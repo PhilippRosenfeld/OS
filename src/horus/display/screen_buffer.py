@@ -4,8 +4,8 @@ from dataclasses import dataclass
 class Cell: 
     """A Single character cell: What's shown and how """
     char: str = " "
-    fg_color = tuple[int, int, int] = (255, 255, 255)  # Default foreground color: white
-    bg_color = tuple[int, int, int] = (0, 0, 0)  # Default background color: black
+    fg_color: tuple[int, int, int] = (255, 255, 255)  # Default foreground color: white
+    bg_color: tuple[int, int, int] = (0, 0, 0)  # Default background color: black
 
 class ScreenBuffer:
     """Class representing a screen buffer with a grid of cells. Renderer will read from this buffer to display content on the screen."""
