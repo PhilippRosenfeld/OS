@@ -19,11 +19,12 @@ class Renderer:
         pixel_width = screen_buffer.cols * font_atlas.char_width
         pixel_height = screen_buffer.rows * font_atlas.char_height
         self._pixel_buffer = np.zeros((pixel_height, pixel_width, 3), dtype=np.uint8)
-        self._texture: moderngl.Texture = moderngl.Texture((pixel_width, pixel_height), 3, data=self._pixel_buffer.tobytes())
+        self._texture: moderngl.Texture = self.ctx.texture((pixel_width, pixel_height), 3, data=self._pixel_buffer.tobytes())
         self._program: moderngl.Program = None
         self._load_shader(str(SHADER_DIR / "crt.vert"), str(SHADER_DIR / "crt.frag"))
         self._quad: moderngl.VertexArray = None
         self._build_quad()
+        self._block_cache: dict[tuple[str, tuple[int, int, int], tuple[int, int, int]], np.ndarray] = {}
 
     def _load_shader(self, ver_path: str, frag_path: str) -> None:
         """Load the vertex and fragment shaders and compile them into a moderngl.Program."""
@@ -34,37 +35,74 @@ class Renderer:
         self._program = self.ctx.program(vertex_shader=vertex_shader_source, fragment_shader=fragment_shader_source)
 
     def _build_quad(self) -> None:
-        """Create the fullscreen quad (position + UV) used to draw the pixel buffer texture."""
+        """Create the quad (position + UV) used to draw the pixel buffer texture. Vertex positions are rewritten each frame in _update_quad_geometry to preserve aspect ratio."""
+        self._quad_vbo = self.ctx.buffer(reserve=4 * 4 * 4)
+        self._quad = self.ctx.vertex_array(self._program, [(self._quad_vbo, '2f 2f', 'in_pos', 'in_uv')])
+
+    def _update_quad_geometry(self, window_width: int, window_height: int) -> None:
+        """Size the quad so the pixel buffer's aspect ratio is preserved, anchored to the top-left corner. Slack space from the aspect mismatch collects at the right/bottom instead of stretching the content or re-centering it."""
+        content_height, content_width = self._pixel_buffer.shape[:2]
+        content_aspect = content_width / content_height
+        window_aspect = window_width / window_height
+        if window_aspect > content_aspect:
+            x_extent, y_extent = content_aspect / window_aspect, 1.0
+        else:
+            x_extent, y_extent = 1.0, window_aspect / content_aspect
+        left, top = -1.0, 1.0
+        right, bottom = left + 2 * x_extent, top - 2 * y_extent
         vertices = np.array([
-            -1.0, -1.0, 0.0, 1.0,
-             1.0, -1.0, 1.0, 1.0,
-            -1.0,  1.0, 0.0, 0.0,
-             1.0,  1.0, 1.0, 0.0,
+            left,  bottom, 0.0, 1.0,
+            right, bottom, 1.0, 1.0,
+            left,  top,    0.0, 0.0,
+            right, top,    1.0, 0.0,
         ], dtype='f4')
-        vbo = self.ctx.buffer(vertices.tobytes())
-        self._quad = self.ctx.vertex_array(self._program, [(vbo, '2f 2f', 'in_pos', 'in_uv')])
-        
+        self._quad_vbo.write(vertices.tobytes())
+
+
+    def _ensure_pixel_buffer_size(self) -> bool:
+        """Reallocate the pixel buffer/texture if the ScreenBuffer's grid size has changed (e.g. after a window resize). Returns True if a reallocation happened."""
+        pixel_width = self.screen_buffer.cols * self.font_atlas.char_width
+        pixel_height = self.screen_buffer.rows * self.font_atlas.char_height
+        if self._pixel_buffer.shape[1] == pixel_width and self._pixel_buffer.shape[0] == pixel_height:
+            return False
+        self._pixel_buffer = np.zeros((pixel_height, pixel_width, 3), dtype=np.uint8)
+        self._texture.release()
+        self._texture = self.ctx.texture((pixel_width, pixel_height), 3, data=self._pixel_buffer.tobytes())
+        return True
+
+    def _get_block(self, char: str, fg_color: tuple[int, int, int], bg_color: tuple[int, int, int]) -> np.ndarray:
+        """Return the rendered (char_height, char_width, 3) pixel block for this glyph/color combo, computing and caching it on first use."""
+        key = (char, fg_color, bg_color)
+        block = self._block_cache.get(key)
+        if block is None:
+            glyph = self.font_atlas.get_glyph(char)
+            coverage = (glyph.astype(np.float32) / 255.0)[:, :, None]
+            fg = np.array(fg_color, dtype=np.float32)
+            bg = np.array(bg_color, dtype=np.float32)
+            block = (coverage * fg + (1.0 - coverage) * bg).astype(np.uint8)
+            self._block_cache[key] = block
+        return block
+
     def _build_pixel_buffer(self) -> None:
         """Convert the ScreenBuffer into a pixel buffer using the FontAtlas."""
         char_width = self.font_atlas.char_width
         char_height = self.font_atlas.char_height
         for row in range(self.screen_buffer.rows):
+            y0 = row * char_height
             for col in range(self.screen_buffer.cols):
                 cell = self.screen_buffer.get_cell(col, row)
-                glyph = self.font_atlas.get_glyph(cell.char)
-                coverage = (glyph.astype(np.float32) / 255.0)[:, :, None]
-                fg = np.array(cell.fg_color, dtype=np.float32)
-                bg = np.array(cell.bg_color, dtype=np.float32)
-                block = coverage * fg + (1.0 - coverage) * bg
-                y0 = row * char_height
+                block = self._get_block(cell.char, cell.fg_color, cell.bg_color)
                 x0 = col * char_width
-                self._pixel_buffer[y0:y0 + char_height, x0:x0 + char_width] = block.astype(np.uint8)
-                
-    def render(self) -> None:
-        """Full frame: rebuild pixel buffer, upload as texture,
-        run the shader, draw the fullscreen quad."""
-        self._build_pixel_buffer()
-        self._texture.write(self._pixel_buffer.tobytes())
+                self._pixel_buffer[y0:y0 + char_height, x0:x0 + char_width] = block
+
+    def render(self, window_width: int, window_height: int) -> None:
+        """Full frame: rebuild pixel buffer and upload as texture only if the content or size changed,
+        run the shader, draw the quad sized to preserve aspect ratio."""
+        resized = self._ensure_pixel_buffer_size()
+        if resized or self.screen_buffer.dirty:
+            self._build_pixel_buffer()
+            self._texture.write(self._pixel_buffer.tobytes())
+            self.screen_buffer.dirty = False
+        self._update_quad_geometry(window_width, window_height)
         self._texture.use()
-        self._program.use()
-        self._quad.render()
+        self._quad.render(moderngl.TRIANGLE_STRIP)

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]  # OS/ Ordner
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ASSETS_DIR = PROJECT_ROOT / "assets"
 FONTS_DIR = ASSETS_DIR / "fonts"
 SHADERS_DIR = ASSETS_DIR / "shaders"
