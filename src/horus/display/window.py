@@ -25,6 +25,7 @@ class DisplayWindow:
         self._on_text_callback = None
         self._on_motion_callback = None
         self._on_enter_callback = None
+        self._on_special_key_callback = None
         self._window.push_handlers(on_draw=self._on_draw, on_resize=self._on_resize)
 
     def set_input_handler(self, callback) -> None:
@@ -32,24 +33,37 @@ class DisplayWindow:
         self._on_key_callback = callback
         self._window.push_handlers(on_key_press=self._on_key_press)
 
-    def set_text_handler(self, on_text=None, on_motion=None, on_enter=None) -> None:
+    def set_text_handler(self, on_text=None, on_motion=None, on_enter=None, on_key=None) -> None:
         """Register callbacks for text input: on_text(str) for typed characters,
         on_motion(motion) for cursor/backspace motions (see pyglet.window.key.MOTION_*),
-        on_enter() when Enter/Return is pressed."""
+        on_enter() when Enter/Return is pressed, on_key(symbol, modifiers) for other
+        key presses pyglet doesn't model as a text motion (e.g. key.INSERT)."""
         self._on_text_callback = on_text
         self._on_motion_callback = on_motion
         self._on_enter_callback = on_enter
+        self._on_special_key_callback = on_key
         self._window.push_handlers(
             on_text=self._on_text,
             on_text_motion=self._on_text_motion,
-            on_key_press=self._on_enter_key,
+            on_key_press=self._on_text_key_press,
         )
 
     def start_cursor_blink(self, interval: float = 0.5) -> None:
-        """Toggle the ScreenBuffer's cursor visibility on a timer, making it blink."""
+        """Toggle the ScreenBuffer's cursor visibility on a timer, making it blink.
+        While the cursor position is actively changing, it's kept solidly visible instead --
+        it only resumes blinking once its position has stayed the same for a full interval."""
+        last_pos = (self.buffer.cursor_col, self.buffer.cursor_row)
+
         def toggle(dt: float) -> None:
-            self.buffer.cursor_visible = not self.buffer.cursor_visible
+            nonlocal last_pos
+            pos = (self.buffer.cursor_col, self.buffer.cursor_row)
+            if pos != last_pos:
+                last_pos = pos
+                self.buffer.cursor_visible = True
+            else:
+                self.buffer.cursor_visible = not self.buffer.cursor_visible
             self.buffer.dirty = True
+
         pyglet.clock.schedule_interval(toggle, interval)
 
     def _on_draw(self) -> None:
@@ -79,10 +93,14 @@ class DisplayWindow:
         if self._on_motion_callback is not None:
             self._on_motion_callback(motion)
 
-    def _on_enter_key(self, symbol: int, modifiers: int) -> None:
-        """pyglet event handler: fires self._on_enter_callback when Enter/Return is pressed."""
-        if symbol == pyglet.window.key.ENTER and self._on_enter_callback is not None:
-            self._on_enter_callback()
+    def _on_text_key_press(self, symbol: int, modifiers: int) -> None:
+        """pyglet event handler: fires self._on_enter_callback for Enter/Return,
+        forwards everything else to self._on_special_key_callback."""
+        if symbol == pyglet.window.key.ENTER:
+            if self._on_enter_callback is not None:
+                self._on_enter_callback()
+        elif self._on_special_key_callback is not None:
+            self._on_special_key_callback(symbol, modifiers)
 
     def run(self) -> None:
         """Starts pyglet's event loop. Blocks until window is closed."""

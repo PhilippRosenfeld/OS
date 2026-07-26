@@ -16,6 +16,7 @@ def main() -> None:
         on_text=input_handler._handle_text,
         on_motion=input_handler._handle_motion,
         on_enter=input_handler._handle_enter,
+        on_key=input_handler._handle_key,
     )
     window.start_cursor_blink()
     window.run()

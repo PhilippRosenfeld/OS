@@ -11,12 +11,20 @@ class InputHandler:
         self.buffer = buffer
         self.current_line: str = ""
         self._on_submit = on_submit
+        self.insert_mode: bool = False
+        self.line_cursor: int = 0
         self._sync_cursor()
 
     def _sync_cursor(self) -> None:
-        """Mirror our cursor position onto the ScreenBuffer so the Renderer can draw it."""
+        """Mirror our cursor position and mode onto the ScreenBuffer so the Renderer can draw it:
+        block cursor while in insert_mode (overwrite), thin bar otherwise. Also force it visible
+        and mark the buffer dirty immediately, so a move/mode change is picked up right away
+        instead of waiting for the next blink-timer tick."""
         self.buffer.cursor_col = self.cursor_col
         self.buffer.cursor_row = self.cursor_row
+        self.buffer.cursor_visible = True
+        self.buffer.cursor_block = self.insert_mode
+        self.buffer.dirty = True
 
     def _advance_row(self, row_change: int) -> None:
         """Move the cursor down by row_change rows. If that would run past the last row,
@@ -28,6 +36,24 @@ class InputHandler:
             self.buffer.scroll(direction='u', lines=(new_row - last_row))
             new_row = last_row
         self.cursor_row = new_row
+        
+    def _adjust_cursor(self, delta: int) -> None:
+        """Move the cursor by `delta` columns (negative = left, positive = right),
+        wrapping across row boundaries as needed. This is the shared col/row
+        mechanic used by text wrapping, Backspace, and Left/Right movement --
+        moving past the bottom row scrolls the buffer (via _advance_row);
+        moving before the very first cell clamps to (0, 0)."""
+        row_change, new_col = divmod(self.cursor_col + delta, self.buffer.cols)
+        if row_change > 0:
+            self._advance_row(row_change)
+        elif row_change < 0:
+            new_row = self.cursor_row + row_change
+            if new_row < 0:
+                new_row, new_col = 0, 0
+            self.cursor_row = new_row
+        self.cursor_col = new_col
+        self.line_cursor = max(0, min(len(self.current_line), self.line_cursor + delta))
+        self._sync_cursor()
 
     def _handle_text(self, text: str):
         if text is None:
@@ -35,37 +61,48 @@ class InputHandler:
         text = "".join(char for char in text if char.isprintable())
         if not text:
             return
-        self.buffer.write_string(col=self.cursor_col, row=self.cursor_row, string=text)
-        self.current_line += text
-        self.cursor_col = self.cursor_col + len(text)
-        if self.cursor_col >= self.buffer.cols:
-            row_change = self.cursor_col // self.buffer.cols
-            self.cursor_col = self.cursor_col % self.buffer.cols
-            self._advance_row(row_change)
-        self._sync_cursor()
+        if self.insert_mode:
+            end = self.line_cursor + len(text)
+            self.current_line = self.current_line[:self.line_cursor] + text + self.current_line[end:]
+            self.buffer.write_string(col=self.cursor_col, row=self.cursor_row, string=text)
+            self._adjust_cursor(len(text))
+        else:
+            tail = self.current_line[self.line_cursor:]
+            self.buffer.write_string(col=self.cursor_col, row=self.cursor_row, string=(text + tail))
+            self.current_line = self.current_line[:self.line_cursor] + text + tail
+            self._adjust_cursor(len(text))
 
     def _handle_motion(self, motion: int):
-        if motion is None:
-            return
-        if motion == pyglet.window.key.MOTION_BACKSPACE:
-            if len(self.current_line) == 0:
+        match motion:
+            case None:
                 return
-            new_col = self.cursor_col - 1
-            if new_col < 0:
-                if self.cursor_row > 0:
-                    self._advance_row(-1)
-                    new_col = self.buffer.cols - 1
-                else: 
+            case pyglet.window.key.MOTION_BACKSPACE:
+                if self.line_cursor == 0:
                     return
-            self.cursor_col = new_col
-            self.current_line = self.current_line[:-1]
-            self.buffer.write_char(col= self.cursor_col, row=self.cursor_row, char=" ")
+                tail = self.current_line[self.line_cursor:]
+                self.current_line = self.current_line[:self.line_cursor - 1] + tail
+                self._adjust_cursor(-1)
+                self.buffer.write_string(col=self.cursor_col, row=self.cursor_row, string=tail + " ")
+            case pyglet.window.key.MOTION_LEFT:
+                if self.line_cursor == 0:
+                    return
+                self._adjust_cursor(-1)
+            case pyglet.window.key.MOTION_RIGHT:
+                if self.line_cursor >= len(self.current_line):
+                    return
+                self._adjust_cursor(1)
+
+    def _handle_key(self, symbol: int, modifiers: int) -> None:
+        """Handles key presses pyglet doesn't model as a text motion (e.g. Insert)."""
+        if symbol == pyglet.window.key.INSERT:
+            self.insert_mode = not self.insert_mode
             self._sync_cursor()
 
     def _handle_enter(self):
         if self._on_submit is not None:
             self._on_submit(self.current_line)
         self.current_line = ""
+        self.line_cursor = 0
         self.cursor_col = 0
         self._advance_row(1)
         self._sync_cursor()

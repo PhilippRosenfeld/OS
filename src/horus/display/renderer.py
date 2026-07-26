@@ -96,18 +96,26 @@ class Renderer:
         return block
 
     def _build_pixel_buffer(self) -> None:
-        """Convert the ScreenBuffer into a pixel buffer using the FontAtlas. The cursor cell (if visible) is drawn with foreground/background swapped."""
+        """Convert the ScreenBuffer into a pixel buffer using the FontAtlas. The cursor cell (if visible)
+        is drawn either as a solid foreground/background-swapped block (overwrite mode) or as a thin
+        vertical bar overlaid on the normal glyph (insert mode), depending on screen_buffer.cursor_block."""
         char_width = self.font_atlas.char_width
         char_height = self.font_atlas.char_height
         cursor_visible = self.screen_buffer.cursor_visible
         cursor_col = self.screen_buffer.cursor_col
         cursor_row = self.screen_buffer.cursor_row
+        cursor_block = self.screen_buffer.cursor_block
+        bar_width = max(1, char_width // 8)
         for row in range(self.screen_buffer.rows):
             y0 = row * char_height
             for col in range(self.screen_buffer.cols):
                 cell = self.screen_buffer.get_cell(col, row)
                 if cursor_visible and col == cursor_col and row == cursor_row:
-                    block = self._get_block(cell.char, cell.bg_color, cell.fg_color)
+                    if cursor_block:
+                        block = self._get_block(cell.char, cell.bg_color, cell.fg_color)
+                    else:
+                        block = self._get_block(cell.char, cell.fg_color, cell.bg_color).copy()
+                        block[:, :bar_width] = cell.fg_color
                 else:
                     block = self._get_block(cell.char, cell.fg_color, cell.bg_color)
                 x0 = col * char_width

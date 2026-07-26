@@ -19,10 +19,11 @@ class ScreenBuffer:
         self.cursor_col = 0
         self.cursor_row = 0
         self.cursor_visible = True
+        self.cursor_block = True  # True: solid block cursor. False: thin bar cursor.
 
     def write_char(self, col: int, row: int, char: str, fg: tuple[int, int, int] = None, bg: tuple[int, int, int] = None) -> None:
         """Write a character to the screen buffer at the specified column and row."""
-        self.write_string(col, row, char, fg, bg)
+        self.write_string(col, row, char, fg, bg) #TODO: Useless?
 
     def write_string(self, col: int, row: int, string: str, fg: tuple[int, int, int] = None, bg: tuple[int, int, int] = None) -> None:
         """Write a string to the screen buffer starting at the specified column and row, wrapping to subsequent rows instead of being cut off."""
