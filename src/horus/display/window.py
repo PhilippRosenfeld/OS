@@ -22,12 +22,28 @@ class DisplayWindow:
         font_atlas = FontAtlas(font_path, char_width, char_height)
         self._renderer: Renderer = Renderer(self.buffer, font_atlas, self._ctx)
         self._on_key_callback = None
+        self._on_text_callback = None
+        self._on_motion_callback = None
+        self._on_enter_callback = None
         self._window.push_handlers(on_draw=self._on_draw, on_resize=self._on_resize)
 
     def set_input_handler(self, callback) -> None:
         """Set the callback function to handle key press events."""
         self._on_key_callback = callback
         self._window.push_handlers(on_key_press=self._on_key_press)
+
+    def set_text_handler(self, on_text=None, on_motion=None, on_enter=None) -> None:
+        """Register callbacks for text input: on_text(str) for typed characters,
+        on_motion(motion) for cursor/backspace motions (see pyglet.window.key.MOTION_*),
+        on_enter() when Enter/Return is pressed."""
+        self._on_text_callback = on_text
+        self._on_motion_callback = on_motion
+        self._on_enter_callback = on_enter
+        self._window.push_handlers(
+            on_text=self._on_text,
+            on_text_motion=self._on_text_motion,
+            on_key_press=self._on_enter_key,
+        )
 
     def _on_draw(self) -> None:
         """pyglet event handler: called every frame, triggers a render."""
@@ -45,6 +61,21 @@ class DisplayWindow:
         """pyglet event handler: forwards to self._on_key_callback."""
         if self._on_key_callback is not None:
             self._on_key_callback(symbol, modifiers)
+
+    def _on_text(self, text: str) -> None:
+        """pyglet event handler: forwards typed text to self._on_text_callback."""
+        if self._on_text_callback is not None:
+            self._on_text_callback(text)
+
+    def _on_text_motion(self, motion: int) -> None:
+        """pyglet event handler: forwards cursor/backspace motions to self._on_motion_callback."""
+        if self._on_motion_callback is not None:
+            self._on_motion_callback(motion)
+
+    def _on_enter_key(self, symbol: int, modifiers: int) -> None:
+        """pyglet event handler: fires self._on_enter_callback when Enter/Return is pressed."""
+        if symbol == pyglet.window.key.ENTER and self._on_enter_callback is not None:
+            self._on_enter_callback()
 
     def run(self) -> None:
         """Starts pyglet's event loop. Blocks until window is closed."""

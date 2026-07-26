@@ -1,4 +1,5 @@
 from horus.display.window import DisplayWindow
+from horus.shell.input_handler import InputHandler
 from horus.utils.configManager import load_config
 
 
@@ -10,6 +11,10 @@ char_size = cfg['display']['char_size']
 
 def main() -> None:
     window = DisplayWindow(font_path = "Px437_IBM_VGA_8x16.ttf", height=1080, title="Horus OS", char_width=8*char_size, char_height=16*char_size, margin=8)
-    for row in range(window.buffer.rows):
-        window.buffer.write_string(0, row,"Hello WorldHello WorldHello WorldHello WorldHello3 WorldHello WorldHello WorldHello WorldHello World!")
+    input_handler = InputHandler(window.buffer)
+    window.set_text_handler(
+        on_text=input_handler._handle_text,
+        on_motion=input_handler._handle_motion,
+        on_enter=input_handler._handle_enter,
+    )
     window.run()

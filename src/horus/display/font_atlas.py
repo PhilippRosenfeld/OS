@@ -42,6 +42,13 @@ class FontAtlas:
             raise ValueError(f"Glyph for character '{char}' not found in atlas.")
         return self.glyphs[char]
     
+    def exists_glyph(self, char: str) -> bool:
+        """Checks if a registered glyph exists for the given character."""
+        if char in self.glyphs:
+            return True
+        else: 
+            return False
+    
 class FontRegistry:
     """Holds multiple named FontAtlas instances. The active one is used
     by the renderer; others are available for boot logos, UI accents,

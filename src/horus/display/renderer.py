@@ -9,8 +9,11 @@ from .font_atlas import FontAtlas
 SHADER_DIR = Path(__file__).parent / "shaders"
 
 
+
 class Renderer:
     """Converts a ScreenBuffer into pixels, uploads to GPU, runs the CRT shader, and displays the result on the screen."""
+    
+    PLACEHOLDER_CHAR = "?"
 
     def __init__(self, screen_buffer: ScreenBuffer, font_atlas: FontAtlas, ctx: moderngl.Context) -> None:
         self.screen_buffer = screen_buffer
@@ -78,7 +81,9 @@ class Renderer:
         return True
 
     def _get_block(self, char: str, fg_color: tuple[int, int, int], bg_color: tuple[int, int, int]) -> np.ndarray:
-        """Return the rendered (char_height, char_width, 3) pixel block for this glyph/color combo, computing and caching it on first use."""
+        """Return the rendered (char_height, char_width, 3) pixel block for this glyph/color combo, computing and caching it on first use. Characters missing from the FontAtlas fall back to a placeholder glyph instead of raising."""
+        if not self.font_atlas.exists_glyph(char):
+            char = self.PLACEHOLDER_CHAR
         key = (char, fg_color, bg_color)
         block = self._block_cache.get(key)
         if block is None:
