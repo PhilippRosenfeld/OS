@@ -3,7 +3,7 @@ from datetime import datetime
 
 @dataclass(frozen=True)
 class Event:
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=datetime.now, kw_only=True)
 
 @dataclass(frozen=True)
 class CommandExecutedEvent(Event):

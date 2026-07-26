@@ -39,17 +39,23 @@ class Renderer:
         self._quad_vbo = self.ctx.buffer(reserve=4 * 4 * 4)
         self._quad = self.ctx.vertex_array(self._program, [(self._quad_vbo, '2f 2f', 'in_pos', 'in_uv')])
 
-    def _update_quad_geometry(self, window_width: int, window_height: int) -> None:
-        """Size the quad so the pixel buffer's aspect ratio is preserved, anchored to the top-left corner. Slack space from the aspect mismatch collects at the right/bottom instead of stretching the content or re-centering it."""
+    def _update_quad_geometry(self, window_width: int, window_height: int, margin: int = 0) -> None:
+        """Size the quad so the pixel buffer's aspect ratio is preserved, inset by `margin` pixels from every window edge and anchored to the top-left corner of that inset area. Slack space from the aspect mismatch collects at the right/bottom instead of stretching the content or re-centering it."""
         content_height, content_width = self._pixel_buffer.shape[:2]
         content_aspect = content_width / content_height
-        window_aspect = window_width / window_height
-        if window_aspect > content_aspect:
-            x_extent, y_extent = content_aspect / window_aspect, 1.0
+        window_width = max(1, window_width)
+        window_height = max(1, window_height)
+        avail_width = max(1, window_width - 2 * margin)
+        avail_height = max(1, window_height - 2 * margin)
+        avail_aspect = avail_width / avail_height
+        if avail_aspect > content_aspect:
+            display_height, display_width = avail_height, avail_height * content_aspect
         else:
-            x_extent, y_extent = 1.0, window_aspect / content_aspect
-        left, top = -1.0, 1.0
-        right, bottom = left + 2 * x_extent, top - 2 * y_extent
+            display_width, display_height = avail_width, avail_width / content_aspect
+        left = -1.0 + 2 * margin / window_width
+        top = 1.0 - 2 * margin / window_height
+        right = left + 2 * display_width / window_width
+        bottom = top - 2 * display_height / window_height
         vertices = np.array([
             left,  bottom, 0.0, 1.0,
             right, bottom, 1.0, 1.0,
@@ -57,6 +63,7 @@ class Renderer:
             right, top,    1.0, 0.0,
         ], dtype='f4')
         self._quad_vbo.write(vertices.tobytes())
+        self._display_size = (display_width, display_height)
 
 
     def _ensure_pixel_buffer_size(self) -> bool:
@@ -95,7 +102,7 @@ class Renderer:
                 x0 = col * char_width
                 self._pixel_buffer[y0:y0 + char_height, x0:x0 + char_width] = block
 
-    def render(self, window_width: int, window_height: int) -> None:
+    def render(self, window_width: int, window_height: int, margin: int = 0) -> None:
         """Full frame: rebuild pixel buffer and upload as texture only if the content or size changed,
         run the shader, draw the quad sized to preserve aspect ratio."""
         resized = self._ensure_pixel_buffer_size()
@@ -103,6 +110,7 @@ class Renderer:
             self._build_pixel_buffer()
             self._texture.write(self._pixel_buffer.tobytes())
             self.screen_buffer.dirty = False
-        self._update_quad_geometry(window_width, window_height)
+        self._update_quad_geometry(window_width, window_height, margin)
+        self._program['resolution'].value = self._display_size
         self._texture.use()
         self._quad.render(moderngl.TRIANGLE_STRIP)
