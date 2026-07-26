@@ -16,6 +16,9 @@ class ScreenBuffer:
         self._cells: list[list[Cell]] = [[Cell() for _ in range(cols)] for _ in range(rows)]
         self._writes: list[tuple[int, int, str, tuple[int, int, int] | None, tuple[int, int, int] | None]] = []
         self.dirty = True
+        self.cursor_col = 0
+        self.cursor_row = 0
+        self.cursor_visible = True
 
     def write_char(self, col: int, row: int, char: str, fg: tuple[int, int, int] = None, bg: tuple[int, int, int] = None) -> None:
         """Write a character to the screen buffer at the specified column and row."""

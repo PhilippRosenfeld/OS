@@ -45,6 +45,13 @@ class DisplayWindow:
             on_key_press=self._on_enter_key,
         )
 
+    def start_cursor_blink(self, interval: float = 0.5) -> None:
+        """Toggle the ScreenBuffer's cursor visibility on a timer, making it blink."""
+        def toggle(dt: float) -> None:
+            self.buffer.cursor_visible = not self.buffer.cursor_visible
+            self.buffer.dirty = True
+        pyglet.clock.schedule_interval(toggle, interval)
+
     def _on_draw(self) -> None:
         """pyglet event handler: called every frame, triggers a render."""
         self._ctx.viewport = (0, 0, self._window.width, self._window.height)

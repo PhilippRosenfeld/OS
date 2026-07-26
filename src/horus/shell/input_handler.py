@@ -11,7 +11,13 @@ class InputHandler:
         self.buffer = buffer
         self.current_line: str = ""
         self._on_submit = on_submit
-    
+        self._sync_cursor()
+
+    def _sync_cursor(self) -> None:
+        """Mirror our cursor position onto the ScreenBuffer so the Renderer can draw it."""
+        self.buffer.cursor_col = self.cursor_col
+        self.buffer.cursor_row = self.cursor_row
+
     def _advance_row(self, row_change: int) -> None:
         """Move the cursor down by row_change rows. If that would run past the last row,
         scroll the buffer up instead and pin the cursor to the last (bottom) row --
@@ -36,6 +42,7 @@ class InputHandler:
             row_change = self.cursor_col // self.buffer.cols
             self.cursor_col = self.cursor_col % self.buffer.cols
             self._advance_row(row_change)
+        self._sync_cursor()
 
     def _handle_motion(self, motion: int):
         if motion is None:
@@ -53,7 +60,7 @@ class InputHandler:
             self.cursor_col = new_col
             self.current_line = self.current_line[:-1]
             self.buffer.write_char(col= self.cursor_col, row=self.cursor_row, char=" ")
-            
+            self._sync_cursor()
 
     def _handle_enter(self):
         if self._on_submit is not None:
@@ -61,3 +68,4 @@ class InputHandler:
         self.current_line = ""
         self.cursor_col = 0
         self._advance_row(1)
+        self._sync_cursor()
