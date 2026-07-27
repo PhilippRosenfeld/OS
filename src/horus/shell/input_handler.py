@@ -28,8 +28,7 @@ class InputHandler:
 
     def _advance_row(self, row_change: int) -> None:
         """Move the cursor down by row_change rows. If that would run past the last row,
-        scroll the buffer up instead and pin the cursor to the last (bottom) row --
-        this is what keeps new input visible at the bottom, like a classic terminal."""
+        scroll the buffer up instead and pin the cursor to the last (bottom) row."""
         last_row = self.buffer.rows - 1
         new_row = self.cursor_row + row_change
         if new_row > last_row:
@@ -40,8 +39,7 @@ class InputHandler:
     def _adjust_cursor(self, delta: int) -> None:
         """Move the cursor by `delta` columns (negative = left, positive = right),
         wrapping across row boundaries as needed. This is the shared col/row
-        mechanic used by text wrapping, Backspace, and Left/Right movement --
-        moving past the bottom row scrolls the buffer (via _advance_row);
+        mechanic used. Moving past the bottom row scrolls the buffer (via _advance_row);
         moving before the very first cell clamps to (0, 0)."""
         row_change, new_col = divmod(self.cursor_col + delta, self.buffer.cols)
         if row_change > 0:
@@ -56,6 +54,7 @@ class InputHandler:
         self._sync_cursor()
 
     def _handle_text(self, text: str):
+        """Handles simple text input key presses, not correlating to any pyglet models."""
         if text is None:
             return
         text = "".join(char for char in text if char.isprintable())
@@ -73,6 +72,7 @@ class InputHandler:
             self._adjust_cursor(len(text))
 
     def _handle_motion(self, motion: int):
+        """Handles key presses pyglet models as a text motion: Backspace, Left, Right, End..."""
         match motion:
             case None:
                 return
@@ -91,14 +91,32 @@ class InputHandler:
                 if self.line_cursor >= len(self.current_line):
                     return
                 self._adjust_cursor(1)
+            case pyglet.window.key.MOTION_BEGINNING_OF_LINE:
+                self._adjust_cursor(-self.line_cursor)
+                self.line_cursor = 0
+            case pyglet.window.key.MOTION_END_OF_LINE:
+                self._adjust_cursor(len(self.current_line) - self.line_cursor)
+                self.line_cursor = len(self.current_line)
+            case pyglet.window.key.MOTION_PREVIOUS_PAGE:
+                self.buffer.scroll(direction="d", lines= self.buffer.rows // 2)
+            case pyglet.window.key.MOTION_NEXT_PAGE:
+                self.buffer.scroll(direction="u", lines= self.buffer.rows // 2) #TODO: text outside of screen is not getting saved
 
     def _handle_key(self, symbol: int, modifiers: int) -> None:
-        """Handles key presses pyglet doesn't model as a text motion (e.g. Insert)."""
+        """Handles key presses pyglet doesn't model as a text motion: Insert, Delete..."""
         if symbol == pyglet.window.key.INSERT:
             self.insert_mode = not self.insert_mode
             self._sync_cursor()
+        if symbol == pyglet.window.key.DELETE:
+            if self.line_cursor >= len(self.current_line):
+                return
+            tail = self.current_line[1 + self.line_cursor:]
+            self.current_line = self.current_line[:self.line_cursor] + tail
+            self.buffer.write_string(col=self.cursor_col, row=self.cursor_row, string=tail + " ")
+            
 
     def _handle_enter(self):
+        """Handles enter key presses."""
         if self._on_submit is not None:
             self._on_submit(self.current_line)
         self.current_line = ""
