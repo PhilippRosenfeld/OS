@@ -53,6 +53,25 @@ class InputHandler:
         self.line_cursor = max(0, min(len(self.current_line), self.line_cursor + delta))
         self._sync_cursor()
 
+    def _next_word_boundary(self) -> int:
+        """Return the current_line index at the start of the next word from line_cursor."""
+        i = self.line_cursor
+        n = len(self.current_line)
+        while i < n and self.current_line[i].isalnum():  # skip rest of the current word
+            i += 1
+        while i < n and not self.current_line[i].isalnum():  # skip the gap to the next word
+            i += 1
+        return i
+
+    def _previous_word_boundary(self) -> int:
+        """Return the current_line index at the start of the previous word from line_cursor."""
+        i = self.line_cursor
+        while i > 0 and not self.current_line[i - 1].isalnum():  # skip the gap before the cursor
+            i -= 1
+        while i > 0 and self.current_line[i - 1].isalnum():  # skip the previous word
+            i -= 1
+        return i
+
     def _handle_text(self, text: str):
         """Handles simple text input key presses, not correlating to any pyglet models."""
         if text is None:
@@ -73,9 +92,11 @@ class InputHandler:
 
     def _handle_motion(self, motion: int):
         """Handles key presses pyglet models as a text motion: Backspace, Left, Right, End..."""
+        print(motion)
         match motion:
             case None:
                 return
+            
             case pyglet.window.key.MOTION_BACKSPACE:
                 if self.line_cursor == 0:
                     return
@@ -83,36 +104,71 @@ class InputHandler:
                 self.current_line = self.current_line[:self.line_cursor - 1] + tail
                 self._adjust_cursor(-1)
                 self.buffer.write_string(col=self.cursor_col, row=self.cursor_row, string=tail + " ")
+                
             case pyglet.window.key.MOTION_LEFT:
                 if self.line_cursor == 0:
                     return
                 self._adjust_cursor(-1)
+                
             case pyglet.window.key.MOTION_RIGHT:
                 if self.line_cursor >= len(self.current_line):
                     return
                 self._adjust_cursor(1)
+                
             case pyglet.window.key.MOTION_BEGINNING_OF_LINE:
                 self._adjust_cursor(-self.line_cursor)
                 self.line_cursor = 0
+                
             case pyglet.window.key.MOTION_END_OF_LINE:
                 self._adjust_cursor(len(self.current_line) - self.line_cursor)
                 self.line_cursor = len(self.current_line)
-            case pyglet.window.key.MOTION_PREVIOUS_PAGE:
-                self.buffer.scroll(direction="d", lines= self.buffer.rows // 2)
-            case pyglet.window.key.MOTION_NEXT_PAGE:
-                self.buffer.scroll(direction="u", lines= self.buffer.rows // 2) #TODO: text outside of screen is not getting saved
+            
+            case pyglet.window.key.MOTION_PREVIOUS_PAGE:  # Page Up: look further back into scrollback history
+                self.buffer.scroll_view(self.buffer.rows // 2)
+
+            case pyglet.window.key.MOTION_NEXT_PAGE:  # Page Down: move back toward the live view
+                self.buffer.scroll_view(-(self.buffer.rows // 2))
+
+            case pyglet.window.key.MOTION_NEXT_WORD:
+                self._adjust_cursor(self._next_word_boundary() - self.line_cursor)
+
+            case pyglet.window.key.MOTION_PREVIOUS_WORD:
+                self._adjust_cursor(self._previous_word_boundary() - self.line_cursor)
 
     def _handle_key(self, symbol: int, modifiers: int) -> None:
         """Handles key presses pyglet doesn't model as a text motion: Insert, Delete..."""
+        print(symbol, modifiers)
+        ctrl_held = bool(modifiers & pyglet.window.key.MOD_CTRL)
+        
         if symbol == pyglet.window.key.INSERT:
             self.insert_mode = not self.insert_mode
             self._sync_cursor()
-        if symbol == pyglet.window.key.DELETE:
+        
+        elif symbol == pyglet.window.key.DELETE and ctrl_held:
+            end = self._next_word_boundary()
+            if end == self.line_cursor:
+                return
+            deleted = end - self.line_cursor
+            tail = self.current_line[end:]
+            self.current_line = self.current_line[:self.line_cursor] + tail
+            self.buffer.write_string(col=self.cursor_col, row=self.cursor_row, string=tail + " " * deleted)
+        
+        elif symbol == pyglet.window.key.DELETE:
             if self.line_cursor >= len(self.current_line):
                 return
             tail = self.current_line[1 + self.line_cursor:]
             self.current_line = self.current_line[:self.line_cursor] + tail
             self.buffer.write_string(col=self.cursor_col, row=self.cursor_row, string=tail + " ")
+            
+        elif symbol == pyglet.window.key.BACKSPACE and ctrl_held:
+            start = self._previous_word_boundary()
+            if start == self.line_cursor:
+                return
+            deleted = self.line_cursor - start
+            tail = self.current_line[self.line_cursor:]
+            self.current_line = self.current_line[:start] + tail
+            self._adjust_cursor(start - self.line_cursor)
+            self.buffer.write_string(col=self.cursor_col, row=self.cursor_row, string=tail + " " * deleted)
             
 
     def _handle_enter(self):

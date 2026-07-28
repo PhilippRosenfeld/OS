@@ -20,6 +20,8 @@ class ScreenBuffer:
         self.cursor_row = 0
         self.cursor_visible = True
         self.cursor_block = True  # True: solid block cursor. False: thin bar cursor.
+        self._scrollback: list[list[Cell]] = []
+        self.view_offset = 0  # rows of scrollback shown at the top of the view instead of live content
 
     def write_char(self, col: int, row: int, char: str, fg: tuple[int, int, int] = None, bg: tuple[int, int, int] = None) -> None:
         """Write a character to the screen buffer at the specified column and row."""
@@ -29,6 +31,7 @@ class ScreenBuffer:
         """Write a string to the screen buffer starting at the specified column and row, wrapping to subsequent rows instead of being cut off."""
         self._writes.append((col, row, string, fg, bg))
         self._place(col, row, string, fg, bg)
+        self.view_offset = 0  # any new content snaps the view back to live, like a real terminal
         self.dirty = True
 
     def _place(self, col: int, row: int, string: str, fg: tuple[int, int, int] = None, bg: tuple[int, int, int] = None) -> None:
@@ -50,11 +53,13 @@ class ScreenBuffer:
             col += 1
         
     def scroll(self, direction: str, lines: int) -> None:
-        """Scroll the screen buffer in the specified direction ('u', 'd', 'l', 'r') for a given number of lines."""
+        """Scroll the screen buffer in the specified direction ('u', 'd', 'l', 'r') for a given number of lines.
+        Rows pushed off the top ('u') are kept in a scrollback history instead of being discarded --
+        see scroll_view() to navigate back into them (e.g. Page Up/Down) without touching live content."""
         match direction:
             case 'u':
                 for _ in range(lines):
-                    self._cells.pop(0)
+                    self._scrollback.append(self._cells.pop(0))
                     self._cells.append([Cell() for _ in range(self.cols)])
             case 'd':
                 for _ in range(lines):
@@ -79,6 +84,7 @@ class ScreenBuffer:
         self.cols = cols
         self.rows = rows
         self._cells = [[Cell() for _ in range(cols)] for _ in range(rows)]
+        self._scrollback = []  # old scrollback rows have the wrong width for the new self.cols
         writes, self._writes = self._writes, []
         for col, row, string, fg, bg in writes:
             self.write_string(col, row, string, fg, bg)
@@ -88,10 +94,26 @@ class ScreenBuffer:
         """Clear the screen buffer by resetting all cells to default."""
         self._cells = [[Cell() for _ in range(self.cols)] for _ in range(self.rows)]
         self._writes = []
+        self._scrollback = []
+        self.view_offset = 0
         self.dirty = True
-        
+
+    def scroll_view(self, delta: int) -> None:
+        """Move the view into scrollback history by `delta` rows (positive = further into
+        the past, negative = back toward the live edge). Clamped to available history and
+        the live view. Does not touch the underlying live content -- only what's displayed."""
+        self.view_offset = max(0, min(len(self._scrollback), self.view_offset + delta))
+        self.dirty = True
+
     def get_cell(self, col: int, row: int) -> Cell:
-        """Get the cell at the specified column and row."""
-        return self._cells[row][col]
+        """Get the cell at the specified column and row, accounting for view_offset:
+        when scrolled back into history, earlier rows come from scrollback and later
+        rows from the live grid, blended at the point where the two meet."""
+        if self.view_offset == 0:
+            return self._cells[row][col]
+        combined_index = len(self._scrollback) - self.view_offset + row
+        if 0 <= combined_index < len(self._scrollback):
+            return self._scrollback[combined_index][col]
+        return self._cells[combined_index - len(self._scrollback)][col]
         
     
