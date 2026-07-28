@@ -27,17 +27,21 @@ class ScreenBuffer:
         """Write a character to the screen buffer at the specified column and row."""
         self.write_string(col, row, char, fg, bg) #TODO: Useless?
 
-    def write_string(self, col: int, row: int, string: str, fg: tuple[int, int, int] = None, bg: tuple[int, int, int] = None) -> None:
-        """Write a string to the screen buffer starting at the specified column and row, wrapping to subsequent rows instead of being cut off."""
+    def write_string(self, col: int, row: int, string: str, fg: tuple[int, int, int] = None, bg: tuple[int, int, int] = None) -> int:
+        """Write a string to the screen buffer starting at the specified column and row,
+        wrapping to subsequent rows instead of being cut off. Returns the number of
+        rows the string spanned (>= 1), so callers can advance a cursor correctly."""
         self._writes.append((col, row, string, fg, bg))
-        self._place(col, row, string, fg, bg)
-        self.view_offset = 0  # any new content snaps the view back to live, like a real terminal
+        rows_used = self._place(col, row, string, fg, bg)
         self.dirty = True
+        return rows_used
 
-    def _place(self, col: int, row: int, string: str, fg: tuple[int, int, int] = None, bg: tuple[int, int, int] = None) -> None:
-        """Write a string into the current grid, wrapping to the next row when a line is full."""
+    def _place(self, col: int, row: int, string: str, fg: tuple[int, int, int] = None, bg: tuple[int, int, int] = None) -> int:
+        """Write a string into the current grid, wrapping to the next row when a line
+        is full. Returns the number of rows touched, clamped to the buffer's bounds."""
         if col < 0 or row < 0:
-            return
+            return 0
+        start_row = row
         for char in string:
             if col >= self.cols:
                 col = 0
@@ -51,7 +55,9 @@ class ScreenBuffer:
             if bg is not None:
                 cell.bg_color = bg
             col += 1
-        
+        end_row = min(row, self.rows - 1)
+        return end_row - start_row + 1
+
     def scroll(self, direction: str, lines: int) -> None:
         """Scroll the screen buffer in the specified direction ('u', 'd', 'l', 'r') for a given number of lines.
         Rows pushed off the top ('u') are kept in a scrollback history instead of being discarded --
