@@ -44,3 +44,20 @@ class Registry:
         if name is None:
             return ""
         return self._help.get(name, "")
+
+
+
+registry = Registry()
+
+
+def command(name: str, help_text: str = "") -> Callable[[CommandHandler], CommandHandler]:
+    """Decorator: registers the decorated function under `name` in the
+    module-level registry.
+
+        @command("echo", help_text="print the given text")
+        def echo(ctx, argv): ...
+    """
+    def decorator(func: CommandHandler) -> CommandHandler:
+        registry.register(name, func, help_text)
+        return func
+    return decorator

@@ -3,10 +3,13 @@ from horus.shell.input_handler import InputHandler
 from horus.utils.config_manager import load_config
 from horus.utils.logging_setup import setup_logging
 from horus.kernel.kernel import Kernel
-from horus.kernel.registry import Registry
+from horus.kernel.registry import registry
 from horus.session.context import Context
 from horus.events.bus import EventBus
+
+import horus.kernel.commands.cmd_text
 import logging
+
 
 
 setup_logging(level=logging.INFO, log_file="horus.log")
@@ -19,8 +22,7 @@ char_size = cfg['display']['char_size']
 
 def main() -> None:
     window = DisplayWindow(font_path = "Px437_IBM_VGA_8x16.ttf", height=1080, title="Horus OS", char_width=8*char_size, char_height=16*char_size, margin=8)
-    
-    registry = Registry()
+
     bus = EventBus()
     kernel = Kernel(registry=registry, bus=bus)
 
@@ -45,4 +47,5 @@ def main() -> None:
         on_key=input_handler._handle_key,
     )
     window.start_cursor_blink()
+    print(registry.names())
     window.run()

@@ -1,5 +1,5 @@
-from kernel.command_parser import CommandArgumentParser, CommandParseError
-from kernel.registry import command
+from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
+from horus.kernel.registry import command
 
 def _build_echo_parser() -> CommandArgumentParser:
     parser = CommandArgumentParser(prog="echo", add_help=True)
@@ -9,7 +9,7 @@ def _build_echo_parser() -> CommandArgumentParser:
 _echo_parser = _build_echo_parser()
 
 
-@command("echo")
+@command("echo", help_text="Test")
 def echo(ctx, argv: list[str]) -> None:
     try:
         args = _echo_parser.parse_args(argv)
