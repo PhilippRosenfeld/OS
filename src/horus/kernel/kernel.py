@@ -1,6 +1,6 @@
-from kernel.registry import Registry
+from horus.kernel.registry import Registry
 from horus.events.bus import EventBus
-from kernel.context import Context
+from horus.session.context import Context
 from horus.events.types import CommandExecutedEvent
 import shlex
 import logging
@@ -41,7 +41,3 @@ class Kernel:
             return
         
         self.bus.publish(CommandExecutedEvent(command=command_name, args=argv, user=ctx.user, session_id= ctx.session_id))
-
-    def _parse(self, raw_line: str) -> str:
-        for i in len(raw_line):
-            
