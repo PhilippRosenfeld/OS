@@ -1,7 +1,10 @@
 from horus.display.window import DisplayWindow
 from horus.shell.input_handler import InputHandler
 from horus.utils.configManager import load_config
+from horus.utils.logging_setup import setup_logging
 
+
+setup_logging(level=logging.INFO, log_file="horus.log")
 
 cfg = load_config()
 char_size = cfg['display']['char_size']
