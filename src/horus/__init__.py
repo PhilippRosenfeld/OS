@@ -19,10 +19,25 @@ char_size = cfg['display']['char_size']
 
 def main() -> None:
     window = DisplayWindow(font_path = "Px437_IBM_VGA_8x16.ttf", height=1080, title="Horus OS", char_width=8*char_size, char_height=16*char_size, margin=8)
+    
     registry = Registry()
     bus = EventBus()
     kernel = Kernel(registry=registry, bus=bus)
-    input_handler = InputHandler(window.buffer, kernel)
+
+    context = Context(
+        session_id = "local",
+        user="root",
+        cwd="/",
+        fs=None,
+        screen=window.buffer,
+        events=bus
+    )
+
+    def on_submit(line: str) -> None:
+        kernel.execute(line, context)
+
+
+    input_handler = InputHandler(window.buffer, on_submit=on_submit)
     window.set_text_handler(
         on_text=input_handler._handle_text,
         on_motion=input_handler._handle_motion,
