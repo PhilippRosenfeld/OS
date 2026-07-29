@@ -22,7 +22,7 @@ class ScreenBuffer:
         self.cursor_block = True  # True: solid block cursor. False: thin bar cursor.
         self._scrollback: list[list[Cell]] = []
         self.view_offset = 0  # rows of scrollback shown at the top of the view instead of live content
-        self.default_fg: tuple[int, int, int] = NAMED_COLORS.get("magenta")
+        self.default_fg: tuple[int, int, int] = NAMED_COLORS.get("green")
         self.default_bg: tuple[int, int, int] = NAMED_COLORS.get("black")
         self._cells: list[list[Cell]] = [[self._blank_cell() for _ in range(cols)] for _ in range(rows)] #has to be set after colors!
 
@@ -38,6 +38,7 @@ class ScreenBuffer:
         resolved_bg = bg if bg is not None else self.default_bg
         self._writes.append((col, row, string, resolved_fg, resolved_bg))
         rows_used = self._place(col, row, string, resolved_fg, resolved_bg)
+        self.view_offset = 0  # any new content snaps the view back to live, like a real terminal
         self.dirty = True
         return rows_used
 
@@ -141,8 +142,8 @@ class ScreenBuffer:
             self.dirty = True
 
     def recolor_all(self, fg=None, bg=None):
-        """Recolors the entire terminal."""
-        for row in self._cells:
+        """Recolors the entire terminal, including scrollback history (e.g. lines only reachable via Page Up)."""
+        for row in (*self._cells, *self._scrollback):
             for cell in row:
                 if fg is not None:
                     cell.fg_color= fg
