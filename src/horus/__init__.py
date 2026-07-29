@@ -7,18 +7,19 @@ from horus.kernel.registry import registry
 from horus.session.context import Context
 from horus.events.bus import EventBus
 
-import horus.kernel.commands.cmd_text
+import horus.kernel.commands
 import logging
-
-
 
 
 cfg = load_config()
 char_size = cfg['display']['char_size']
 setup_logging(level=cfg['debug_level'], log_file="horus.log")
+logger = logging.getLogger(__name__)
+
 
 
 def main() -> None:
+    logger.info("\n \n" + "Application started")
     window = DisplayWindow(font_path = "Px437_IBM_VGA_8x16.ttf", height=1080, title="Horus OS", char_width=8*char_size, char_height=16*char_size, margin=8)
 
     bus = EventBus()
