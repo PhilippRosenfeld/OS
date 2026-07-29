@@ -38,21 +38,30 @@ jobs:
           $dll = Get-ChildItem -Path mesa -Recurse -Filter "opengl32.dll" |
                  Where-Object { $_.FullName -match "x64" } | Select-Object -First 1
           if (-not $dll) { throw "opengl32.dll (x64) not found in Mesa archive" }
+          $sourceDir = $dll.DirectoryName
 
           # pyglet loads opengl32 by bare name (ctypes.windll.opengl32), which Windows'
           # "Known DLLs" mechanism redirects straight to System32 regardless of search
           # path or working directory -- so a local copy alone (e.g. next to python.exe)
           # is silently ignored. The only way to make pyglet pick up Mesa's software
-          # implementation is to replace the actual System32 copy. That file is owned by
-          # TrustedInstaller, so even an admin needs to take ownership first.
-          $system32Dll = "$env:WINDIR\System32\opengl32.dll"
-          takeown /f $system32Dll /a
-          icacls $system32Dll /grant "*S-1-5-32-544:F" | Out-Null
-          Copy-Item $dll.FullName -Destination $system32Dll -Force
+          # implementation is to replace the actual System32 copies. Those files are
+          # owned by TrustedInstaller, so even an admin needs to take ownership first.
+          # Mesa's opengl32.dll is a thin loader for libgallium_wgl.dll (the actual
+          # llvmpipe implementation) -- both must land in System32 together, or loading
+          # opengl32 fails with "could not find ... one of its dependencies".
+          $system32 = "$env:WINDIR\System32"
+          foreach ($name in @("opengl32.dll", "libgallium_wgl.dll")) {
+            $target = Join-Path $system32 $name
+            if (Test-Path $target) {
+              takeown /f $target /a | Out-Null
+              icacls $target /grant "*S-1-5-32-544:F" | Out-Null
+            }
+            Copy-Item (Join-Path $sourceDir $name) -Destination $target -Force
+          }
 
           # Also point glcontext (moderngl's standalone-context backend) at it directly
           # via its documented override, since it takes an absolute path anyway.
-          echo "GLCONTEXT_WIN_LIBGL=$system32Dll" >> $env:GITHUB_ENV
+          echo "GLCONTEXT_WIN_LIBGL=$(Join-Path $system32 'opengl32.dll')" >> $env:GITHUB_ENV
 
       - name: Run tests
         run: uv run pytest -v
