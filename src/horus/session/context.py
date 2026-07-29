@@ -29,12 +29,19 @@ class Context:
         """Writes text onto the screen buffer at the current cursor position and advances the cursor as needed."""
         cols = self.screen.cols
         lines_needed = max(1, -(-len(text) // cols))
+        last_row = self.screen.rows - 1
 
-        overflow = (self.screen.cursor_row + lines_needed) - self.screen.rows
-        if overflow > 0:
+        end_row = self.screen.cursor_row + lines_needed - 1  # last row this write will actually touch
+        if end_row > last_row:
+            overflow = end_row - last_row
             self.screen.scroll(direction='u', lines=overflow)
             self.screen.cursor_row -= overflow
 
         self.screen.write_string(col=0, row=self.screen.cursor_row, string=text, fg=fg, bg=bg)
-        self.screen.cursor_row += lines_needed
+
+        new_row = self.screen.cursor_row + lines_needed
+        if new_row > last_row:  # no fresh row left below the output -- scroll to make one
+            self.screen.scroll(direction='u', lines=new_row - last_row)
+            new_row = last_row
+        self.screen.cursor_row = new_row
         self.screen.cursor_col = 0
