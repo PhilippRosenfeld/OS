@@ -1,13 +1,19 @@
 name: Tests
 
+env:
+  # windows-latest's default OpenGL driver is a barebones/legacy stub (no OpenGL 2.0+,
+  # no wglCreateContextAttribsARB) -- moderngl/pyglet need real OpenGL 3.3. Mesa's
+  # llvmpipe software rasterizer (installed below) provides that; this tells it to
+  # actually use the software path instead of trying (and failing) to find a real GPU.
+  GALLIUM_DRIVER: llvmpipe
+  MESA_GL_VERSION_OVERRIDE: "3.3"
+
 on:
   push:
   pull_request:
 
 jobs:
   test:
-    # windows-latest: moderngl/pyglet need a real GL context/window, which Windows runners
-    # provide out of the box (no Xvfb/software-GL setup needed, unlike ubuntu-latest).
     runs-on: windows-latest
 
     steps:
@@ -21,6 +27,18 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --locked
+
+      - name: Install Mesa software OpenGL (llvmpipe)
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $url = "https://github.com/pal1000/mesa-dist-win/releases/download/26.1.3/mesa3d-26.1.3-release-msvc.7z"
+          Invoke-WebRequest -Uri $url -OutFile mesa.7z
+          7z x mesa.7z -omesa -y | Out-Null
+          $dll = Get-ChildItem -Path mesa -Recurse -Filter "opengl32.dll" |
+                 Where-Object { $_.FullName -match "x64" } | Select-Object -First 1
+          if (-not $dll) { throw "opengl32.dll (x64) not found in Mesa archive" }
+          Copy-Item $dll.FullName -Destination ".venv\Scripts\opengl32.dll" -Force
 
       - name: Run tests
         run: uv run pytest -v
