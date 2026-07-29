@@ -23,6 +23,7 @@ class Kernel:
         try:
             tokens = shlex.split(line)
         except ValueError as e:
+            logger.warning(f"Parse error: {e}")
             ctx.write_line(f"Parse error: {e}")
             return
 
@@ -36,8 +37,17 @@ class Kernel:
         try:
             handler(ctx, argv)
         except Exception:
-            logger.exception(f"command '{command_name}' raised an exception")
+            logger.warning(f"Command '{command_name}' raised an exception")
             ctx.write_line(f"{command_name}: internal error")
             return
         
-        self.bus.publish(CommandExecutedEvent(command=command_name, args=argv, user=ctx.user, session_id= ctx.session_id))
+        self.bus.publish(
+            CommandExecutedEvent(
+                command=command_name, 
+                args=argv, 
+                user=ctx.user, 
+                session_id= ctx.session_id
+            )
+        )
+
+        logger.info(f"CTX: ID={ctx.session_id}, USER={ctx.user}, CWD={ctx.cwd}, FS={ctx.fs} | Executed Command '{command_name}', args: {argv}")

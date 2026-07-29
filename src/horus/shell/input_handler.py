@@ -2,6 +2,9 @@ from typing import Callable
 from horus.display.screen_buffer import ScreenBuffer
 
 import pyglet
+import logging
+
+logger = logging.getLogger(__name__)
 
 class InputHandler:
     
@@ -92,7 +95,7 @@ class InputHandler:
 
     def _handle_motion(self, motion: int):
         """Handles key presses pyglet models as a text motion: Backspace, Left, Right, End..."""
-        print(motion)
+        logger.debug(f"INPUT: Motion='{motion}'")
         match motion:
             case None:
                 return
@@ -137,7 +140,7 @@ class InputHandler:
 
     def _handle_key(self, symbol: int, modifiers: int) -> None:
         """Handles key presses pyglet doesn't model as a text motion: Insert, Delete..."""
-        print(symbol, modifiers)
+        logger.debug(f"INPUT: Symbol='{symbol}', modifiers='{modifiers}'")
         ctrl_held = bool(modifiers & pyglet.window.key.MOD_CTRL)
         
         if symbol == pyglet.window.key.INSERT:
@@ -173,6 +176,9 @@ class InputHandler:
 
     def _handle_enter(self):
         """Handles enter key presses."""
+        logger.debug(f"INPUT: 'enter', Current Line='{self.current_line}")
+        self._advance_row(1)
+        self._sync_cursor()
         if self._on_submit is not None:
             self._on_submit(self.current_line)
         self.current_line = ""

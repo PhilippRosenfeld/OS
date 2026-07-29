@@ -12,12 +12,10 @@ import logging
 
 
 
-setup_logging(level=logging.INFO, log_file="horus.log")
 
 cfg = load_config()
 char_size = cfg['display']['char_size']
-
-#Terminus (TTF) 500.ttf       Px437_IBM_VGA_8x16.ttf
+setup_logging(level=cfg['debug_level'], log_file="horus.log")
 
 
 def main() -> None:
@@ -47,5 +45,4 @@ def main() -> None:
         on_key=input_handler._handle_key,
     )
     window.start_cursor_blink()
-    print(registry.names())
     window.run()
