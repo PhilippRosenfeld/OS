@@ -105,6 +105,8 @@ class Renderer:
         cursor_col = self.screen_buffer.cursor_col
         cursor_row = self.screen_buffer.cursor_row
         cursor_block = self.screen_buffer.cursor_block
+        cursor_fg = self.screen_buffer.default_fg
+        cursor_bg = self.screen_buffer.default_bg
         bar_width = max(1, char_width // 8)
         for row in range(self.screen_buffer.rows):
             y0 = row * char_height
@@ -112,10 +114,10 @@ class Renderer:
                 cell = self.screen_buffer.get_cell(col, row)
                 if cursor_visible and col == cursor_col and row == cursor_row:
                     if cursor_block:
-                        block = self._get_block(cell.char, cell.bg_color, cell.fg_color)
+                        block = self._get_block(cell.char, cursor_bg, cursor_fg)
                     else:
                         block = self._get_block(cell.char, cell.fg_color, cell.bg_color).copy()
-                        block[:, :bar_width] = cell.fg_color
+                        block[:, :bar_width] = cursor_fg
                 else:
                     block = self._get_block(cell.char, cell.fg_color, cell.bg_color)
                 x0 = col * char_width

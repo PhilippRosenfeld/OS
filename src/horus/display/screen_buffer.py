@@ -1,11 +1,12 @@
 from dataclasses import dataclass
+from horus.display.colors import NAMED_COLORS
 
 @dataclass
 class Cell: 
     """A Single character cell: What's shown and how """
     char: str = " "
-    fg_color: tuple[int, int, int] = (0, 255, 0)  # Default foreground color: green
-    bg_color: tuple[int, int, int] = (0, 0, 0)  # Default background color: black
+    fg_color: tuple[int, int, int] = NAMED_COLORS.get("green")  # Placeholder foreground color: will be overwritten
+    bg_color: tuple[int, int, int] = NAMED_COLORS.get("magenta")  # Placeholder background color: will be overwritten
 
 class ScreenBuffer:
     """Class representing a screen buffer with a grid of cells. Renderer will read from this buffer to display content on the screen."""
@@ -13,7 +14,6 @@ class ScreenBuffer:
     def __init__(self, cols: int, rows: int) -> None:
         self.cols = cols
         self.rows = rows
-        self._cells: list[list[Cell]] = [[Cell() for _ in range(cols)] for _ in range(rows)]
         self._writes: list[tuple[int, int, str, tuple[int, int, int] | None, tuple[int, int, int] | None]] = []
         self.dirty = True
         self.cursor_col = 0
@@ -22,6 +22,9 @@ class ScreenBuffer:
         self.cursor_block = True  # True: solid block cursor. False: thin bar cursor.
         self._scrollback: list[list[Cell]] = []
         self.view_offset = 0  # rows of scrollback shown at the top of the view instead of live content
+        self.default_fg: tuple[int, int, int] = NAMED_COLORS.get("magenta")
+        self.default_bg: tuple[int, int, int] = NAMED_COLORS.get("black")
+        self._cells: list[list[Cell]] = [[self._blank_cell() for _ in range(cols)] for _ in range(rows)] #has to be set after colors!
 
     def write_char(self, col: int, row: int, char: str, fg: tuple[int, int, int] = None, bg: tuple[int, int, int] = None) -> None:
         """Write a character to the screen buffer at the specified column and row."""
@@ -31,8 +34,10 @@ class ScreenBuffer:
         """Write a string to the screen buffer starting at the specified column and row,
         wrapping to subsequent rows instead of being cut off. Returns the number of
         rows the string spanned (>= 1), so callers can advance a cursor correctly."""
-        self._writes.append((col, row, string, fg, bg))
-        rows_used = self._place(col, row, string, fg, bg)
+        resolved_fg = fg if fg is not None else self.default_fg
+        resolved_bg = bg if bg is not None else self.default_bg
+        self._writes.append((col, row, string, resolved_fg, resolved_bg))
+        rows_used = self._place(col, row, string, resolved_fg, resolved_bg)
         self.dirty = True
         return rows_used
 
@@ -50,10 +55,8 @@ class ScreenBuffer:
                 break
             cell = self._cells[row][col]
             cell.char = char
-            if fg is not None:
-                cell.fg_color = fg
-            if bg is not None:
-                cell.bg_color = bg
+            cell.fg_color = fg if fg is not None else self.default_fg
+            cell.bg_color = bg if bg is not None else self.default_bg
             col += 1
         end_row = min(row, self.rows - 1)
         return end_row - start_row + 1
@@ -66,21 +69,21 @@ class ScreenBuffer:
             case 'u':
                 for _ in range(lines):
                     self._scrollback.append(self._cells.pop(0))
-                    self._cells.append([Cell() for _ in range(self.cols)])
+                    self._cells.append([self._blank_cell() for _ in range(self.cols)])
             case 'd':
                 for _ in range(lines):
                     self._cells.pop()
-                    self._cells.insert(0, [Cell() for _ in range(self.cols)])
+                    self._cells.insert(0, [self._blank_cell() for _ in range(self.cols)])
             case 'l':
                 for _ in range(lines):
                     for row in self._cells:
                         row.pop(0)
-                        row.append(Cell())
+                        row.append(self._blank_cell())
             case 'r':
                 for _ in range(lines):
                     for row in self._cells:
                         row.pop()
-                        row.insert(0, Cell())
+                        row.insert(0, self._blank_cell())
             case _:
                 raise ValueError("Invalid scroll direction. Use 'u', 'd', 'l', or 'r'.")
         self.dirty = True
@@ -89,7 +92,7 @@ class ScreenBuffer:
         """Resize the grid and re-wrap all previously written text to fit the new size, instead of losing content that no longer fits the old layout."""
         self.cols = cols
         self.rows = rows
-        self._cells = [[Cell() for _ in range(cols)] for _ in range(rows)]
+        self._cells = [[self._blank_cell() for _ in range(cols)] for _ in range(rows)]
         self._scrollback = []  # old scrollback rows have the wrong width for the new self.cols
         writes, self._writes = self._writes, []
         for col, row, string, fg, bg in writes:
@@ -98,7 +101,7 @@ class ScreenBuffer:
 
     def clear(self) -> None:
         """Clear the screen buffer by resetting all cells to default."""
-        self._cells = [[Cell() for _ in range(self.cols)] for _ in range(self.rows)]
+        self._cells = [[self._blank_cell() for _ in range(self.cols)] for _ in range(self.rows)]
         self._writes = []
         self._scrollback = []
         self.view_offset = 0
@@ -122,4 +125,33 @@ class ScreenBuffer:
             return self._scrollback[combined_index][col]
         return self._cells[combined_index - len(self._scrollback)][col]
         
+    def set_default_color(self, fg=None, bg=None):
+        """Sets the colors used for future writes. Foreground applies only to
+        subsequent writes. Background is applied immediately to every cell from
+        the current cursor position onward (the current row from cursor_col on,
+        and every row below) -- cells before the cursor are left untouched."""
+        if fg is not None:
+            self.default_fg = fg
+        if bg is not None:
+            self.default_bg = bg
+            for row_idx in range(self.cursor_row, self.rows):
+                start_col = self.cursor_col if row_idx == self.cursor_row else 0
+                for col_idx in range(start_col, self.cols):
+                    self._cells[row_idx][col_idx].bg_color = bg
+            self.dirty = True
+
+    def recolor_all(self, fg=None, bg=None):
+        """Recolors the entire terminal."""
+        for row in self._cells:
+            for cell in row:
+                if fg is not None:
+                    cell.fg_color= fg
+                if bg is not None:
+                    cell.bg_color= bg
+        self.dirty=True
     
+    def _blank_cell(self) -> Cell:
+        """A fresh empty cell using the buffer's current default colors,
+        so newly created cells (init, scroll, resize, clear) always match
+        whatever set_default_colors() last configured."""
+        return Cell(char=" ", fg_color=self.default_fg, bg_color=self.default_bg)

@@ -7,20 +7,19 @@ from horus.kernel.registry import registry
 from horus.session.context import Context
 from horus.events.bus import EventBus
 
-import horus.kernel.commands.cmd_text
+import horus.kernel.commands
 import logging
 
 
-
-setup_logging(level=logging.INFO, log_file="horus.log")
-
 cfg = load_config()
 char_size = cfg['display']['char_size']
+setup_logging(level=cfg['debug_level'], log_file="horus.log")
+logger = logging.getLogger(__name__)
 
-#Terminus (TTF) 500.ttf       Px437_IBM_VGA_8x16.ttf
 
 
 def main() -> None:
+    logger.info("\n \n" + "Application started")
     window = DisplayWindow(font_path = "Px437_IBM_VGA_8x16.ttf", height=1080, title="Horus OS", char_width=8*char_size, char_height=16*char_size, margin=8)
 
     bus = EventBus()
@@ -47,5 +46,4 @@ def main() -> None:
         on_key=input_handler._handle_key,
     )
     window.start_cursor_blink()
-    print(registry.names())
     window.run()

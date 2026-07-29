@@ -25,8 +25,14 @@ class Context:
             raise RuntimeError("Filesystem not set in context")
         return self.fs.resolve_path(self.cwd, path)
 
-    def write_line(self, text:str, fg=None, bg=None) -> None:
-        """Writes text onto the screen buffer at the current cursor position and advances the cursor as needed."""
+    def write_line(self, text: str, fg=None, bg=None) -> None:
+        """Writes text at column 0 of the current output row. Multi-line input
+        (containing '\\n') is split and written as separate lines, since the
+        screen buffer has no concept of a newline character -- only rows."""
+        for line in text.split("\n"):
+            self._write_single_line(line, fg, bg)
+
+    def _write_single_line(self, text: str, fg=None, bg=None) -> None:
         cols = self.screen.cols
         lines_needed = max(1, -(-len(text) // cols))
         last_row = self.screen.rows - 1

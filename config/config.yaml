@@ -1,2 +1,4 @@
+debug_level: INFO
+
 display:
   char_size: 4
