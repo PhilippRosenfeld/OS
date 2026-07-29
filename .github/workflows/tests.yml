@@ -38,7 +38,21 @@ jobs:
           $dll = Get-ChildItem -Path mesa -Recurse -Filter "opengl32.dll" |
                  Where-Object { $_.FullName -match "x64" } | Select-Object -First 1
           if (-not $dll) { throw "opengl32.dll (x64) not found in Mesa archive" }
-          Copy-Item $dll.FullName -Destination ".venv\Scripts\opengl32.dll" -Force
+
+          # pyglet loads opengl32 by bare name (ctypes.windll.opengl32), which Windows'
+          # "Known DLLs" mechanism redirects straight to System32 regardless of search
+          # path or working directory -- so a local copy alone (e.g. next to python.exe)
+          # is silently ignored. The only way to make pyglet pick up Mesa's software
+          # implementation is to replace the actual System32 copy. That file is owned by
+          # TrustedInstaller, so even an admin needs to take ownership first.
+          $system32Dll = "$env:WINDIR\System32\opengl32.dll"
+          takeown /f $system32Dll /a
+          icacls $system32Dll /grant "*S-1-5-32-544:F" | Out-Null
+          Copy-Item $dll.FullName -Destination $system32Dll -Force
+
+          # Also point glcontext (moderngl's standalone-context backend) at it directly
+          # via its documented override, since it takes an absolute path anyway.
+          echo "GLCONTEXT_WIN_LIBGL=$system32Dll" >> $env:GITHUB_ENV
 
       - name: Run tests
         run: uv run pytest -v
