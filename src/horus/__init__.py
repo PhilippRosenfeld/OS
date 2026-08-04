@@ -6,6 +6,8 @@ from horus.kernel.kernel import Kernel
 from horus.kernel.registry import registry
 from horus.session.context import Context
 from horus.events.bus import EventBus
+from horus.filesystem.backend.memory import InMemoryVFS
+from horus.filesystem.seed import seed_minimal
 
 import horus.kernel.commands
 import logging
@@ -23,12 +25,14 @@ def main() -> None:
 
     bus = EventBus()
     kernel = Kernel(registry=registry, bus=bus)
+    fs = InMemoryVFS()
+    seed_minimal(fs)
 
     context = Context(
         session_id = "local",
         user="root",
-        cwd="/",
-        fs=None,
+        cwd="/home/root",
+        fs=fs,
         screen=window.buffer,
         events=bus
     )
