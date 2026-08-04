@@ -1,0 +1,67 @@
+name: Tests
+
+env:
+  # windows-latest's default OpenGL driver is a barebones/legacy stub (no OpenGL 2.0+,
+  # no wglCreateContextAttribsARB) -- moderngl/pyglet need real OpenGL 3.3. Mesa's
+  # llvmpipe software rasterizer (installed below) provides that; this tells it to
+  # actually use the software path instead of trying (and failing) to find a real GPU.
+  GALLIUM_DRIVER: llvmpipe
+  MESA_GL_VERSION_OVERRIDE: "3.3"
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Install Mesa software OpenGL (llvmpipe)
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $url = "https://github.com/pal1000/mesa-dist-win/releases/download/26.1.3/mesa3d-26.1.3-release-msvc.7z"
+          Invoke-WebRequest -Uri $url -OutFile mesa.7z
+          7z x mesa.7z -omesa -y | Out-Null
+          $dll = Get-ChildItem -Path mesa -Recurse -Filter "opengl32.dll" |
+                 Where-Object { $_.FullName -match "x64" } | Select-Object -First 1
+          if (-not $dll) { throw "opengl32.dll (x64) not found in Mesa archive" }
+          $sourceDir = $dll.DirectoryName
+
+          # pyglet loads opengl32 by bare name (ctypes.windll.opengl32), which Windows'
+          # "Known DLLs" mechanism redirects straight to System32 regardless of search
+          # path or working directory -- so a local copy alone (e.g. next to python.exe)
+          # is silently ignored. The only way to make pyglet pick up Mesa's software
+          # implementation is to replace the actual System32 copies. Those files are
+          # owned by TrustedInstaller, so even an admin needs to take ownership first.
+          # Mesa's opengl32.dll is a thin loader for libgallium_wgl.dll (the actual
+          # llvmpipe implementation) -- both must land in System32 together, or loading
+          # opengl32 fails with "could not find ... one of its dependencies".
+          $system32 = "$env:WINDIR\System32"
+          foreach ($name in @("opengl32.dll", "libgallium_wgl.dll")) {
+            $target = Join-Path $system32 $name
+            if (Test-Path $target) {
+              takeown /f $target /a | Out-Null
+              icacls $target /grant "*S-1-5-32-544:F" | Out-Null
+            }
+            Copy-Item (Join-Path $sourceDir $name) -Destination $target -Force
+          }
+
+          # Also point glcontext (moderngl's standalone-context backend) at it directly
+          # via its documented override, since it takes an absolute path anyway.
+          echo "GLCONTEXT_WIN_LIBGL=$(Join-Path $system32 'opengl32.dll')" >> $env:GITHUB_ENV
+
+      - name: Run tests
+        run: uv run pytest -v

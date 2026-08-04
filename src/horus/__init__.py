@@ -17,9 +17,8 @@ setup_logging(level=cfg['debug_level'], log_file="horus.log")
 logger = logging.getLogger(__name__)
 
 
-
 def main() -> None:
-    logger.info("\n \n" + "Application started")
+    logger.info("-------------------- Application started --------------------")
     window = DisplayWindow(font_path = "Px437_IBM_VGA_8x16.ttf", height=1080, title="Horus OS", char_width=8*char_size, char_height=16*char_size, margin=8)
 
     bus = EventBus()

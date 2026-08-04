@@ -25,14 +25,14 @@ class Registry:
     def lookup(self, name: str) -> CommandHandler | None:
         """Lookup a given command and return its handler."""
         if name is None:
-            raise None
+            return None
         return self._commands.get(name)
 
     def unregister(self, name: str) -> CommandHandler | None:
         """Unregisters a given command. Returns unregistered command if successful, None otherwise."""
         if name is None:
-            raise None
-            self._help.pop(name, None)
+            return None
+        self._help.pop(name, None)
         return self._commands.pop(name, None)
 
     def names(self) -> list[str]:

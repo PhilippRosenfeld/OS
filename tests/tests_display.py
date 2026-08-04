@@ -60,7 +60,7 @@ def test_on_resize_recomputes_grid_size():
 def test_screen_buffer_starts_blank_and_dirty():
     buffer = ScreenBuffer(5, 2)
     assert buffer.dirty is True
-    assert buffer.get_cell(0, 0) == Cell()
+    assert buffer.get_cell(0, 0) == Cell(fg_color=buffer.default_fg, bg_color=buffer.default_bg)
 
 
 def test_write_string_fills_cells():
@@ -144,6 +144,93 @@ def test_clear_resets_cells_and_write_history():
     assert buffer.get_cell(0, 0).char == " "
     buffer.resize(3, 2)  # replays write history; should stay blank since it was cleared
     assert buffer.get_cell(0, 0).char == " "
+
+
+# --- ScreenBuffer: scrollback / colors ---
+
+def test_scroll_up_moves_pushed_rows_into_scrollback():
+    buffer = ScreenBuffer(3, 2)
+    buffer.write_string(0, 0, "AAA")
+    buffer.write_string(0, 1, "BBB")
+    buffer.scroll("u", 1)
+    assert len(buffer._scrollback) == 1
+    assert "".join(c.char for c in buffer._scrollback[0]) == "AAA"
+
+
+def test_get_cell_reads_from_scrollback_when_view_offset_set():
+    buffer = ScreenBuffer(3, 2)
+    buffer.write_string(0, 0, "AAA")
+    buffer.write_string(0, 1, "BBB")
+    buffer.scroll("u", 1)  # "AAA" -> scrollback, live becomes ["BBB", blank]
+    buffer.scroll_view(1)
+    assert "".join(buffer.get_cell(c, 0).char for c in range(3)) == "AAA"
+    assert "".join(buffer.get_cell(c, 1).char for c in range(3)) == "BBB"
+
+
+def test_scroll_view_clamps_to_available_history():
+    buffer = ScreenBuffer(3, 2)
+    buffer.write_string(0, 0, "AAA")
+    buffer.scroll("u", 1)
+    buffer.scroll_view(100)
+    assert buffer.view_offset == len(buffer._scrollback)
+    buffer.scroll_view(-100)
+    assert buffer.view_offset == 0
+
+
+def test_write_string_resets_view_offset_to_live():
+    buffer = ScreenBuffer(3, 2)
+    buffer.write_string(0, 0, "AAA")
+    buffer.scroll("u", 1)
+    buffer.scroll_view(1)
+    assert buffer.view_offset != 0
+    buffer.write_string(0, 0, "X")
+    assert buffer.view_offset == 0
+
+
+def test_resize_clears_scrollback():
+    buffer = ScreenBuffer(3, 2)
+    buffer.write_string(0, 0, "AAA")
+    buffer.scroll("u", 1)
+    assert len(buffer._scrollback) == 1
+    buffer.resize(3, 2)
+    assert buffer._scrollback == []
+
+
+def test_clear_resets_scrollback_and_view_offset():
+    buffer = ScreenBuffer(3, 2)
+    buffer.write_string(0, 0, "AAA")
+    buffer.scroll("u", 1)
+    buffer.scroll_view(1)
+    buffer.clear()
+    assert buffer._scrollback == []
+    assert buffer.view_offset == 0
+
+
+def test_set_default_color_changes_future_writes():
+    buffer = ScreenBuffer(5, 2)
+    buffer.set_default_color(fg=(9, 9, 9))
+    buffer.write_string(0, 0, "x")
+    assert buffer.get_cell(0, 0).fg_color == (9, 9, 9)
+
+
+def test_set_default_bg_repaints_from_cursor_onward_only():
+    buffer = ScreenBuffer(5, 2)
+    buffer.write_string(0, 0, "x")  # cell at (0,0), before the cursor
+    buffer.cursor_row, buffer.cursor_col = 0, 1
+    buffer.set_default_color(bg=(7, 7, 7))
+    assert buffer.get_cell(0, 0).bg_color != (7, 7, 7)
+    assert buffer.get_cell(1, 0).bg_color == (7, 7, 7)
+    assert buffer.get_cell(0, 1).bg_color == (7, 7, 7)
+
+
+def test_recolor_all_updates_live_and_scrollback_cells():
+    buffer = ScreenBuffer(5, 2)
+    buffer.write_string(0, 0, "x")
+    buffer.scroll("u", 1)
+    buffer.recolor_all(fg=(1, 1, 1), bg=(2, 2, 2))
+    assert buffer._scrollback[0][0].fg_color == (1, 1, 1)
+    assert buffer._scrollback[0][0].bg_color == (2, 2, 2)
+    assert buffer.get_cell(0, 0).fg_color == (1, 1, 1)
 
 
 # --- FontAtlas / FontRegistry ---
