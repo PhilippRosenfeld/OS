@@ -23,7 +23,7 @@ class Kernel:
         try:
             tokens = shlex.split(line)
         except ValueError as e:
-            logger.warning(f"Parse error: {e}")
+            logger.exception(f"Parse error: {e}")
             ctx.write_line(f"Parse error: {e}")
             return
 
@@ -37,7 +37,7 @@ class Kernel:
         try:
             handler(ctx, argv)
         except Exception:
-            logger.warning(f"Command '{command_name}' raised an exception")
+            logger.exception(f"Command '{command_name}' raised an exception")
             ctx.write_line(f"{command_name}: internal error")
             return
         

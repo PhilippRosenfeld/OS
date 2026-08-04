@@ -23,7 +23,7 @@ class Context:
         """Resolve a path relative to the current working directory."""
         if self.fs is None:
             raise RuntimeError("Filesystem not set in context")
-        return self.fs.resolve_path(self.cwd, path)
+        return self.fs.resolve_path(cwd=self.cwd, path=path)
 
     def write_line(self, text: str, fg=None, bg=None) -> None:
         """Writes text at column 0 of the current output row. Multi-line input
