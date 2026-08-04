@@ -13,7 +13,7 @@ _ls_parser = _build_ls_parser()
 @command("ls", help_text="List current directory content")
 def ls(ctx, argv: list[str]) -> None:
     try:
-        args = _color_parser.parse_args(argv)
+        args = _ls_parser.parse_args(argv)
     except CommandParseError as e:
         ctx.write_line(e.message or e.usage)
         return
