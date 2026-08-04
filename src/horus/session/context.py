@@ -3,21 +3,23 @@ from dataclasses import dataclass, field
 from horus.events.bus import EventBus
 from horus.filesystem.vfs import VFS
 from horus.display.screen_buffer import ScreenBuffer
+from horus.ui.screen_manager import ScreenManager
 
 @dataclass
 class Context:
     """Bundles everything a command needs to execute: who's running it,
     where they are, and what systems they can reach. Passed into every
     command handler as the first argument."""
-    
+
     session_id: str
     user: str
     cwd: str
     env: dict[str, str] = field(default_factory=dict)
-    
+
     fs: VFS = None
     events: EventBus = None
     screen: ScreenBuffer = None
+    screens: ScreenManager = None
             
     def resolve_path(self, path: str) -> str:
         """Resolve a path relative to the current working directory."""

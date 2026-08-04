@@ -8,6 +8,8 @@ from horus.session.context import Context
 from horus.events.bus import EventBus
 from horus.filesystem.backend.memory import InMemoryVFS
 from horus.filesystem.seed import seed_minimal
+from horus.ui.screen_manager import ScreenManager
+from horus.ui.shell_screen import ShellScreen
 
 import horus.kernel.commands
 import logging
@@ -28,25 +30,29 @@ def main() -> None:
     fs = InMemoryVFS()
     seed_minimal(fs)
 
+    screens = ScreenManager()
+
     context = Context(
         session_id = "local",
         user="root",
         cwd="/home",
         fs=fs,
         screen=window.buffer,
-        events=bus
+        events=bus,
+        screens=screens,
     )
 
     def on_submit(line: str) -> None:
         kernel.execute(line, context)
 
-
     input_handler = InputHandler(window.buffer, on_submit=on_submit)
+    screens.push(ShellScreen(input_handler))
+
     window.set_text_handler(
-        on_text=input_handler._handle_text,
-        on_motion=input_handler._handle_motion,
-        on_enter=input_handler._handle_enter,
-        on_key=input_handler._handle_key,
+        on_text=screens.handle_text,
+        on_motion=screens.handle_motion,
+        on_enter=screens.handle_enter,
+        on_key=screens.handle_key,
     )
     window.start_cursor_blink()
     window.run()
