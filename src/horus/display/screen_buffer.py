@@ -22,7 +22,7 @@ class ScreenBuffer:
         self.cursor_block = True  # True: solid block cursor. False: thin bar cursor.
         self._scrollback: list[list[Cell]] = []
         self.view_offset = 0  # rows of scrollback shown at the top of the view instead of live content
-        self.default_fg: tuple[int, int, int] = NAMED_COLORS.get("magenta")
+        self.default_fg: tuple[int, int, int] = NAMED_COLORS.get("green")
         self.default_bg: tuple[int, int, int] = NAMED_COLORS.get("black")
         self._cells: list[list[Cell]] = [[self._blank_cell() for _ in range(cols)] for _ in range(rows)] #has to be set after colors!
 
