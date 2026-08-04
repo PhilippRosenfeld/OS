@@ -17,7 +17,7 @@ class Registry:
         if not name or handler is None:
             raise ValueError("command name and handler must be provided.")
         if name in self._commands:
-            raise ValueError("command '{name}' is already registered.")
+            raise ValueError(f"command '{name}' is already registered.")
 
         self._commands[name] = handler
         self._help[name] = help_text

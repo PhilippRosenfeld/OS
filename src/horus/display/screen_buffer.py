@@ -19,6 +19,7 @@ class ScreenBuffer:
         self.cursor_col = 0
         self.cursor_row = 0
         self.cursor_visible = True
+        self.cursor_enabled = True  # False: cursor never renders, regardless of the blink state above
         self.cursor_block = True  # True: solid block cursor. False: thin bar cursor.
         self._scrollback: list[list[Cell]] = []
         self.view_offset = 0  # rows of scrollback shown at the top of the view instead of live content
@@ -151,6 +152,24 @@ class ScreenBuffer:
                     cell.bg_color= bg
         self.dirty=True
     
+    def snapshot(self) -> dict:
+        """Capture the visible grid + cursor position so it can be restored later
+        (e.g. a menu overlay that temporarily takes over the screen)."""
+        return {
+            "cells": [[Cell(c.char, c.fg_color, c.bg_color) for c in row] for row in self._cells],
+            "cursor_col": self.cursor_col,
+            "cursor_row": self.cursor_row,
+            "view_offset": self.view_offset,
+        }
+
+    def restore(self, snapshot: dict) -> None:
+        """Restore a grid + cursor position previously captured with snapshot()."""
+        self._cells = snapshot["cells"]
+        self.cursor_col = snapshot["cursor_col"]
+        self.cursor_row = snapshot["cursor_row"]
+        self.view_offset = snapshot["view_offset"]
+        self.dirty = True
+
     def _blank_cell(self) -> Cell:
         """A fresh empty cell using the buffer's current default colors,
         so newly created cells (init, scroll, resize, clear) always match

@@ -101,7 +101,7 @@ class Renderer:
         vertical bar overlaid on the normal glyph (insert mode), depending on screen_buffer.cursor_block."""
         char_width = self.font_atlas.char_width
         char_height = self.font_atlas.char_height
-        cursor_visible = self.screen_buffer.cursor_visible and self.screen_buffer.view_offset == 0
+        cursor_visible = self.screen_buffer.cursor_visible and self.screen_buffer.cursor_enabled and self.screen_buffer.view_offset == 0
         cursor_col = self.screen_buffer.cursor_col
         cursor_row = self.screen_buffer.cursor_row
         cursor_block = self.screen_buffer.cursor_block

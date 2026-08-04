@@ -38,4 +38,3 @@ def color(ctx, argv: list[str]) -> None:
 
     if args.omnia:
         ctx.screen.recolor_all(fg, bg)
-
