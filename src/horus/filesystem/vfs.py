@@ -13,7 +13,7 @@ class VFS(ABC):
         pass
 
     @abstractmethod
-    def list_dir(self, path: str) -> list[Node]:
+    def list_dir(self, path: str, show_all: bool, recursive: bool) -> list[Node]:
         pass
 
     @abstractmethod

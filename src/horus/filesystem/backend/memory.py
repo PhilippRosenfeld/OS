@@ -68,14 +68,28 @@ class InMemoryVFS(VFS):
         """Checks if a given path exists"""
         return self._walk(path) is not None
 
-    def list_dir(self, path: str) -> list[Node]:
-        """Returns the content of a given directory as a list"""
+    def list_dir(self, path: str, show_all: bool = False, recursive: bool = False) -> list[Node]:
+        """Returns the content of a given directory as a list.
+        show_all: include hidden entries (Node.hidden).
+        recursive: also descend into subdirectories, flattening their entries into the same list."""
         cur_node = self._walk(path)
 
-        if cur_node is None or cur_node.meta.type != NodeType.DIRECTORY:
+        if cur_node is None:
             raise FileNotFoundError(path)
         
-        return [child.meta for child in node.children.values()]
+        if cur_node.meta.type != NodeType.DIRECTORY:
+            raise NotADirectoryError(path)
+
+        entries: list[Node] = []
+        for name, child in cur_node.children.items():
+            if not show_all and child.meta.hidden:
+                continue
+            entries.append(child.meta)
+            if recursive and child.meta.type == NodeType.DIRECTORY:
+                child_path = path.rstrip("/") + "/" + name
+                entries.extend(self.list_dir(child_path, show_all=show_all, recursive=True))
+
+        return entries
 
     def read_file(self, path: str) -> str:
         """Reads the content of a file and returns it as a string.

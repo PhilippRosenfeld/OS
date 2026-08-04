@@ -14,7 +14,7 @@ _echo_parser = _build_echo_parser()
 _whoami_parser = _build_whoami_parser()
 
 
-@command("echo", help_text="Test")
+@command("echo", help_text="Echoes the input text")
 def echo(ctx, argv: list[str]) -> None:
     try:
         args = _echo_parser.parse_args(argv)
@@ -27,3 +27,4 @@ def echo(ctx, argv: list[str]) -> None:
 @command("whoami", help_text="Who are you?")
 def whoami(ctx, argv: list[str]) -> None:
     ctx.write_line("" + ctx.user)
+    

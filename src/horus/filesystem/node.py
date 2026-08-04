@@ -11,7 +11,7 @@ class Node:
     name:str
     type: NodeType
     owner: str = "root"
-    permisions: str ="rwxr-xr-x"
+    permissions: str ="rwxr-xr-x"
     created_at: datetime = field(default_factory=datetime.now)
     modified_at: datetime = field(default_factory=datetime.now)
     hidden: bool = False

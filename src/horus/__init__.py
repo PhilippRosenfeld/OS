@@ -31,7 +31,7 @@ def main() -> None:
     context = Context(
         session_id = "local",
         user="root",
-        cwd="/home/root",
+        cwd="/home",
         fs=fs,
         screen=window.buffer,
         events=bus
