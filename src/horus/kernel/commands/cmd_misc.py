@@ -4,7 +4,7 @@ from horus.display.colors import NAMED_COLORS
 
 
 def _build_color_parser() -> CommandArgumentParser:
-    parser = CommandArgumentParser(prog="color", add_help=True)
+    parser = CommandArgumentParser(prog="color", add_help=True, description="Set terminal colors")
     parser.add_argument("-f", "--fg", default=None, help="Foreground color")
     parser.add_argument("-b", "--bg", default=None, help="Background color")
     parser.add_argument("-o", "--omnia", action="store_true", help="Changes the colors retroactively")

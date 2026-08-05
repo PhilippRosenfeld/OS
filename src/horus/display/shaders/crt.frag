@@ -25,7 +25,7 @@ void main() {
     color.rgb *= mix(0.75, 1.0, scanline);
 
     // vignette: darken toward the corners for a rounded-glass look
-    float vignette = 1.0 - dot(centered, centered) * 0.35;
+    float vignette = 1.0 - dot(centered, centered) * 0.2;
     color.rgb *= clamp(vignette, 0.0, 1.0);
 
     frag_color = color;

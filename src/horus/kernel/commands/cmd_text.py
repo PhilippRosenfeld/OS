@@ -2,12 +2,12 @@ from horus.kernel.commands.command_parser import CommandArgumentParser, CommandP
 from horus.kernel.registry import command
 
 def _build_echo_parser() -> CommandArgumentParser:
-    parser = CommandArgumentParser(prog="echo", add_help=True)
+    parser = CommandArgumentParser(prog="echo", add_help=True, description="Echoes the input text")
     parser.add_argument("text", nargs="*")
     return parser
 
 def _build_whoami_parser() -> CommandArgumentParser:
-    parser = CommandArgumentParser(prog="whoami", add_help=True)
+    parser = CommandArgumentParser(prog="whoami", add_help=True, description="Who are you?")
     return parser
 
 _echo_parser = _build_echo_parser()
@@ -26,5 +26,11 @@ def echo(ctx, argv: list[str]) -> None:
 
 @command("whoami", help_text="Who are you?")
 def whoami(ctx, argv: list[str]) -> None:
+    try:
+        args = _whoami_parser.parse_args(argv)
+    except CommandParseError as e:
+        ctx.write_line(e.message or e.usage)
+        return
+
     ctx.write_line("" + ctx.user)
     
