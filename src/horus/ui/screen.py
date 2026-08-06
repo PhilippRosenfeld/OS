@@ -12,6 +12,10 @@ class Screen(ABC):
     def on_pop(self) -> None:
         """Called once when this screen stops being active (popped off the stack)."""
 
+    def on_resume(self) -> None:
+        """Called when this screen becomes active again because the screen above
+        it was popped off (as opposed to being pushed fresh -- see on_push)."""
+
     @abstractmethod
     def handle_text(self, text: str) -> None:
         pass

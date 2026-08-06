@@ -259,3 +259,60 @@ def test_enter_without_submit_callback_does_not_raise():
     handler._handle_text("hi")
     handler._handle_enter()  # should not raise
     assert handler.current_line == ""
+
+
+# --- prompt ---
+
+def test_no_prompt_by_default_input_starts_at_column_zero():
+    handler, buffer = make()
+    assert buffer.cursor_col == 0
+    assert row_text(buffer, 0).strip() == ""
+
+
+def test_get_prompt_is_written_at_construction_and_offsets_the_cursor():
+    buffer = ScreenBuffer(20, 5)
+    handler = InputHandler(buffer, get_prompt=lambda: "root@/home > ")
+    assert row_text(buffer, 0).startswith("root@/home > ")
+    assert buffer.cursor_col == len("root@/home > ")
+    assert handler.line_cursor == 0
+
+
+def test_typed_text_lands_after_the_prompt():
+    buffer = ScreenBuffer(20, 5)
+    handler = InputHandler(buffer, get_prompt=lambda: "> ")
+    handler._handle_text("ls")
+    assert row_text(buffer, 0).startswith("> ls")
+    assert handler.current_line == "ls"  # the prompt itself is never part of current_line
+
+
+def test_prompt_reflects_the_callback_live_e_g_after_cd():
+    state = {"cwd": "/home"}
+    buffer = ScreenBuffer(30, 5)
+    handler = InputHandler(buffer, get_prompt=lambda: f"root@{state['cwd']} > ")
+    state["cwd"] = "/etc"
+    handler.start_line()
+    assert row_text(buffer, 0).startswith("root@/etc > ")
+
+
+def test_start_line_after_enter_draws_prompt_on_the_new_row():
+    buffer = ScreenBuffer(20, 5)
+    handler = InputHandler(buffer, get_prompt=lambda: "> ")
+    handler._handle_text("cmd")
+    handler._handle_enter()
+    handler.start_line()
+    assert row_text(buffer, 1).startswith("> ")
+    assert buffer.cursor_row == 1
+    assert buffer.cursor_col == len("> ")
+
+
+def test_backspace_and_home_cannot_reach_into_the_prompt():
+    buffer = ScreenBuffer(20, 5)
+    handler = InputHandler(buffer, get_prompt=lambda: "> ")
+    handler._handle_text("x")
+    handler._handle_motion(key.MOTION_BACKSPACE)
+    handler._handle_motion(key.MOTION_BACKSPACE)  # already empty, must be a no-op
+    assert buffer.cursor_col == len("> ")
+    assert row_text(buffer, 0) == "> " + " " * 18
+    handler._handle_text("ab")
+    handler._handle_motion(key.MOTION_BEGINNING_OF_LINE)
+    assert buffer.cursor_col == len("> ")

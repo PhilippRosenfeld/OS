@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from horus.events.bus import EventBus
 from horus.filesystem.vfs import VFS
 from horus.display.screen_buffer import ScreenBuffer
+from horus.display.window import DisplayWindow
 from horus.ui.screen_manager import ScreenManager
 
 @dataclass
@@ -20,6 +21,7 @@ class Context:
     events: EventBus = None
     screen: ScreenBuffer = None
     screens: ScreenManager = None
+    window: DisplayWindow = None
             
     def resolve_path(self, path: str) -> str:
         """Resolve a path relative to the current working directory."""

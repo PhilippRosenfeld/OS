@@ -114,12 +114,12 @@ class InMemoryVFS(VFS):
             existing.content = text
             existing.meta.size = len(text)
 
-    def mkdir(self, path: str, name: str, hidden: bool) -> None:
+    def mkdir(self, path: str, hidden: bool = False) -> None:
         """Creates a directory at the given path."""
         parent, name = self._parent_and_name(path)
         if name in parent.children:
             raise FileExistsError(path)
-        parent.children[name] = _TreeNode(Node(name=name, type=NodeType.DIRECTORY, ))
+        parent.children[name] = _TreeNode(Node(name=name, type=NodeType.DIRECTORY, hidden = hidden))
 
     def get_meta(self, path: str) -> None:
         node = self._walk(path)

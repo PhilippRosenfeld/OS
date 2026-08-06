@@ -38,8 +38,10 @@ class MenuScreen(Screen):
         self._render()
 
     def on_pop(self) -> None:
+        """restore() also brings back cursor_enabled from the snapshot, so this
+        correctly leaves the cursor disabled when popping back into another menu
+        instead of always re-enabling it as if the shell was always underneath."""
         self._buffer.restore(self._saved_screen)
-        self._buffer.cursor_enabled = True
 
     def _render(self) -> None:
         self._buffer.write_string(0, 0, self._title)

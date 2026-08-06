@@ -12,6 +12,7 @@ class DisplayWindow:
         self._char_width = char_width
         self._char_height = char_height
         self._margin = margin
+        self._font_path = font_path
         if cols is None:
             cols = max(1, (width - 2 * margin) // char_width)
         if rows is None:
@@ -27,6 +28,40 @@ class DisplayWindow:
         self._on_enter_callback = None
         self._on_special_key_callback = None
         self._window.push_handlers(on_draw=self._on_draw, on_resize=self._on_resize)
+
+    @property
+    def char_width(self) -> int:
+        return self._char_width
+
+    @property
+    def char_height(self) -> int:
+        return self._char_height
+
+    @property
+    def font_path(self) -> str:
+        return self._font_path
+
+    @property
+    def window_size(self) -> tuple[int, int]:
+        return (self._window.width, self._window.height)
+
+    def set_char_size(self, char_width: int, char_height: int) -> None:
+        """Rebuild the font atlas at a new glyph size and re-fit the grid to the window."""
+        self._char_width = char_width
+        self._char_height = char_height
+        self._renderer.set_font_atlas(FontAtlas(self._font_path, char_width, char_height))
+        self._on_resize(self._window.width, self._window.height)
+
+    def set_font(self, font_path: str) -> None:
+        """Rebuild the font atlas with a different typeface at the current glyph size."""
+        self._font_path = font_path
+        self._renderer.set_font_atlas(FontAtlas(font_path, self._char_width, self._char_height))
+
+    def set_window_size(self, width: int, height: int) -> None:
+        """Resize the OS window and immediately re-fit the grid to it (pyglet's own
+        on_resize event depends on the OS message pump, so it isn't relied on here)."""
+        self._window.set_size(width, height)
+        self._on_resize(width, height)
 
     def set_input_handler(self, callback) -> None:
         """Set the callback function to handle key press events."""

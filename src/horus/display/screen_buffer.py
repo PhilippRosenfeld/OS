@@ -154,19 +154,42 @@ class ScreenBuffer:
     
     def snapshot(self) -> dict:
         """Capture the visible grid + cursor position so it can be restored later
-        (e.g. a menu overlay that temporarily takes over the screen)."""
+        (e.g. a menu overlay that temporarily takes over the screen). Includes
+        _writes -- the replay log resize() uses -- so that a later resize() while
+        the restored content is showing re-wraps *this* content, not whatever the
+        overlay itself wrote in the meantime (overlays clear() on their way in,
+        which wipes _writes, and keep appending to it as they re-render)."""
         return {
+            "cols": self.cols,
+            "rows": self.rows,
             "cells": [[Cell(c.char, c.fg_color, c.bg_color) for c in row] for row in self._cells],
+            "writes": list(self._writes),
             "cursor_col": self.cursor_col,
             "cursor_row": self.cursor_row,
+            "cursor_enabled": self.cursor_enabled,
             "view_offset": self.view_offset,
         }
 
     def restore(self, snapshot: dict) -> None:
-        """Restore a grid + cursor position previously captured with snapshot()."""
-        self._cells = snapshot["cells"]
-        self.cursor_col = snapshot["cursor_col"]
-        self.cursor_row = snapshot["cursor_row"]
+        """Restore a grid + cursor position previously captured with snapshot(). If
+        cols/rows changed since the snapshot was taken (e.g. a settings menu resized
+        the window or font while active), the saved cells are fitted -- padded or
+        clipped -- to the current grid instead of being swapped in as-is, since a raw
+        swap would leave _cells out of sync with cols/rows."""
+        cells = snapshot["cells"]
+        if snapshot["cols"] != self.cols or snapshot["rows"] != self.rows:
+            cells = [
+                [
+                    cells[r][c] if r < len(cells) and c < len(cells[r]) else self._blank_cell()
+                    for c in range(self.cols)
+                ]
+                for r in range(self.rows)
+            ]
+        self._cells = cells
+        self._writes = list(snapshot["writes"])
+        self.cursor_col = min(snapshot["cursor_col"], self.cols - 1)
+        self.cursor_row = min(snapshot["cursor_row"], self.rows - 1)
+        self.cursor_enabled = snapshot["cursor_enabled"]
         self.view_offset = snapshot["view_offset"]
         self.dirty = True
 

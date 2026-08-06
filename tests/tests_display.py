@@ -55,6 +55,44 @@ def test_on_resize_recomputes_grid_size():
         window._window.close()
 
 
+def test_set_char_size_rebuilds_atlas_and_refits_grid():
+    window = DisplayWindow(font_path=FONT, char_width=8, char_height=16, width=320, height=160, margin=0)
+    try:
+        window.set_char_size(16, 32)
+        assert window.char_width == 16
+        assert window.char_height == 32
+        assert window._renderer.font_atlas.char_width == 16
+        assert window._renderer.font_atlas.char_height == 32
+        assert window.buffer.cols == 320 // 16
+        assert window.buffer.rows == 160 // 32
+    finally:
+        window._window.close()
+
+
+def test_set_font_swaps_atlas_without_changing_grid_size():
+    window = DisplayWindow(font_path=FONT, char_width=8, char_height=16, width=320, height=160, margin=0)
+    try:
+        cols_before, rows_before = window.buffer.cols, window.buffer.rows
+        window.set_font("Terminus (TTF) 500.ttf")
+        assert window.font_path == "Terminus (TTF) 500.ttf"
+        assert window._renderer.font_atlas.font_path.name == "Terminus (TTF) 500.ttf"
+        assert window.buffer.cols == cols_before
+        assert window.buffer.rows == rows_before
+    finally:
+        window._window.close()
+
+
+def test_set_window_size_resizes_window_and_refits_grid():
+    window = DisplayWindow(font_path=FONT, char_width=8, char_height=16, width=320, height=160, margin=0)
+    try:
+        window.set_window_size(640, 320)
+        assert window.window_size == (640, 320)
+        assert window.buffer.cols == 640 // 8
+        assert window.buffer.rows == 320 // 16
+    finally:
+        window._window.close()
+
+
 # --- ScreenBuffer ---
 
 def test_screen_buffer_starts_blank_and_dirty():
@@ -206,6 +244,72 @@ def test_clear_resets_scrollback_and_view_offset():
     assert buffer.view_offset == 0
 
 
+def test_snapshot_restore_round_trip_at_same_size():
+    buffer = ScreenBuffer(5, 2)
+    buffer.write_string(0, 0, "hi")
+    buffer.cursor_col, buffer.cursor_row = 2, 0
+    snap = buffer.snapshot()
+    buffer.clear()
+    buffer.restore(snap)
+    assert "".join(buffer.get_cell(c, 0).char for c in range(5)) == "hi   "
+    assert (buffer.cursor_col, buffer.cursor_row) == (2, 0)
+
+
+def test_restore_after_grid_grew_pads_with_blank_cells():
+    buffer = ScreenBuffer(3, 2)
+    buffer.write_string(0, 0, "AB")
+    snap = buffer.snapshot()
+    buffer.resize(5, 3)  # grid changed size while the snapshot was held elsewhere
+    buffer.restore(snap)
+    assert "".join(buffer.get_cell(c, 0).char for c in range(5)) == "AB   "
+    assert buffer.get_cell(0, 2).char == " "  # new row beyond the old grid is blank, not an IndexError
+
+
+def test_restore_after_grid_shrank_clips_and_clamps_cursor():
+    buffer = ScreenBuffer(5, 3)
+    buffer.write_string(0, 0, "ABCDE")
+    buffer.cursor_col, buffer.cursor_row = 4, 2
+    snap = buffer.snapshot()
+    buffer.resize(3, 1)
+    buffer.restore(snap)  # should not raise despite the smaller grid
+    assert "".join(buffer.get_cell(c, 0).char for c in range(3)) == "ABC"
+    assert buffer.cursor_col <= 2
+    assert buffer.cursor_row <= 0
+
+
+def test_snapshot_restore_round_trips_cursor_enabled():
+    buffer = ScreenBuffer(5, 2)
+    buffer.cursor_enabled = False
+    snap = buffer.snapshot()
+    buffer.cursor_enabled = True
+    buffer.restore(snap)
+    assert buffer.cursor_enabled is False
+
+
+def test_restore_also_restores_the_write_history_for_future_resizes():
+    """Regression test: a menu overlay clear()s the buffer (which wipes _writes)
+    before rendering itself, then restore() brings the underlying content back.
+    Without restoring _writes too, a resize() after that point would replay the
+    overlay's stale writes on top of whatever the restored screen rendered next,
+    corrupting the display (this is exactly what happened when dragging the
+    window bigger while the settings menu was open)."""
+    buffer = ScreenBuffer(20, 5)
+    buffer.write_string(0, 0, "Menu")
+    buffer.write_string(0, 2, "> Back to Shell")
+    snap = buffer.snapshot()
+
+    buffer.clear()  # simulates a submenu's on_push()
+    buffer.write_string(0, 0, "Settings")
+    buffer.write_string(0, 2, "> Window Size: < 2560x1440 >")
+
+    buffer.restore(snap)  # simulates the submenu's on_pop()
+    buffer.write_string(0, 2, "> Back to Shell")  # simulates a re-render after restore (e.g. arrow key)
+
+    buffer.resize(20, 6)  # simulates dragging the window bigger
+    assert "".join(buffer.get_cell(c, 0).char for c in range(20)).rstrip() == "Menu"
+    assert "".join(buffer.get_cell(c, 2).char for c in range(20)).rstrip() == "> Back to Shell"
+
+
 def test_set_default_color_changes_future_writes():
     buffer = ScreenBuffer(5, 2)
     buffer.set_default_color(fg=(9, 9, 9))
@@ -328,6 +432,18 @@ def test_renderer_skips_rebuild_when_not_dirty():
     buffer.write_string(0, 0, "x")
     renderer.render(200, 100)
     assert len(calls) == 2
+
+
+def test_renderer_set_font_atlas_swaps_atlas_and_clears_block_cache():
+    renderer, buffer, atlas = make_renderer(cols=10, rows=5)
+    renderer._get_block("A", (1, 2, 3), (4, 5, 6))
+    assert len(renderer._block_cache) == 1
+
+    new_atlas = make_atlas(char_width=16, char_height=32)
+    renderer.set_font_atlas(new_atlas)
+    assert renderer.font_atlas is new_atlas
+    assert renderer._block_cache == {}
+    assert buffer.dirty is True
 
 
 def test_renderer_rebuilds_pixel_buffer_when_screen_buffer_resizes():

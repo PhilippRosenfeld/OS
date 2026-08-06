@@ -8,12 +8,27 @@ logger = logging.getLogger(__name__)
 
 class InputHandler:
     
-    def __init__(self, buffer: ScreenBuffer, on_submit: Callable[[str], None] | None = None) -> None:
+    def __init__(self, buffer: ScreenBuffer, on_submit: Callable[[str], None] | None = None, get_prompt: Callable[[], str] | None = None) -> None:
         self.buffer = buffer
         self.current_line: str = ""
         self._on_submit = on_submit
+        self._get_prompt = get_prompt
         self.insert_mode: bool = False
         self.line_cursor: int = 0
+        self.start_line()
+
+    def start_line(self) -> None:
+        """Write the prompt (e.g. 'user@cwd > ') at the start of the current row, if a
+        get_prompt callback was given, and position the cursor right after it, ready
+        for input. Called for the very first line and after every submitted line --
+        but the caller decides *when* it's safe to call this (e.g. ShellScreen skips
+        it if the submitted command switched to a different screen, since writing
+        here would otherwise clobber whatever that screen just rendered)."""
+        prompt = self._get_prompt() if self._get_prompt is not None else ""
+        if prompt:
+            self.buffer.write_string(col=0, row=self.buffer.cursor_row, string=prompt)
+        self.buffer.cursor_col = len(prompt)
+        self.line_cursor = 0
         self._sync_cursor()
 
     def _sync_cursor(self) -> None:
@@ -171,7 +186,8 @@ class InputHandler:
             
 
     def _handle_enter(self):
-        """Handles enter key presses."""
+        """Handles enter key presses. Leaves writing the prompt for the next line to
+        start_line() -- see its docstring for why that's the caller's decision."""
         logger.debug(f"INPUT: 'enter', Current Line='{self.current_line}")
         self._advance_row(1)
         self.buffer.cursor_col = 0
@@ -181,4 +197,3 @@ class InputHandler:
 
         self.current_line = ""
         self.line_cursor = 0
-        self._sync_cursor()

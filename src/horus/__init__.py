@@ -40,13 +40,17 @@ def main() -> None:
         screen=window.buffer,
         events=bus,
         screens=screens,
+        window=window,
     )
 
     def on_submit(line: str) -> None:
         kernel.execute(line, context)
 
-    input_handler = InputHandler(window.buffer, on_submit=on_submit)
-    screens.push(ShellScreen(input_handler))
+    def get_prompt() -> str:
+        return f"{context.user}@{context.cwd} > "
+
+    input_handler = InputHandler(window.buffer, on_submit=on_submit, get_prompt=get_prompt)
+    screens.push(ShellScreen(input_handler, screens))
 
     window.set_text_handler(
         on_text=screens.handle_text,

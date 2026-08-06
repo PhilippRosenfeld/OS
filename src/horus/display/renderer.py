@@ -69,6 +69,13 @@ class Renderer:
         self._display_size = (display_width, display_height)
 
 
+    def set_font_atlas(self, font_atlas: FontAtlas) -> None:
+        """Swap in a new FontAtlas (e.g. after a font or font-size change) and drop
+        cached glyph blocks, which would otherwise be the wrong pixel dimensions."""
+        self.font_atlas = font_atlas
+        self._block_cache = {}
+        self.screen_buffer.dirty = True
+
     def _ensure_pixel_buffer_size(self) -> bool:
         """Reallocate the pixel buffer/texture if the ScreenBuffer's grid size has changed (e.g. after a window resize). Returns True if a reallocation happened."""
         pixel_width = self.screen_buffer.cols * self.font_atlas.char_width

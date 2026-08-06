@@ -20,8 +20,9 @@ _cd_parser = _build_cd_parser()
 
 def _print_node(ctx, node, show_meta: bool) -> None:
     type = "DIRECTORY" if node.type is NodeType.DIRECTORY else "FILE"
+    hidden = "H" if node.hidden else "V"
     if show_meta:
-        ctx.write_line(f"{node.permissions}   {node.owner}   {type}   {node.size} bytes   {node.created_at}   {node.modified_at}   {node.name}")
+        ctx.write_line(f"{node.permissions}   {node.owner}   {type}   {node.size} bytes   {node.created_at}   {node.modified_at}   {hidden}   {node.name}")
     else:
         ctx.write_line(f"{node.permissions}   {node.owner}   {type}   {node.name}")
 

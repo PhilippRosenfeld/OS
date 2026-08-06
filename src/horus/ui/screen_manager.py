@@ -14,11 +14,15 @@ class ScreenManager:
         screen.on_push()
 
     def pop(self) -> None:
-        """Deactivate the current screen and return to whatever was below it. No-op if empty."""
+        """Deactivate the current screen and return to whatever was below it. No-op if empty.
+        Notifies the screen that becomes active again via on_resume(), so it can e.g. redraw
+        anything it would normally only draw once on_push()."""
         if not self._stack:
             return
         screen = self._stack.pop()
         screen.on_pop()
+        if self._stack:
+            self._stack[-1].on_resume()
 
     @property
     def active(self) -> Screen | None:
