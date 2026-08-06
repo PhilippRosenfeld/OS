@@ -15,4 +15,14 @@ class Node:
     created_at: datetime = field(default_factory=datetime.now)
     modified_at: datetime = field(default_factory=datetime.now)
     hidden: bool = False
+    protected: bool = False
     size: int = 0
+    
+    
+class ProtectedFileError(Exception):
+    """Raised when attempting to remove or modify a protected file or directory,
+    or to create/remove an entry inside a protected directory without force=True."""
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+        super().__init__(message)

@@ -138,10 +138,10 @@ class InputHandler:
                 self.line_cursor = len(self.current_line)
             
             case pyglet.window.key.MOTION_PREVIOUS_PAGE:  # Page Up: look further back into scrollback history
-                self.buffer.scroll_view(self.buffer.rows // 2)
+                self.buffer.scroll_view(self.buffer.rows // 3)
 
             case pyglet.window.key.MOTION_NEXT_PAGE:  # Page Down: move back toward the live view
-                self.buffer.scroll_view(-(self.buffer.rows // 2))
+                self.buffer.scroll_view(-(self.buffer.rows // 3))
 
             case pyglet.window.key.MOTION_NEXT_WORD:
                 self._adjust_cursor(self._next_word_boundary() - self.line_cursor)

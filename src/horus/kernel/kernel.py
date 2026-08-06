@@ -50,4 +50,5 @@ class Kernel:
             )
         )
 
-        logger.info(f"CTX: ID={ctx.session_id}, USER={ctx.user}, CWD={ctx.cwd}, FS={ctx.fs} | Executed Command '{command_name}', args: {argv}")
+        fs_name = type(ctx.fs).__name__ if ctx.fs is not None else "None"
+        logger.info(f"CTX: ID={ctx.session_id}, USER={ctx.user}, CWD={ctx.cwd}, FS={fs_name} | Executed Command '{command_name}', args: {argv}")

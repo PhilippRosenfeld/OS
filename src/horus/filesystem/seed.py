@@ -7,6 +7,7 @@ def seed_minimal(fs: VFS) -> None:
     the Context is built."""
     fs.mkdir("/home")
     fs.mkdir("/home/hidden", hidden=True)
+    fs.mkdir("/home/protected", protected =True)
     fs.mkdir("/home/root")
     fs.mkdir("/home/tmp")
     fs.write_file("/home/root/readme.txt", "welcome to horus.\n")

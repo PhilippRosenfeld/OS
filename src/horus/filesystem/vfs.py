@@ -31,4 +31,8 @@ class VFS(ABC):
     @abstractmethod
     def read_file(self, path: str) -> str:
         pass
+    
+    @abstractmethod
+    def remove(self, path: str) -> None:
+        pass
 

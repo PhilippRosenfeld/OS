@@ -8,7 +8,9 @@ from horus.kernel.kernel import Kernel
 from horus.kernel.registry import Registry, registry
 from horus.kernel.commands.cmd_text import echo
 from horus.kernel.commands.cmd_misc import color
+from horus.kernel.commands.cmd_fs import ls
 from horus.display.colors import NAMED_COLORS
+from horus.filesystem.backend.memory import InMemoryVFS
 
 
 def make_context(cols=20, rows=5):
@@ -203,3 +205,18 @@ def test_color_with_no_arguments_is_a_no_op():
     original_fg = buffer.default_fg
     color(ctx, [])
     assert buffer.default_fg == original_fg
+
+
+# --- ls command ---
+
+def test_ls_with_meta_shows_timestamps_without_fractional_seconds():
+    buffer = ScreenBuffer(80, 10)
+    fs = InMemoryVFS()
+    fs.mkdir("/home")
+    fs.write_file("/home/notes", "hi")  # no '.' in the name, so any '.' in the output can only be a timestamp
+    assert fs.get_meta("/home/notes").created_at.microsecond != 0  # backend still stores full precision
+    ctx = Context(session_id="s", user="root", cwd="/home", fs=fs, screen=buffer)
+
+    ls(ctx, ["-m"])
+
+    assert "." not in full_text(buffer)  # no fractional-second remainder anywhere in the output
