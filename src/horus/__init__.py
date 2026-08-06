@@ -6,10 +6,11 @@ from horus.kernel.kernel import Kernel
 from horus.kernel.registry import registry
 from horus.session.context import Context
 from horus.events.bus import EventBus
-from horus.filesystem.backend.memory import InMemoryVFS
+from horus.filesystem.backend.sqlite import SQLiteVFS
 from horus.filesystem.seed import seed_minimal
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.shell_screen import ShellScreen
+from horus.paths import SAVES_DIR
 
 import horus.kernel.commands
 import logging
@@ -27,8 +28,9 @@ def main() -> None:
 
     bus = EventBus()
     kernel = Kernel(registry=registry, bus=bus)
-    fs = InMemoryVFS()
-    seed_minimal(fs)
+    fs = SQLiteVFS(SAVES_DIR / "horus.db")
+    if fs.is_empty():
+        seed_minimal(fs)
 
     screens = ScreenManager()
 

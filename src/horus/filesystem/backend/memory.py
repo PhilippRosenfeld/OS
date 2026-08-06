@@ -1,5 +1,6 @@
 from horus.filesystem.vfs import VFS
 from horus.filesystem.node import Node, NodeType
+from horus.filesystem.path_utils import resolve_path as _resolve_path
 
 class _TreeNode:
 
@@ -15,23 +16,7 @@ class InMemoryVFS(VFS):
     # --- path handling -------------------------------------------------------
 
     def resolve_path(self, path: str, cwd: str) -> str:
-        """Combine cwd + path, collapse '.', '..', return a normalized
-        absolute path starting with '/'."""
-        if not cwd:
-            raise ValueError(f"cwd must be provided")
-        if not path:
-            return cwd
-        base = path if path.startswith("/") else cwd + "/" + path
-        segments = [seg for seg in base.split("/") if seg not in ("", ".")]
-        stack: list[str] = []
-        for seg in segments:
-            if seg == "..":
-                if stack:
-                    stack.pop()
-                # else: '..' past root — silently ignore, stay at root
-            else:
-                stack.append(seg)
-        return "/" + "/".join(stack)
+        return _resolve_path(path, cwd)
 
     def _walk(self, path:str) -> _TreeNode | None:
         """Internal: traverse the tree from root along the segments of
