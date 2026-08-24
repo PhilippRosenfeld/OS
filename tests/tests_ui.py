@@ -6,6 +6,7 @@ from horus.ui.shell_screen import ShellScreen
 from horus.ui.menu_screen import MenuScreen, MenuOption
 from horus.ui.settings_screen import SettingScreen, SettingOption
 from horus.shell.input_handler import InputHandler
+from horus.session.history import CommandHistory
 
 key = pyglet.window.key
 
@@ -32,7 +33,8 @@ def test_screen_manager_push_makes_screen_active_and_calls_on_push():
 def test_screen_manager_pop_restores_previous_screen():
     buffer = ScreenBuffer(20, 5)
     manager = ScreenManager()
-    handler = InputHandler(buffer)
+    history = CommandHistory()
+    handler = InputHandler(buffer, history)
     shell = ShellScreen(handler, manager)
     manager.push(shell)
     menu = MenuScreen(buffer, "T", [MenuOption("A", lambda: None)], manager)
@@ -51,7 +53,8 @@ def test_screen_manager_pop_on_empty_stack_is_a_no_op():
 def test_shell_screen_writes_prompt_on_push():
     buffer = ScreenBuffer(20, 5)
     manager = ScreenManager()
-    handler = InputHandler(buffer, get_prompt=lambda: "> ")
+    history = CommandHistory()
+    handler = InputHandler(buffer, history, get_prompt=lambda: "> ")
     manager.push(ShellScreen(handler, manager))
     assert row_text(buffer, 0) == ">"
 
@@ -59,7 +62,8 @@ def test_shell_screen_writes_prompt_on_push():
 def test_shell_screen_redraws_prompt_after_plain_command():
     buffer = ScreenBuffer(20, 5)
     manager = ScreenManager()
-    handler = InputHandler(buffer, get_prompt=lambda: "> ")
+    history = CommandHistory()
+    handler = InputHandler(buffer, history, get_prompt=lambda: "> ")
     manager.push(ShellScreen(handler, manager))
     manager.handle_text("hi")
     manager.handle_enter()  # no on_submit given, so nothing switches screens
@@ -78,7 +82,8 @@ def test_shell_screen_does_not_clobber_a_screen_opened_from_enter():
             menu = MenuScreen(buffer, "Menu", [MenuOption("A", lambda: None)], manager)
             manager.push(menu)
 
-    handler = InputHandler(buffer, on_submit=on_submit, get_prompt=lambda: "> ")
+    history = CommandHistory()
+    handler = InputHandler(buffer, history, on_submit=on_submit, get_prompt=lambda: "> ")
     shell = ShellScreen(handler, manager)
     manager.push(shell)
     manager.handle_text("horus")
@@ -90,7 +95,8 @@ def test_shell_screen_does_not_clobber_a_screen_opened_from_enter():
 def test_shell_screen_redraws_prompt_when_menu_above_it_closes():
     buffer = ScreenBuffer(20, 5)
     manager = ScreenManager()
-    handler = InputHandler(buffer, get_prompt=lambda: "> ")
+    history = CommandHistory()
+    handler = InputHandler(buffer, history, get_prompt=lambda: "> ")
     shell = ShellScreen(handler, manager)
     manager.push(shell)
     menu = MenuScreen(buffer, "Menu", [MenuOption("Back", lambda: manager.pop())], manager)
@@ -105,7 +111,8 @@ def test_shell_screen_redraws_prompt_when_menu_above_it_closes():
 def test_screen_manager_only_forwards_to_top_screen():
     buffer = ScreenBuffer(20, 5)
     manager = ScreenManager()
-    handler = InputHandler(buffer)
+    history = CommandHistory()
+    handler = InputHandler(buffer, history)
     manager.push(ShellScreen(handler, manager))
     manager.handle_text("hi")
     assert handler.current_line == "hi"

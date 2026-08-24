@@ -3,13 +3,15 @@ import pytest
 
 from horus.display.screen_buffer import ScreenBuffer
 from horus.shell.input_handler import InputHandler
+from horus.session.history import CommandHistory
 
 key = pyglet.window.key
 
 
 def make(cols=20, rows=5):
     buffer = ScreenBuffer(cols, rows)
-    handler = InputHandler(buffer)
+    history = CommandHistory()
+    handler = InputHandler(buffer, history)
     return handler, buffer
 
 
@@ -231,7 +233,8 @@ def test_page_up_down_move_view_offset():
 def test_enter_calls_on_submit_with_current_line_and_resets_it():
     submitted = []
     buffer = ScreenBuffer(20, 5)
-    handler = InputHandler(buffer, on_submit=submitted.append)
+    history = CommandHistory()
+    handler = InputHandler(buffer, history, on_submit=submitted.append)
     handler._handle_text("hello")
     handler._handle_enter()
     assert submitted == ["hello"]
@@ -246,7 +249,8 @@ def test_enter_advances_cursor_before_submit_so_output_lands_below():
     def on_submit(line):
         seen_rows.append(buffer.cursor_row)
 
-    handler = InputHandler(buffer, on_submit=on_submit)
+    history = CommandHistory()
+    handler = InputHandler(buffer, history, on_submit=on_submit)
     handler._handle_text("cmd")
     row_before_enter = buffer.cursor_row
     handler._handle_enter()
@@ -255,7 +259,8 @@ def test_enter_advances_cursor_before_submit_so_output_lands_below():
 
 def test_enter_without_submit_callback_does_not_raise():
     buffer = ScreenBuffer(20, 5)
-    handler = InputHandler(buffer)
+    history = CommandHistory()
+    handler = InputHandler(buffer, history)
     handler._handle_text("hi")
     handler._handle_enter()  # should not raise
     assert handler.current_line == ""
@@ -271,7 +276,8 @@ def test_no_prompt_by_default_input_starts_at_column_zero():
 
 def test_get_prompt_is_written_at_construction_and_offsets_the_cursor():
     buffer = ScreenBuffer(20, 5)
-    handler = InputHandler(buffer, get_prompt=lambda: "root@/home > ")
+    history = CommandHistory()
+    handler = InputHandler(buffer, history, get_prompt=lambda: "root@/home > ")
     assert row_text(buffer, 0).startswith("root@/home > ")
     assert buffer.cursor_col == len("root@/home > ")
     assert handler.line_cursor == 0
@@ -279,7 +285,8 @@ def test_get_prompt_is_written_at_construction_and_offsets_the_cursor():
 
 def test_typed_text_lands_after_the_prompt():
     buffer = ScreenBuffer(20, 5)
-    handler = InputHandler(buffer, get_prompt=lambda: "> ")
+    history = CommandHistory()
+    handler = InputHandler(buffer, history, get_prompt=lambda: "> ")
     handler._handle_text("ls")
     assert row_text(buffer, 0).startswith("> ls")
     assert handler.current_line == "ls"  # the prompt itself is never part of current_line
@@ -288,7 +295,8 @@ def test_typed_text_lands_after_the_prompt():
 def test_prompt_reflects_the_callback_live_e_g_after_cd():
     state = {"cwd": "/home"}
     buffer = ScreenBuffer(30, 5)
-    handler = InputHandler(buffer, get_prompt=lambda: f"root@{state['cwd']} > ")
+    history = CommandHistory()
+    handler = InputHandler(buffer, history, get_prompt=lambda: f"root@{state['cwd']} > ")
     state["cwd"] = "/etc"
     handler.start_line()
     assert row_text(buffer, 0).startswith("root@/etc > ")
@@ -296,7 +304,8 @@ def test_prompt_reflects_the_callback_live_e_g_after_cd():
 
 def test_start_line_after_enter_draws_prompt_on_the_new_row():
     buffer = ScreenBuffer(20, 5)
-    handler = InputHandler(buffer, get_prompt=lambda: "> ")
+    history = CommandHistory()
+    handler = InputHandler(buffer, history, get_prompt=lambda: "> ")
     handler._handle_text("cmd")
     handler._handle_enter()
     handler.start_line()
@@ -307,7 +316,8 @@ def test_start_line_after_enter_draws_prompt_on_the_new_row():
 
 def test_backspace_and_home_cannot_reach_into_the_prompt():
     buffer = ScreenBuffer(20, 5)
-    handler = InputHandler(buffer, get_prompt=lambda: "> ")
+    history = CommandHistory()
+    handler = InputHandler(buffer, history, get_prompt=lambda: "> ")
     handler._handle_text("x")
     handler._handle_motion(key.MOTION_BACKSPACE)
     handler._handle_motion(key.MOTION_BACKSPACE)  # already empty, must be a no-op
