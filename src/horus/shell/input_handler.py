@@ -150,10 +150,10 @@ class InputHandler:
                 self.line_cursor = len(self.current_line)
             
             case pyglet.window.key.MOTION_PREVIOUS_PAGE:  # Page Up: look further back into scrollback history
-                self.buffer.scroll_view(self.buffer.rows // 3)
+                self.buffer.scroll_view(self.buffer.rows // 2)
 
             case pyglet.window.key.MOTION_NEXT_PAGE:  # Page Down: move back toward the live view
-                self.buffer.scroll_view(-(self.buffer.rows // 3))
+                self.buffer.scroll_view(-(self.buffer.rows // 2))
 
             case pyglet.window.key.MOTION_NEXT_WORD:
                 self._adjust_cursor(self._next_word_boundary() - self.line_cursor)
@@ -195,7 +195,12 @@ class InputHandler:
             self.current_line = self.current_line[:start] + tail
             self._adjust_cursor(start - self.line_cursor)
             self.buffer.write_string(col=self.buffer.cursor_col, row=self.buffer.cursor_row, string=tail + " " * deleted)
-            
+        
+        elif symbol == pyglet.window.key.UP and ctrl_held:
+            self.buffer.scroll_view(1)
+
+        elif symbol == pyglet.window.key.DOWN and ctrl_held:
+            self.buffer.scroll_view(-1)
 
     def _handle_enter(self):
         """Handles enter key presses. Leaves writing the prompt for the next line to
