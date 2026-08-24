@@ -5,6 +5,7 @@ from horus.utils.logging_setup import setup_logging
 from horus.kernel.kernel import Kernel
 from horus.kernel.registry import registry
 from horus.session.context import Context
+from horus.session.history import CommandHistory
 from horus.events.bus import EventBus
 from horus.filesystem.backend.sqlite import SQLiteVFS
 from horus.filesystem.seed import seed_minimal
@@ -51,7 +52,8 @@ def main() -> None:
     def get_prompt() -> str:
         return f"{context.user}@{context.cwd} > "
 
-    input_handler = InputHandler(window.buffer, on_submit=on_submit, get_prompt=get_prompt)
+    history = CommandHistory()
+    input_handler = InputHandler(window.buffer, history, on_submit=on_submit, get_prompt=get_prompt)
     screens.push(ShellScreen(input_handler, screens))
 
     window.set_text_handler(

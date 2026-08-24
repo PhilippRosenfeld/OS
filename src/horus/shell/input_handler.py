@@ -1,5 +1,6 @@
 from typing import Callable
 from horus.display.screen_buffer import ScreenBuffer
+from horus.session.history import CommandHistory
 
 import pyglet
 import logging
@@ -8,8 +9,9 @@ logger = logging.getLogger(__name__)
 
 class InputHandler:
     
-    def __init__(self, buffer: ScreenBuffer, on_submit: Callable[[str], None] | None = None, get_prompt: Callable[[], str] | None = None) -> None:
+    def __init__(self, buffer: ScreenBuffer, history: CommandHistory, on_submit: Callable[[str], None] | None = None, get_prompt: Callable[[], str] | None = None) -> None:
         self.buffer = buffer
+        self.history = history
         self.current_line: str = ""
         self._on_submit = on_submit
         self._get_prompt = get_prompt
@@ -128,7 +130,17 @@ class InputHandler:
                 if self.line_cursor >= len(self.current_line):
                     return
                 self._adjust_cursor(1)
-                
+
+            case pyglet.window.key.MOTION_UP:
+                entry = self.history.previous(self.current_line)
+                if entry is not None:
+                    self._replace_current_line(entry)
+
+            case pyglet.window.key.MOTION_DOWN:
+                entry = self.history.next()
+                if entry is not None:
+                    self._replace_current_line(entry)
+   
             case pyglet.window.key.MOTION_BEGINNING_OF_LINE:
                 self._adjust_cursor(-self.line_cursor)
                 self.line_cursor = 0
@@ -192,8 +204,27 @@ class InputHandler:
         self._advance_row(1)
         self.buffer.cursor_col = 0
         self._sync_cursor()
+
+        if self.current_line.strip():
+            self.history.add(self.current_line)
+
         if self._on_submit is not None:
             self._on_submit(self.current_line)
 
         self.current_line = ""
         self.line_cursor = 0
+        self._sync_cursor()
+
+    def _replace_current_line(self, new_line: str) -> None:
+        old_len = len(self.current_line)
+        start_col = self.buffer.cursor_col - self.line_cursor
+
+        # Overwrite the old line's screen area with blanks first
+        self.buffer.write_string(col=start_col, row=self.buffer.cursor_row, string=" " * old_len)
+
+        self.current_line = new_line
+        self.buffer.write_string(col=start_col, row=self.buffer.cursor_row, string=new_line)
+
+        self.buffer.cursor_col = start_col
+        self.line_cursor = 0
+        self._adjust_cursor(len(new_line))
