@@ -1,6 +1,35 @@
 from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
 from horus.kernel.registry import command
 from horus.filesystem.node import NodeType, ProtectedFileError
+from horus.filesystem.permissions import AccessDeniedError
+import re
+
+_FLAG_ALIASES = {
+    "p": "protected", "protected": "protected",
+    "h": "hidden", "hidden": "hidden",
+    "i": "immutable", "immutable": "immutable",
+}
+
+# One sign followed by either one long name, or a run of one-letter shorthands.
+_FLAG_GROUP = re.compile(r"([+-])(protected|hidden|immutable|[phi]+)")
+
+def _parse_flags(flags_str: str) -> dict[str, bool]:
+    """Parses strings like '+p+h-i', '+pi-h', or '+protected-hidden' into
+    {'protected': True, 'hidden': True, 'immutable': False}."""
+    matches = _FLAG_GROUP.findall(flags_str)
+    consumed = "".join(f"{sign}{body}" for sign, body in matches)
+    if consumed != flags_str:
+        raise ValueError(f"invalid flag syntax: '{flags_str}'")
+
+    updates: dict[str, bool] = {}
+    for sign, body in matches:
+        value = (sign == "+")
+        if body in ("protected", "hidden", "immutable"):
+            updates[body] = value
+        else:
+            for letter in body:
+                updates[_FLAG_ALIASES[letter]] = value
+    return updates
 
 def _build_ls_parser() -> CommandArgumentParser:
     parser = CommandArgumentParser(prog="ls", add_help=True, description="List current directory content")
@@ -26,19 +55,34 @@ def _build_rm_parser() -> CommandArgumentParser:
     parser.add_argument("path", nargs=1)
     return parser
 
+def _build_chmod_parser() -> CommandArgumentParser:
+    parser = CommandArgumentParser(prog="chmod", add_help=True,
+                                    description="Change file/directory permissions")
+    parser.add_argument("mode", help="3-digit octal mode, e.g. 755")
+    parser.add_argument("path")
+    return parser
+
+def _build_chattr_parser() -> CommandArgumentParser:
+    parser = CommandArgumentParser(prog="chattr", add_help=False,
+                                    description="Toggle protected/hidden/immutable flags")
+    return parser
+
 _ls_parser = _build_ls_parser()
 _cd_parser = _build_cd_parser()
 _mkdir_parser = _build_mkdir_parser()
 _rm_parser = _build_rm_parser()
+_chmod_parser = _build_chmod_parser()
+_chattr_parser = _build_chattr_parser()
 
 def _print_node(ctx, node, show_meta: bool) -> None:
     type = "DIRECTORY" if node.type is NodeType.DIRECTORY else "FILE"
     hidden = "H" if node.hidden else "V"
     protected = "P" if node.protected else "U"
+    immutable = "I" if node.immutable else "M"
     if show_meta:
         created_at = node.created_at.isoformat(sep=" ", timespec="seconds")
         modified_at = node.modified_at.isoformat(sep=" ", timespec="seconds")
-        ctx.write_line(f"{node.permissions}    {hidden}-{protected}    {node.owner}   {type}   {node.size} bytes   C:{created_at}   M:{modified_at}   {node.name}")
+        ctx.write_line(f"{node.permissions}    {hidden}-{protected}-{immutable}    {node.owner}   {type}   {node.size} bytes   C:{created_at}   M:{modified_at}   {node.name}")
     else:
         ctx.write_line(f"{node.permissions}   {node.owner}   {type}   {node.name}")
 
@@ -128,3 +172,53 @@ def rm(ctx, argv: list[str]) -> None:
         ctx.write_line(f"rm: cannot remove '{args.path[0]}': No such file or directory")
     except ProtectedFileError:
         ctx.write_line(f"rm: cannot remove '{args.path[0]}': File is protected")
+
+
+@command("chmod", help_text="Change file/directory permissions")
+def chmod(ctx, argv: list[str]) -> None:
+    try:
+        args = _chmod_parser.parse_args(argv)
+    except CommandParseError as e:
+        ctx.write_line(e.message or e.usage)
+        return
+
+    path = ctx.resolve_path(args.path)
+
+    try: 
+        ctx.fs.chmod(path, mode=args.mode, user=ctx.effective_user)
+    except ValueError as e:
+        ctx.write_line(f"chmod: {e}")
+    except FileNotFoundError as e:
+        ctx.write_line(f"chmod: cannot access '{args.path}': No such file or directory")
+    except AccessDeniedError as e:
+        ctx.write_line(f"chmod: changing permissions of '{args.path}': Operation not permitted")
+
+@command("chattr", help_text="Toggle protected/hidden/immutable flags")
+def chattr(ctx, argv: list[str]) -> None:
+    if not argv or argv[0] in ("-h", "--help"):
+        ctx.write_line(_CHATTR_HELP)
+        return
+
+    if len(argv) != 2:
+        ctx.write_line("usage: chattr <flags> <path>")
+        return
+
+    flags_str, raw_path = argv   # beide direkt aus argv, keine args.flags/args.path mehr
+
+    try:
+        updates = _parse_flags(flags_str)
+    except ValueError as e:
+        ctx.write_line(f"chattr: {e}")
+        return
+
+    if not updates:
+        ctx.write_line("chattr: no flags given, e.g. +p, -hidden, +p+h-i")
+        return
+
+    path = ctx.resolve_path(raw_path)
+    try:
+        ctx.fs.set_attributes(path, user=ctx.effective_user, **updates)
+    except FileNotFoundError:
+        ctx.write_line(f"chattr: cannot access '{raw_path}': No such file or directory")
+    except AccessDeniedError:
+        ctx.write_line(f"chattr: changing attributes of '{raw_path}': Operation not permitted")

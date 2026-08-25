@@ -135,3 +135,23 @@ class InMemoryVFS(VFS):
 
         parent, name = self._parent_and_name(path)
         del parent.children[name]
+
+    def chmod(self, path: str, mode: str, user: str) -> None:
+        node = self._walk(path)
+        if node is None:
+            raise FileNotFoundError(path)
+        require_metadata_change(node.meta, user, path)
+        node.meta.permissions = octal_to_permissions(mode)
+
+    def set_attributes(self, path: str, user: str, protected: bool = None,
+                        hidden: bool = None, immutable: bool = None) -> None:
+        node = self._walk(path)
+        if node is None:
+            raise FileNotFoundError(path)
+        require_metadata_change(node.meta, user, path)
+        if protected is not None:
+            node.meta.protected = protected
+        if hidden is not None:
+            node.meta.hidden = hidden
+        if immutable is not None:
+            node.meta.immutable = immutable        

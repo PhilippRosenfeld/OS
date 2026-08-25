@@ -15,7 +15,8 @@ class Node:
     created_at: datetime = field(default_factory=datetime.now)
     modified_at: datetime = field(default_factory=datetime.now)
     hidden: bool = False
-    protected: bool = False
+    protected: bool = False #File only changeable by sudo
+    immutable: bool = False #blocks all changes
     size: int = 0
     
     

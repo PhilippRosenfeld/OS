@@ -36,3 +36,13 @@ class VFS(ABC):
     def remove(self, path: str,  user: str) -> None:
         pass
 
+    @abstractmethod
+    def chmod(self, path: str, user: str, mode: str) -> None:
+        """Mode is a 3-digit octal string, e.g. '755'."""
+        pass
+
+    @abstractmethod
+    def set_attributes(self, path: str, user: str, protected: bool = None,
+                        hidden: bool = None, immutable: bool = None) -> None:
+        """Updates only the attributes explicitly passed (non-None)."""
+        pass

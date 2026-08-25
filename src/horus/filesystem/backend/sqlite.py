@@ -5,7 +5,7 @@ from pathlib import Path
 from horus.filesystem.vfs import VFS
 from horus.filesystem.node import Node, NodeType, ProtectedFileError
 from horus.filesystem.path_utils import resolve_path as _resolve_path
-from horus.filesystem.permissions import require_write, can_write, AccessDeniedError
+from horus.filesystem.permissions import require_write, can_write, AccessDeniedError, require_metadata_change, octal_to_permissions
 
 class SQLiteVFS(VFS):
     """SQLite-backed filesystem. Persists across app restarts: the schema is
@@ -41,6 +41,7 @@ class SQLiteVFS(VFS):
                 modified_at TEXT NOT NULL,
                 hidden INTEGER NOT NULL DEFAULT 0,
                 protected INTEGER NOT NULL DEFAULT 0,
+                immutable INTEGER NOT NULL DEFAULT 0,
                 size INTEGER NOT NULL DEFAULT 0,
                 content TEXT
             )
@@ -49,6 +50,8 @@ class SQLiteVFS(VFS):
         existing_columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(nodes)")}
         if "protected" not in existing_columns:
             self._conn.execute("ALTER TABLE nodes ADD COLUMN protected INTEGER NOT NULL DEFAULT 0")
+        if "immutable" not in existing_columns:
+            self._conn.execute("ALTER TABLE nodes ADD COLUMN immutable INTEGER NOT NULL DEFAULT 0")
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_parent_path ON nodes(parent_path)")
         now = self._now()
         self._conn.execute(
@@ -73,6 +76,7 @@ class SQLiteVFS(VFS):
             modified_at=datetime.fromisoformat(row["modified_at"]),
             hidden=bool(row["hidden"]),
             protected=bool(row["protected"]),
+            immutable=bool(row["immutable"]),
             size=row["size"],
         )
 
@@ -127,7 +131,7 @@ class SQLiteVFS(VFS):
             raise FileNotFoundError(path)
         return row["content"] or ""
 
-    def write_file(self, path: str, content: str, user: str, protected: bool = False) -> None:
+    def write_file(self, path: str, content: str, user: str, protected: bool = False, immutable: bool = False) -> None:
         """Writes text to a file, creating it if it doesn't already exist.
 
         protected only takes effect when creating a new file -- rewriting an
@@ -155,14 +159,14 @@ class SQLiteVFS(VFS):
 
             self._conn.execute(
                 "INSERT INTO nodes (path, parent_path, name, type, owner, permissions, "
-                "created_at, modified_at, hidden, protected, size, content) "
-                "VALUES (?, ?, ?, 'file', ?, 'rwxr-xr-x', ?, ?, 0, ?, ?, ?)",
-                (path, parent_path, name, user, now, now, int(protected), len(content), content),
+                "created_at, modified_at, hidden, protected, immutable, size, content) "
+                "VALUES (?, ?, ?, 'file', ?, 'rwxr-xr-x', ?, ?, 0, ?, ?, ?, ?)",
+                (path, parent_path, name, user, now, now, int(protected), int(immutable), len(content), content),
             )
         self._conn.commit()
 
 
-    def mkdir(self, path: str, user: str, hidden: bool = False, protected: bool = False) -> None:
+    def mkdir(self, path: str, user: str, hidden: bool = False, protected: bool = False, immutable: bool = False) -> None:
         """Creates a directory at the given path."""
         parent_path = self._parent_path(path)
         parent_row = self._fetch(parent_path)
@@ -177,9 +181,9 @@ class SQLiteVFS(VFS):
         name = path.rsplit("/", 1)[-1]
         now = self._now()
         self._conn.execute(
-            "INSERT INTO nodes (path, parent_path, name, type, owner, permissions, created_at, modified_at, hidden, protected, size) "
-            "VALUES (?, ?, ?, 'directory', ?, 'rwxr-xr-x', ?, ?, ?, ?, 0)",
-            (path, parent_path, name, user, now, now, int(hidden), int(protected)),
+            "INSERT INTO nodes (path, parent_path, name, type, owner, permissions, created_at, modified_at, hidden, protected, immutable, size) "
+            "VALUES (?, ?, ?, 'directory', ?, 'rwxr-xr-x', ?, ?, ?, ?, ?, 0)",
+            (path, parent_path, name, user, now, now, int(hidden), int(protected), int(immutable)),
         )
         self._conn.commit()
 
@@ -207,4 +211,45 @@ class SQLiteVFS(VFS):
                 raise OSError(f"Directory not empty: {path}")
 
         self._conn.execute("DELETE FROM nodes WHERE path = ?", (path,))
+        self._conn.commit()
+
+    def chmod(self, path: str, mode: str, user: str) -> None:
+        row = self._fetch(path)
+        if row is None:
+            raise FileNotFoundError(path)
+        node = self._row_to_node(row)
+        require_metadata_change(node, user, path)
+
+        new_permissions = octal_to_permissions(mode)
+        self._conn.execute(
+            "UPDATE nodes SET permissions = ?, modified_at = ? WHERE path = ?",
+            (new_permissions, self._now(), path),
+        )
+        self._conn.commit()
+
+    def set_attributes(self, path: str, user: str, protected: bool = None,
+                        hidden: bool = None, immutable: bool = None) -> None:
+        row = self._fetch(path)
+        if row is None:
+            raise FileNotFoundError(path)
+        node = self._row_to_node(row)
+        require_metadata_change(node, user, path)
+
+        updates, params = [], []
+        if protected is not None:
+            updates.append("protected = ?")
+            params.append(int(protected))
+        if hidden is not None:
+            updates.append("hidden = ?")
+            params.append(int(hidden))
+        if immutable is not None:
+            updates.append("immutable = ?")
+            params.append(int(immutable))
+        if not updates:
+            return
+
+        updates.append("modified_at = ?")
+        params.append(self._now())
+        params.append(path)
+        self._conn.execute(f"UPDATE nodes SET {', '.join(updates)} WHERE path = ?", params)
         self._conn.commit()
