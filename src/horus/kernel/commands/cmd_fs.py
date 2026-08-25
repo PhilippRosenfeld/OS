@@ -36,6 +36,7 @@ def _build_ls_parser() -> CommandArgumentParser:
     parser.add_argument("-a", "--all", action="store_true", help="Show all files, including directory entries and hidden files")
     parser.add_argument("-m", "--meta", action="store_true", help="Shows the metadata")
     parser.add_argument("-r", "--recursive", action="store_true", help="Recursively displays sub-directories.")
+    parser.add_argument("-R", "--tree", action="store_true", help="Show subdirectories treelike, indented")
     return parser
 
 def _build_cd_parser() -> CommandArgumentParser:
@@ -48,6 +49,7 @@ def _build_mkdir_parser() -> CommandArgumentParser:
     parser.add_argument("path")
     parser.add_argument("-p", "--protected", action="store_true", help="Makes directory protected")
     parser.add_argument("-H", "--hidden", action="store_true", help="Makes directory hidden")
+    parser.add_argument("-i", "--immutable", action="store_true", help="Makes directory immutable")
     return parser
 
 def _build_rm_parser() -> CommandArgumentParser:
@@ -86,6 +88,21 @@ def _print_node(ctx, node, show_meta: bool) -> None:
     else:
         ctx.write_line(f"{node.permissions}   {node.owner}   {type}   {node.name}")
 
+def _print_tree(ctx, fs, path: str, show_all: bool, depth: int = 0) -> None:
+    """Recursively writes a directory's contents with indentation showing
+    nesting depth. Called once per directory, not via list_dir(recursive=True),
+    so parent/child structure is preserved for the indentation."""
+    entries = fs.list_dir(path, show_all=show_all)
+    entries.sort(key=lambda n: n.name)
+
+    for entry in entries:
+        indent = "  " * depth
+        marker = "/" if entry.type == NodeType.DIRECTORY else ""
+        ctx.write_line(f"{indent}{entry.name}{marker}")
+
+        if entry.type == NodeType.DIRECTORY:
+            child_path = path.rstrip("/") + "/" + entry.name
+            _print_tree(ctx, fs, child_path, show_all, depth + 1)
 
 def _list_directory(ctx, path: str, args) -> None:
     """Lists one directory's contents, then (if args.recursive) descends into each
@@ -111,7 +128,10 @@ def ls(ctx, argv: list[str]) -> None:
         return
 
     try:
-        _list_directory(ctx, ctx.cwd, args)
+        if args.tree:
+            _print_tree(ctx, ctx.fs, ctx.cwd, show_all=args.all)
+        else:
+            _list_directory(ctx, ctx.cwd, args)
     except FileNotFoundError as e:
         ctx.write_line(f"ls: File not found: {e}")
         return
@@ -141,18 +161,18 @@ def mkdir(ctx, argv: list[str]) -> None:
         ctx.write_line(e.message or e.usage)
         return
 
-    path = ctx.resolve_path(argv[0])
+    path = ctx.resolve_path(args.path)
 
     try:
-        ctx.fs.mkdir(path, hidden=args.hidden, protected=args.protected)
+        ctx.fs.mkdir(path, user=ctx.effective_user, hidden=args.hidden, protected=args.protected, immutable=args.immutable)
     except FileExistsError:
-        ctx.write_line(f"mkdir: cannot create directory '{argv[0]}': File exists")
+        ctx.write_line(f"mkdir: cannot create directory '{args.path}': File exists")
     except ProtectedFileError:
-        ctx.write_line(f"mkdir: cannot create directory '{argv[0]}': Directory is protected")
+        ctx.write_line(f"mkdir: cannot create directory '{args.path}': Directory is protected")
     except (FileNotFoundError, NotADirectoryError) as e:
         ctx.write_line(f"mkdir: cannot create directory '{args.path}': {e}")
     except Exception as e:
-        ctx.write_line(f"mkdir: error creating directory '{argv[0]}': {e}")
+        ctx.write_line(f"mkdir: error creating directory '{args.path}': {e}")
         
         
 @command("rm", help_text="Remove a file or directory")

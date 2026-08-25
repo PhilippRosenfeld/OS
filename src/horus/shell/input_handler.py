@@ -18,6 +18,10 @@ class InputHandler:
         self.insert_mode: bool = False
         self.line_cursor: int = 0
         self.start_line()
+        self._pending_submit: Callable[[str], None] | None = None
+        self.masked: bool = False
+        self._sync_cursor()
+
 
     def start_line(self) -> None:
         """Write the prompt (e.g. 'user@cwd > ') at the start of the current row, if a
@@ -98,11 +102,11 @@ class InputHandler:
         if self.insert_mode:
             end = self.line_cursor + len(text)
             self.current_line = self.current_line[:self.line_cursor] + text + self.current_line[end:]
-            self.buffer.write_string(col=self.buffer.cursor_col, row=self.buffer.cursor_row, string=text)
+            self.buffer.write_string(col=self.buffer.cursor_col, row=self.buffer.cursor_row, string=self._display(text))
             self._adjust_cursor(len(text))
         else:
             tail = self.current_line[self.line_cursor:]
-            self.buffer.write_string(col=self.buffer.cursor_col, row=self.buffer.cursor_row, string=(text + tail))
+            self.buffer.write_string(col=self.buffer.cursor_col, row=self.buffer.cursor_row, string=self._display(text + tail))
             self.current_line = self.current_line[:self.line_cursor] + text + tail
             self._adjust_cursor(len(text))
 
@@ -119,7 +123,7 @@ class InputHandler:
                 tail = self.current_line[self.line_cursor:]
                 self.current_line = self.current_line[:self.line_cursor - 1] + tail
                 self._adjust_cursor(-1)
-                self.buffer.write_string(col=self.buffer.cursor_col, row=self.buffer.cursor_row, string=tail + " ")
+                self.buffer.write_string(col=self.buffer.cursor_col, row=self.buffer.cursor_row, string=self._display(tail) + " ")
                 
             case pyglet.window.key.MOTION_LEFT:
                 if self.line_cursor == 0:
@@ -176,15 +180,15 @@ class InputHandler:
                 return
             deleted = end - self.line_cursor
             tail = self.current_line[end:]
-            self.current_line = self.current_line[:self.line_cursor] + tail
-            self.buffer.write_string(col=self.buffer.cursor_col, row=self.buffer.cursor_row, string=tail + " " * deleted)
+            self.current_line = self.current_line[:self.line_cursor] + self._display(tail)
+            self.buffer.write_string(col=self.buffer.cursor_col, row=self.buffer.cursor_row, string=self._display(tail) + " " * deleted)
         
         elif symbol == pyglet.window.key.DELETE:
             if self.line_cursor >= len(self.current_line):
                 return
             tail = self.current_line[1 + self.line_cursor:]
-            self.current_line = self.current_line[:self.line_cursor] + tail
-            self.buffer.write_string(col=self.buffer.cursor_col, row=self.buffer.cursor_row, string=tail + " ")
+            self.current_line = self.current_line[:self.line_cursor] + self._display(tail)
+            self.buffer.write_string(col=self.buffer.cursor_col, row=self.buffer.cursor_row, string=self._display(tail) + " ")
             
         elif symbol == pyglet.window.key.BACKSPACE and ctrl_held:
             start = self._previous_word_boundary()
@@ -192,9 +196,9 @@ class InputHandler:
                 return
             deleted = self.line_cursor - start
             tail = self.current_line[self.line_cursor:]
-            self.current_line = self.current_line[:start] + tail
+            self.current_line = self.current_line[:start] + self._display(tail)
             self._adjust_cursor(start - self.line_cursor)
-            self.buffer.write_string(col=self.buffer.cursor_col, row=self.buffer.cursor_row, string=tail + " " * deleted)
+            self.buffer.write_string(col=self.buffer.cursor_col, row=self.buffer.cursor_row, string=self._display(tail) + " " * deleted)
         
         elif symbol == pyglet.window.key.UP and ctrl_held:
             self.buffer.scroll_view(1)
@@ -210,14 +214,24 @@ class InputHandler:
         self.buffer.cursor_col = 0
         self._sync_cursor()
 
-        if self.current_line.strip():
-            self.history.add(self.current_line)
-
-        if self._on_submit is not None:
-            self._on_submit(self.current_line)
-
+        line = self.current_line
         self.current_line = ""
         self.line_cursor = 0
+
+        if self._pending_submit is not None:
+            callback = self._pending_submit
+            self._pending_submit = None
+            self.masked = False
+            self._sync_cursor()
+            callback(line)
+            return
+
+        if line.strip():
+            self.history.add(line)
+
+        if self._on_submit is not None:
+            self._on_submit(line)
+
         self._sync_cursor()
 
     def _replace_current_line(self, new_line: str) -> None:
@@ -233,3 +247,14 @@ class InputHandler:
         self.buffer.cursor_col = start_col
         self.line_cursor = 0
         self._adjust_cursor(len(new_line))
+
+    def request_line(self, callback: Callable[[str], None], masked: bool = False) -> None:
+        """Redirects the next submitted line to callback instead of the normal
+        kernel dispatch -- used for interactive prompts like password entry."""
+        self._pending_submit = callback
+        self.masked = masked
+
+    def _display(self, text: str) -> str:
+        """What gets drawn on screen for a piece of current_line content --
+        asterisks while masked, the real text otherwise."""
+        return "*" * len(text) if self.masked else text

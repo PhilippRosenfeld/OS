@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from typing import Callable
 
 from horus.events.bus import EventBus
 from horus.filesystem.vfs import VFS
@@ -24,7 +25,9 @@ class Context:
     users: "UserRegistry" = None
     kernel: "Kernel" = None
     window: DisplayWindow = None
-    effective_user: str = None    ##user that executes command, defaults to user
+    effective_user: str = None    #user that executes command, defaults to user
+    input_handler: "InputHandler" = None
+
 
     def __post_init__(self):
         if self.effective_user is None:
@@ -62,3 +65,8 @@ class Context:
             new_row = last_row
         self.screen.cursor_row = new_row
         self.screen.cursor_col = 0
+
+    def request_input(self, callback: Callable[[str], None], masked: bool = False) -> None:
+        if self.input_handler is None:
+            raise RuntimeError("no input handler available on this context")
+        self.input_handler.request_line(callback, masked=masked)
