@@ -5,7 +5,7 @@ from pathlib import Path
 from horus.filesystem.vfs import VFS
 from horus.filesystem.node import Node, NodeType, ProtectedFileError
 from horus.filesystem.path_utils import resolve_path as _resolve_path
-
+from horus.filesystem.permissions import require_write, can_write, AccessDeniedError
 
 class SQLiteVFS(VFS):
     """SQLite-backed filesystem. Persists across app restarts: the schema is
@@ -127,57 +127,59 @@ class SQLiteVFS(VFS):
             raise FileNotFoundError(path)
         return row["content"] or ""
 
-    def write_file(self, path: str, text: str, protected: bool = False, force: bool = False) -> None:
+    def write_file(self, path: str, content: str, user: str, protected: bool = False) -> None:
         """Writes text to a file, creating it if it doesn't already exist.
 
         protected only takes effect when creating a new file -- rewriting an
-        existing file's content never changes its protected status.
-
-        Raises ProtectedFileError if the file already exists and is protected
-        (force never overrides this -- a protected node's own content can never
-        be changed), or if it doesn't exist yet and the parent directory is
-        protected and force is False (force lets you create it anyway)."""
+        existing file's content never changes its protected status."""
         parent_path = self._parent_path(path)
         parent_row = self._fetch(parent_path)
         if parent_row is None:
             raise FileNotFoundError(f"no such directory: {parent_path}")
+
+        parent_node = self._row_to_node(parent_row)
         name = path.rsplit("/", 1)[-1]
         now = self._now()
         existing = self._fetch(path)
+
         if existing is not None:
-            if existing["protected"]:
-                raise ProtectedFileError(f"'{path}' is protected")
+            existing_node = self._row_to_node(existing)
+            require_write(existing_node, user, path)
+
             self._conn.execute(
                 "UPDATE nodes SET content = ?, size = ?, modified_at = ? WHERE path = ?",
-                (text, len(text), now, path),
+                (content, len(content), now, path),
             )
         else:
-            if parent_row["protected"] and not force:
-                raise ProtectedFileError(f"cannot create '{path}': parent directory is protected")
+            require_write(parent_node, user, path)
+
             self._conn.execute(
-                "INSERT INTO nodes (path, parent_path, name, type, owner, permissions, created_at, modified_at, hidden, protected, size, content) "
-                "VALUES (?, ?, ?, 'file', 'root', 'rwxr-xr-x', ?, ?, 0, ?, ?, ?)",
-                (path, parent_path, name, now, now, int(protected), len(text), text),
+                "INSERT INTO nodes (path, parent_path, name, type, owner, permissions, "
+                "created_at, modified_at, hidden, protected, size, content) "
+                "VALUES (?, ?, ?, 'file', ?, 'rwxr-xr-x', ?, ?, 0, ?, ?, ?)",
+                (path, parent_path, name, user, now, now, int(protected), len(content), content),
             )
         self._conn.commit()
 
-    def mkdir(self, path: str, hidden: bool = False, protected: bool = False, force: bool = False) -> None:
-        """Creates a directory at the given path. Raises ProtectedFileError if the
-        parent directory is protected and force is False."""
+
+    def mkdir(self, path: str, user: str, hidden: bool = False, protected: bool = False) -> None:
+        """Creates a directory at the given path."""
         parent_path = self._parent_path(path)
         parent_row = self._fetch(parent_path)
         if parent_row is None:
             raise FileNotFoundError(f"no such directory: {parent_path}")
         if self.exists(path):
             raise FileExistsError(path)
-        if parent_row["protected"] and not force:
-            raise ProtectedFileError(f"cannot create '{path}': parent directory is protected")
+
+        parent_node = self._row_to_node(parent_row)
+        require_write(parent_node, user, path)
+
         name = path.rsplit("/", 1)[-1]
         now = self._now()
         self._conn.execute(
             "INSERT INTO nodes (path, parent_path, name, type, owner, permissions, created_at, modified_at, hidden, protected, size) "
-            "VALUES (?, ?, ?, 'directory', 'root', 'rwxr-xr-x', ?, ?, ?, ?, 0)",
-            (path, parent_path, name, now, now, int(hidden), int(protected)),
+            "VALUES (?, ?, ?, 'directory', ?, 'rwxr-xr-x', ?, ?, ?, ?, 0)",
+            (path, parent_path, name, user, now, now, int(hidden), int(protected)),
         )
         self._conn.commit()
 
@@ -187,22 +189,22 @@ class SQLiteVFS(VFS):
             raise FileNotFoundError(path)
         return self._row_to_node(row)
     
-    def remove(self, path: str, force: bool = False) -> None:
-        """Removes a file or directory at the given path. If it's a directory, it must
-        be empty. Raises ProtectedFileError if the node itself is protected (always,
-        regardless of force), or if its parent directory is protected and force is False."""
+    def remove(self, path: str, user: str) -> None:
+        """Removes a file or directory at the given path. If it's a directory,
+        it must be empty."""
         row = self._fetch(path)
         if row is None:
             raise FileNotFoundError(path)
-        if row["protected"]:
-            raise ProtectedFileError(f"'{path}' is protected")
-        parent_row = self._fetch(self._parent_path(path))
-        if parent_row is not None and parent_row["protected"] and not force:
-            raise ProtectedFileError(f"cannot remove '{path}': parent directory is protected")
+
+        node = self._row_to_node(row)
+        require_write(node, user, path)
+
         if row["type"] == NodeType.DIRECTORY.value:
-            # Check if directory is empty
-            children = self._conn.execute("SELECT COUNT(*) AS n FROM nodes WHERE parent_path = ?", (path,)).fetchone()
+            children = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM nodes WHERE parent_path = ?", (path,)
+            ).fetchone()
             if children["n"] > 0:
                 raise OSError(f"Directory not empty: {path}")
+
         self._conn.execute("DELETE FROM nodes WHERE path = ?", (path,))
         self._conn.commit()

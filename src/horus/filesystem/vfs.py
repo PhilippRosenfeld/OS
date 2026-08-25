@@ -17,7 +17,7 @@ class VFS(ABC):
         pass
 
     @abstractmethod
-    def mkdir(self, path: str) -> None:
+    def mkdir(self, path: str, user: str, hidden: bool = False, protected: bool = False) -> None:
         pass
 
     @abstractmethod
@@ -25,7 +25,7 @@ class VFS(ABC):
         pass
 
     @abstractmethod
-    def write_file(self, path: str) -> None:
+    def write_file(self, path: str, content: str, user: str, protected: bool = False) -> None:
         pass
 
     @abstractmethod
@@ -33,6 +33,6 @@ class VFS(ABC):
         pass
     
     @abstractmethod
-    def remove(self, path: str) -> None:
+    def remove(self, path: str,  user: str) -> None:
         pass
 

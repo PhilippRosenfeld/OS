@@ -212,8 +212,8 @@ def test_color_with_no_arguments_is_a_no_op():
 def test_ls_with_meta_shows_timestamps_without_fractional_seconds():
     buffer = ScreenBuffer(80, 10)
     fs = InMemoryVFS()
-    fs.mkdir("/home")
-    fs.write_file("/home/notes", "hi")  # no '.' in the name, so any '.' in the output can only be a timestamp
+    fs.mkdir("/home", user="root")
+    fs.write_file("/home/notes", "hi", user="root")  # no '.' in the name, so any '.' in the output can only be a timestamp
     assert fs.get_meta("/home/notes").created_at.microsecond != 0  # backend still stores full precision
     ctx = Context(session_id="s", user="root", cwd="/home", fs=fs, screen=buffer)
 

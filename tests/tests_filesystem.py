@@ -2,8 +2,11 @@ import pytest
 
 from horus.filesystem.backend.sqlite import SQLiteVFS
 from horus.filesystem.backend.memory import InMemoryVFS
-from horus.filesystem.node import NodeType, ProtectedFileError
+from horus.filesystem.node import NodeType
+from horus.filesystem.permissions import AccessDeniedError
 from horus.filesystem.path_utils import resolve_path
+
+ROOT = "root"
 
 
 def make(tmp_path):
@@ -28,7 +31,7 @@ def fs(request, tmp_path):
     ("../../etc", "/home/root", "/etc"),
     ("", "/home", "/home"),
     (".", "/home", "/home"),
-    ("../../../..", "/home", "/"),  # '..' past root silently clamps
+    ("../../../..", "/home", "/"),
 ])
 def test_resolve_path(path, cwd, expected):
     assert resolve_path(path, cwd) == expected
@@ -40,8 +43,6 @@ def test_resolve_path_requires_cwd():
 
 
 def test_inmemory_and_sqlite_resolve_path_agree(tmp_path):
-    """Both backends delegate to the same shared helper -- pin that down so a
-    future edit to one doesn't silently diverge from the other."""
     mem = InMemoryVFS()
     sql = make(tmp_path)
     assert mem.resolve_path("../etc", "/home/root") == sql.resolve_path("../etc", "/home/root")
@@ -51,28 +52,24 @@ def test_inmemory_and_sqlite_resolve_path_agree(tmp_path):
 
 def test_inmemory_remove_deletes_a_file():
     fs = InMemoryVFS()
-    fs.mkdir("/home")
-    fs.write_file("/home/f.txt", "x")
-    fs.remove("/home/f.txt")
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/f.txt", "x", user=ROOT)
+    fs.remove("/home/f.txt", user=ROOT)
     assert fs.exists("/home/f.txt") is False
 
 
 def test_inmemory_remove_non_empty_directory_raises():
     fs = InMemoryVFS()
-    fs.mkdir("/home")
-    fs.write_file("/home/f.txt", "x")
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/f.txt", "x", user=ROOT)
     with pytest.raises(OSError):
-        fs.remove("/home")
+        fs.remove("/home", user=ROOT)
     assert fs.exists("/home/f.txt") is True
 
 
 # --- SQLiteVFS: schema / root ---
 
 def test_opening_a_pre_protected_column_db_migrates_it(tmp_path):
-    """Regression test: a save created before the 'protected' column existed must
-    still open (and gain the column with sensible defaults) instead of crashing --
-    a plain CREATE TABLE IF NOT EXISTS doesn't retrofit new columns onto an
-    already-existing table."""
     import sqlite3
     db_path = tmp_path / "horus.db"
     conn = sqlite3.connect(db_path)
@@ -98,9 +95,9 @@ def test_opening_a_pre_protected_column_db_migrates_it(tmp_path):
     conn.commit()
     conn.close()
 
-    fs = SQLiteVFS(db_path)  # must not raise despite the missing column
+    fs = SQLiteVFS(db_path)
     assert fs.get_meta("/").protected is False
-    fs.mkdir("/home", protected=True)  # writing to the new column must work too
+    fs.mkdir("/home", user=ROOT, protected=True)
     assert fs.get_meta("/home").protected is True
 
 
@@ -116,19 +113,17 @@ def test_is_empty_true_for_a_fresh_database(tmp_path):
 
 def test_is_empty_false_after_creating_something(tmp_path):
     fs = make(tmp_path)
-    fs.mkdir("/home")
+    fs.mkdir("/home", user=ROOT)
     assert fs.is_empty() is False
 
 
 def test_reopening_the_same_db_file_does_not_reset_the_schema(tmp_path):
-    """Opening an already-initialized db a second time must not raise or wipe
-    the root -- CREATE TABLE IF NOT EXISTS / INSERT OR IGNORE must hold."""
     db_path = tmp_path / "horus.db"
     fs1 = SQLiteVFS(db_path)
-    fs1.mkdir("/home")
+    fs1.mkdir("/home", user=ROOT)
     fs1.close()
 
-    fs2 = SQLiteVFS(db_path)  # reopen
+    fs2 = SQLiteVFS(db_path)
     assert fs2.exists("/home")
     fs2.close()
 
@@ -137,7 +132,7 @@ def test_reopening_the_same_db_file_does_not_reset_the_schema(tmp_path):
 
 def test_mkdir_creates_directory(tmp_path):
     fs = make(tmp_path)
-    fs.mkdir("/home")
+    fs.mkdir("/home", user=ROOT)
     assert fs.exists("/home")
     assert fs.get_meta("/home").type == NodeType.DIRECTORY
 
@@ -145,20 +140,20 @@ def test_mkdir_creates_directory(tmp_path):
 def test_mkdir_missing_parent_raises(tmp_path):
     fs = make(tmp_path)
     with pytest.raises(FileNotFoundError):
-        fs.mkdir("/no/such/parent")
+        fs.mkdir("/no/such/parent", user=ROOT)
 
 
 def test_mkdir_duplicate_raises(tmp_path):
     fs = make(tmp_path)
-    fs.mkdir("/home")
+    fs.mkdir("/home", user=ROOT)
     with pytest.raises(FileExistsError):
-        fs.mkdir("/home")
+        fs.mkdir("/home", user=ROOT)
 
 
 def test_mkdir_hidden_flag(tmp_path):
     fs = make(tmp_path)
-    fs.mkdir("/home")
-    fs.mkdir("/home/.secret", hidden=True)
+    fs.mkdir("/home", user=ROOT)
+    fs.mkdir("/home/.secret", user=ROOT, hidden=True)
     assert fs.get_meta("/home/.secret").hidden is True
 
 
@@ -171,22 +166,22 @@ def test_exists_false_for_unknown_path(tmp_path):
 
 def test_write_then_read_file(tmp_path):
     fs = make(tmp_path)
-    fs.mkdir("/home")
-    fs.write_file("/home/readme.txt", "hello")
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/readme.txt", "hello", user=ROOT)
     assert fs.read_file("/home/readme.txt") == "hello"
 
 
 def test_write_file_missing_parent_raises(tmp_path):
     fs = make(tmp_path)
     with pytest.raises(FileNotFoundError):
-        fs.write_file("/no/such/dir/file.txt", "x")
+        fs.write_file("/no/such/dir/file.txt", "x", user=ROOT)
 
 
 def test_write_file_overwrites_existing_content_and_size(tmp_path):
     fs = make(tmp_path)
-    fs.mkdir("/home")
-    fs.write_file("/home/f.txt", "hello")
-    fs.write_file("/home/f.txt", "hi")
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/f.txt", "hello", user=ROOT)
+    fs.write_file("/home/f.txt", "hi", user=ROOT)
     assert fs.read_file("/home/f.txt") == "hi"
     assert fs.get_meta("/home/f.txt").size == 2
 
@@ -199,7 +194,7 @@ def test_read_file_missing_raises(tmp_path):
 
 def test_read_file_on_a_directory_raises(tmp_path):
     fs = make(tmp_path)
-    fs.mkdir("/home")
+    fs.mkdir("/home", user=ROOT)
     with pytest.raises(FileNotFoundError):
         fs.read_file("/home")
 
@@ -208,26 +203,26 @@ def test_read_file_on_a_directory_raises(tmp_path):
 
 def test_list_dir_returns_children(tmp_path):
     fs = make(tmp_path)
-    fs.mkdir("/home")
-    fs.mkdir("/home/root")
-    fs.write_file("/home/a.txt", "x")
+    fs.mkdir("/home", user=ROOT)
+    fs.mkdir("/home/root", user=ROOT)
+    fs.write_file("/home/a.txt", "x", user=ROOT)
     names = {n.name for n in fs.list_dir("/home")}
     assert names == {"root", "a.txt"}
 
 
 def test_list_dir_hides_hidden_entries_by_default(tmp_path):
     fs = make(tmp_path)
-    fs.mkdir("/home")
-    fs.mkdir("/home/.secret", hidden=True)
+    fs.mkdir("/home", user=ROOT)
+    fs.mkdir("/home/.secret", user=ROOT, hidden=True)
     assert fs.list_dir("/home") == []
     assert len(fs.list_dir("/home", show_all=True)) == 1
 
 
 def test_list_dir_recursive_flattens_subdirectories(tmp_path):
     fs = make(tmp_path)
-    fs.mkdir("/home")
-    fs.mkdir("/home/root")
-    fs.write_file("/home/root/f.txt", "x")
+    fs.mkdir("/home", user=ROOT)
+    fs.mkdir("/home/root", user=ROOT)
+    fs.write_file("/home/root/f.txt", "x", user=ROOT)
     names = {n.name for n in fs.list_dir("/home", recursive=True)}
     assert names == {"root", "f.txt"}
 
@@ -240,8 +235,8 @@ def test_list_dir_missing_path_raises(tmp_path):
 
 def test_list_dir_on_a_file_raises(tmp_path):
     fs = make(tmp_path)
-    fs.mkdir("/home")
-    fs.write_file("/home/f.txt", "x")
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/f.txt", "x", user=ROOT)
     with pytest.raises(NotADirectoryError):
         fs.list_dir("/home/f.txt")
 
@@ -256,8 +251,8 @@ def test_get_meta_missing_raises(tmp_path):
 
 def test_get_meta_reflects_written_file(tmp_path):
     fs = make(tmp_path)
-    fs.mkdir("/home")
-    fs.write_file("/home/f.txt", "hello")
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/f.txt", "hello", user=ROOT)
     meta = fs.get_meta("/home/f.txt")
     assert meta.name == "f.txt"
     assert meta.type == NodeType.FILE
@@ -266,7 +261,7 @@ def test_get_meta_reflects_written_file(tmp_path):
 
 def test_timestamps_are_stored_at_second_precision(tmp_path):
     fs = make(tmp_path)
-    fs.mkdir("/home")
+    fs.mkdir("/home", user=ROOT)
     meta = fs.get_meta("/home")
     assert meta.created_at.microsecond == 0
     assert meta.modified_at.microsecond == 0
@@ -276,125 +271,120 @@ def test_timestamps_are_stored_at_second_precision(tmp_path):
 
 def test_remove_deletes_a_file(tmp_path):
     fs = make(tmp_path)
-    fs.mkdir("/home")
-    fs.write_file("/home/f.txt", "x")
-    fs.remove("/home/f.txt")
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/f.txt", "x", user=ROOT)
+    fs.remove("/home/f.txt", user=ROOT)
     assert fs.exists("/home/f.txt") is False
 
 
 def test_remove_deletes_an_empty_directory(tmp_path):
     fs = make(tmp_path)
-    fs.mkdir("/home")
-    fs.remove("/home")
+    fs.mkdir("/home", user=ROOT)
+    fs.remove("/home", user=ROOT)
     assert fs.exists("/home") is False
 
 
 def test_remove_non_empty_directory_raises(tmp_path):
     fs = make(tmp_path)
-    fs.mkdir("/home")
-    fs.write_file("/home/f.txt", "x")
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/f.txt", "x", user=ROOT)
     with pytest.raises(OSError):
-        fs.remove("/home")
-    assert fs.exists("/home/f.txt") is True  # nothing was deleted
+        fs.remove("/home", user=ROOT)
+    assert fs.exists("/home/f.txt") is True
 
 
 def test_remove_missing_path_raises(tmp_path):
     fs = make(tmp_path)
     with pytest.raises(FileNotFoundError):
-        fs.remove("/nope")
+        fs.remove("/nope", user=ROOT)
 
 
-# --- protected nodes (both backends -- this is a VFS-interface contract) ---
+# --- protected nodes (both backends -- VFS-interface contract) ---
+# New model: 'protected' means only root may write/remove the node --
+# not even its owner. root can always bypass it directly; there is no
+# separate 'force' escape hatch anymore.
 
-def test_protected_file_cannot_be_overwritten_even_with_force(fs):
-    """Protection on the target itself is never bypassed -- force only lifts the
-    *parent's* restriction on creating/removing entries, never a node's own flag."""
-    fs.mkdir("/home")
-    fs.write_file("/home/f.txt", "original", protected=True)
+def test_protected_file_cannot_be_written_by_non_root(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/f.txt", "original", user=ROOT, protected=True)
 
-    with pytest.raises(ProtectedFileError):
-        fs.write_file("/home/f.txt", "changed", force=True)
+    with pytest.raises(AccessDeniedError):
+        fs.write_file("/home/f.txt", "changed", user="user1")
     assert fs.read_file("/home/f.txt") == "original"
+
+
+def test_protected_file_can_still_be_written_by_root(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/f.txt", "original", user=ROOT, protected=True)
+
+    fs.write_file("/home/f.txt", "changed", user=ROOT)
+    assert fs.read_file("/home/f.txt") == "changed"
 
 
 def test_write_file_protected_flag_only_applies_on_creation():
     """Rewriting an existing (unprotected) file must not silently protect it."""
     fs = InMemoryVFS()
-    fs.mkdir("/home")
-    fs.write_file("/home/f.txt", "original")
-    fs.write_file("/home/f.txt", "changed", protected=True)  # protected= is ignored on update
-    fs.write_file("/home/f.txt", "changed again")  # still not protected -> should just work
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/f.txt", "original", user=ROOT)
+    fs.write_file("/home/f.txt", "changed", user=ROOT, protected=True)  # ignored on update
+    fs.write_file("/home/f.txt", "changed again", user=ROOT)  # still not protected -> should work
     assert fs.read_file("/home/f.txt") == "changed again"
 
 
-def test_protected_directory_cannot_be_removed(fs):
-    fs.mkdir("/home")
-    fs.mkdir("/home/locked", protected=True)
-    with pytest.raises(ProtectedFileError):
-        fs.remove("/home/locked")
+def test_protected_directory_cannot_be_removed_by_non_root(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.mkdir("/home/locked", user=ROOT, protected=True)
+    with pytest.raises(AccessDeniedError):
+        fs.remove("/home/locked", user="user1")
     assert fs.exists("/home/locked") is True
 
 
-def test_protected_directory_cannot_be_removed_even_with_force(fs):
-    fs.mkdir("/home")
-    fs.mkdir("/home/locked", protected=True)
-    with pytest.raises(ProtectedFileError):
-        fs.remove("/home/locked", force=True)
-    assert fs.exists("/home/locked") is True
+def test_protected_directory_can_be_removed_by_root(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.mkdir("/home/locked", user=ROOT, protected=True)
+    fs.remove("/home/locked", user=ROOT)
+    assert fs.exists("/home/locked") is False
 
 
-def test_creating_a_file_inside_a_protected_directory_requires_force(fs):
-    fs.mkdir("/home")
-    fs.mkdir("/home/locked", protected=True)
-    with pytest.raises(ProtectedFileError):
-        fs.write_file("/home/locked/f.txt", "x")
-    assert fs.exists("/home/locked/f.txt") is False
-
-    fs.write_file("/home/locked/f.txt", "x", force=True)  # the special method
-    assert fs.read_file("/home/locked/f.txt") == "x"
+def test_non_owner_cannot_write_into_a_directory_without_write_permission(fs):
+    """Baseline (non-protected) permission check: a directory owned by root
+    with default 'rwxr-xr-x' permissions only grants write to root/owner."""
+    fs.mkdir("/home", user=ROOT)
+    with pytest.raises(AccessDeniedError):
+        fs.write_file("/home/f.txt", "x", user="user1")
+    assert fs.exists("/home/f.txt") is False
 
 
-def test_creating_a_subdirectory_inside_a_protected_directory_requires_force(fs):
-    fs.mkdir("/home")
-    fs.mkdir("/home/locked", protected=True)
-    with pytest.raises(ProtectedFileError):
-        fs.mkdir("/home/locked/sub")
-    assert fs.exists("/home/locked/sub") is False
-
-    fs.mkdir("/home/locked/sub", force=True)
-    assert fs.exists("/home/locked/sub") is True
+def test_root_can_always_write_into_an_unprotected_directory(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/f.txt", "x", user=ROOT)
+    assert fs.read_file("/home/f.txt") == "x"
 
 
-def test_removing_a_file_inside_a_protected_directory_requires_force(fs):
-    fs.mkdir("/home")
-    fs.mkdir("/home/locked", protected=True)
-    fs.write_file("/home/locked/f.txt", "x", force=True)
+def test_removing_a_file_inside_a_protected_directory_by_non_root_raises(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.mkdir("/home/locked", user=ROOT, protected=True)
+    fs.write_file("/home/locked/f.txt", "x", user=ROOT)
 
-    with pytest.raises(ProtectedFileError):
-        fs.remove("/home/locked/f.txt")
+    with pytest.raises(AccessDeniedError):
+        fs.remove("/home/locked/f.txt", user="user1")
     assert fs.exists("/home/locked/f.txt") is True
 
-    fs.remove("/home/locked/f.txt", force=True)
+    fs.remove("/home/locked/f.txt", user=ROOT)
     assert fs.exists("/home/locked/f.txt") is False
 
 
-def test_a_child_that_is_itself_protected_resists_force(fs):
-    """force only bypasses the *parent's* protection over its children -- a child
-    that is independently marked protected still can't be touched, even with force."""
-    fs.mkdir("/home")
-    fs.mkdir("/home/locked", protected=True)
-    fs.mkdir("/home/locked/inner", protected=True, force=True)
+def test_a_protected_child_inside_a_protected_directory_still_requires_root(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.mkdir("/home/locked", user=ROOT, protected=True)
+    fs.mkdir("/home/locked/inner", user=ROOT, protected=True)
 
-    with pytest.raises(ProtectedFileError):
-        fs.remove("/home/locked/inner", force=True)
+    with pytest.raises(AccessDeniedError):
+        fs.remove("/home/locked/inner", user="user1")
     assert fs.exists("/home/locked/inner") is True
 
-
-def test_unprotected_directory_does_not_require_force(fs):
-    fs.mkdir("/home")  # not protected
-    fs.write_file("/home/f.txt", "x")  # should just work, no force needed
-    fs.remove("/home/f.txt")
-    assert fs.exists("/home/f.txt") is False
+    fs.remove("/home/locked/inner", user=ROOT)
+    assert fs.exists("/home/locked/inner") is False
 
 
 # --- persistence across reconnects (the whole point of switching to SQLite) ---
@@ -402,8 +392,8 @@ def test_unprotected_directory_does_not_require_force(fs):
 def test_content_persists_across_reconnect(tmp_path):
     db_path = tmp_path / "horus.db"
     fs1 = SQLiteVFS(db_path)
-    fs1.mkdir("/home")
-    fs1.write_file("/home/readme.txt", "welcome")
+    fs1.mkdir("/home", user=ROOT)
+    fs1.write_file("/home/readme.txt", "welcome", user=ROOT)
     fs1.close()
 
     fs2 = SQLiteVFS(db_path)

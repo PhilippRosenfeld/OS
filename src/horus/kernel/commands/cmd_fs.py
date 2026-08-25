@@ -16,7 +16,9 @@ def _build_cd_parser() -> CommandArgumentParser:
 
 def _build_mkdir_parser() -> CommandArgumentParser:
     parser = CommandArgumentParser(prog="mkdir", add_help=True, description="Create a new directory")
-    parser.add_argument("path", nargs=1)
+    parser.add_argument("path")
+    parser.add_argument("-p", "--protected", action="store_true", help="Makes directory protected")
+    parser.add_argument("-H", "--hidden", action="store_true", help="Makes directory hidden")
     return parser
 
 def _build_rm_parser() -> CommandArgumentParser:
@@ -96,12 +98,15 @@ def mkdir(ctx, argv: list[str]) -> None:
         return
 
     path = ctx.resolve_path(argv[0])
+
     try:
-        ctx.fs.mkdir(path)
+        ctx.fs.mkdir(path, hidden=args.hidden, protected=args.protected)
     except FileExistsError:
         ctx.write_line(f"mkdir: cannot create directory '{argv[0]}': File exists")
     except ProtectedFileError:
         ctx.write_line(f"mkdir: cannot create directory '{argv[0]}': Directory is protected")
+    except (FileNotFoundError, NotADirectoryError) as e:
+        ctx.write_line(f"mkdir: cannot create directory '{args.path}': {e}")
     except Exception as e:
         ctx.write_line(f"mkdir: error creating directory '{argv[0]}': {e}")
         
@@ -117,7 +122,7 @@ def rm(ctx, argv: list[str]) -> None:
     path = ctx.resolve_path(args.path[0])
     
     try:
-        ctx.fs.remove(path)
+        ctx.fs.remove(path, user=ctx.effective_user)
         ctx.write_line(f"Removed: {args.path[0]}")
     except FileNotFoundError:
         ctx.write_line(f"rm: cannot remove '{args.path[0]}': No such file or directory")

@@ -1,6 +1,7 @@
 from horus.filesystem.vfs import VFS
 from horus.filesystem.node import Node, NodeType, ProtectedFileError
 from horus.filesystem.path_utils import resolve_path as _resolve_path
+from horus.filesystem.permissions import require_write, require_read, can_write, can_read, AccessDeniedError
 
 class _TreeNode:
 
@@ -86,40 +87,33 @@ class InMemoryVFS(VFS):
         
         return file.content
 
-    def write_file(self, path: str, text: str, protected: bool = False, force: bool = False) -> None:
-        """Writes text in a file, creating it if it doesn't already exist.
-        #TODO: Implement handlers for different file types
+    def write_file(self, path: str, content: str, user: str, protected: bool = False) -> None:
+        """Writes text to a file, creating it if it doesn't already exist.
 
         protected only takes effect when creating a new file -- rewriting an
-        existing file's content never changes its protected status.
-
-        Raises ProtectedFileError if the file already exists and is protected
-        (force never overrides this -- a protected node's own content can never
-        be changed), or if it doesn't exist yet and the parent directory is
-        protected and force is False (force lets you create it anyway)."""
+        existing file's content never changes its protected status."""
         parent, name = self._parent_and_name(path)
         existing = parent.children.get(name)
 
         if existing is None:
-            if parent.meta.protected and not force:
-                raise ProtectedFileError(f"cannot create '{path}': parent directory is protected")
-            meta = Node(name=name, type=NodeType.FILE, size=len(text), protected=protected)
-            parent.children[name] = _TreeNode(meta, content=text)
+            require_write(parent.meta, user, path)
+            meta = Node(name=name, type=NodeType.FILE, size=len(content), owner=user, protected=protected)
+            parent.children[name] = _TreeNode(meta, content=content)
         else:
-            if existing.meta.protected:
-                raise ProtectedFileError(f"'{path}' is protected")
-            existing.content = text
-            existing.meta.size = len(text)
+            require_write(existing.meta, user, path)
+            existing.content = content
+            existing.meta.size = len(content)
 
-    def mkdir(self, path: str, hidden: bool = False, protected: bool = False, force: bool = False) -> None:
-        """Creates a directory at the given path. Raises ProtectedFileError if the
-        parent directory is protected and force is False."""
+    def mkdir(self, path: str, user: str, hidden: bool = False, protected: bool = False) -> None:
+        """Creates a directory at the given path."""
         parent, name = self._parent_and_name(path)
         if name in parent.children:
             raise FileExistsError(path)
-        if parent.meta.protected and not force:
-            raise ProtectedFileError(f"cannot create '{path}': parent directory is protected")
-        parent.children[name] = _TreeNode(Node(name=name, type=NodeType.DIRECTORY, hidden=hidden, protected=protected))
+
+        require_write(parent.meta, user, path)
+
+        meta = Node(name=name, type=NodeType.DIRECTORY, owner=user, hidden=hidden, protected=protected)
+        parent.children[name] = _TreeNode(meta)
 
     def get_meta(self, path: str) -> None:
         node = self._walk(path)
@@ -127,18 +121,17 @@ class InMemoryVFS(VFS):
             raise FileNotFoundError(path)
         return node.meta
 
-    def remove(self, path: str, force: bool = False) -> None:
-        """Removes a file or directory at the given path. If it's a directory, it must
-        be empty. Raises ProtectedFileError if the node itself is protected (always,
-        regardless of force), or if its parent directory is protected and force is False."""
+    def remove(self, path: str, user: str) -> None:
+        """Removes a file or directory at the given path. If it's a directory,
+        it must be empty."""
         node = self._walk(path)
         if node is None:
             raise FileNotFoundError(path)
-        if node.meta.protected:
-            raise ProtectedFileError(f"'{path}' is protected")
-        parent, name = self._parent_and_name(path)
-        if parent.meta.protected and not force:
-            raise ProtectedFileError(f"cannot remove '{path}': parent directory is protected")
+
+        require_write(node.meta, user, path)
+
         if node.meta.type == NodeType.DIRECTORY and node.children:
             raise OSError(f"Directory not empty: {path}")
+
+        parent, name = self._parent_and_name(path)
         del parent.children[name]

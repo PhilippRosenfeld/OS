@@ -13,7 +13,7 @@ class Context:
     command handler as the first argument."""
 
     session_id: str
-    user: str
+    user: str #logged in user, stable for the session
     cwd: str
     env: dict[str, str] = field(default_factory=dict)
 
@@ -21,7 +21,14 @@ class Context:
     events: EventBus = None
     screen: ScreenBuffer = None
     screens: ScreenManager = None
+    users: "UserRegistry" = None
+    kernel: "Kernel" = None
     window: DisplayWindow = None
+    effective_user: str = None    ##user that executes command, defaults to user
+
+    def __post_init__(self):
+        if self.effective_user is None:
+            self.effective_user = self.user
             
     def resolve_path(self, path: str) -> str:
         """Resolve a path relative to the current working directory."""
