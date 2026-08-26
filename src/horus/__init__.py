@@ -11,10 +11,16 @@ from horus.filesystem.backend.sqlite import SQLiteVFS
 from horus.filesystem.seed import seed_minimal
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.shell_screen import ShellScreen
-from horus.paths import SAVES_DIR
+from horus.ui.boot_screen import BootScreen, BootFrame
+from horus.paths import SAVES_DIR, DATA_DIR
 from horus.session.user import UserRegistry, User, UserRole
 from horus.session.seed import seed_users
 from horus.session.auth import hash_password
+from horus.__about__ import VERSION
+from horus.story.progress import BootProgress
+from horus.paths import BOOT_PROGRESS_PATH, BOOT_DIR
+from horus.hardware.spec import HardwareSpec
+from horus.paths import HARDWARE_SPEC_PATH
 
 import horus.kernel.commands
 import logging
@@ -60,11 +66,48 @@ def main() -> None:
     def get_prompt() -> str:
         return f"{context.user}@{context.cwd} > "
 
+
+    def _load_boot_frames(path, context: dict[str, str] = None) -> list[BootFrame]:
+        """context provides {placeholder} values substituted into each line,
+        e.g. {'version': '0.3.0'}."""
+        context = context or {}
+        frames = []
+        with open(path, "r", encoding="utf-8") as f:
+            for line_num, raw_line in enumerate(f, start=1):
+                line = raw_line.rstrip("\n")
+                if not line:
+                    continue
+
+                delay_str, sep, text = line.partition("|")
+                if not sep:
+                    text, delay = line, 0.05
+                else:
+                    try:
+                        delay = float(delay_str)
+                    except ValueError:
+                        logger.warning(f"boot sequence line {line_num} has invalid delay '{delay_str}', using default")
+                        delay = 0.05
+
+                try:
+                    text = text.format(**context)
+                except KeyError as e:
+                    logger.warning(f"boot sequence line {line_num} references unknown placeholder {e}")
+
+                frames.append(BootFrame(text=text, delay=delay))
+
+        logger.debug(f"loaded {len(frames)} boot frames from {path}")
+        return frames
+
     history = CommandHistory()
     input_handler = InputHandler(window.buffer, history, on_submit=on_submit, get_prompt=get_prompt)
     context.input_handler = input_handler
 
-    screens.push(ShellScreen(input_handler, screens))
+    shell_screen = ShellScreen(input_handler, screens)
+
+    def _on_boot_complete():
+        screens.pop()
+        screens.push(shell_screen)
+        window.start_cursor_blink()
 
     window.set_text_handler(
         on_text=screens.handle_text,
@@ -72,5 +115,31 @@ def main() -> None:
         on_enter=screens.handle_enter,
         on_key=screens.handle_key,
     )
-    window.start_cursor_blink()
+
+
+    #------------- START -------------
+    boot_progress = BootProgress.load(BOOT_PROGRESS_PATH)
+    latest_disk = boot_progress.latest_ok_disk()
+    boot_disk_name = f"Disk {latest_disk}" if latest_disk is not None else "Disk 0 (recovery mode)"
+    disk_context = {
+        f"disk{d}_{c}": boot_progress.status(f"disk{d}_{c}")
+        for d in (1, 2, 3)
+        for c in (1, 2, 3)
+    }
+    hardware = HardwareSpec.load(HARDWARE_SPEC_PATH)
+    frames = _load_boot_frames(DATA_DIR / "boot" / "boot_sequence.txt",
+     context={
+        "version": VERSION, 
+        "memory_size": hardware.memory_kb,
+        "memory_count": hardware.memory_count,
+        "cpu_cores": hardware.cpu_cores,
+        "cpu_name": hardware.cpu_name,
+        "cpu_mhz": hardware.cpu_mhz,
+        "coolant_type": hardware.coolant_type,
+        "coolant_amount": hardware.coolant_amount,
+        "boot_disk": boot_disk_name,
+        **disk_context})
+    boot_screen = BootScreen(window.buffer, frames, on_complete=_on_boot_complete)
+    screens.push(boot_screen)
+
     window.run()

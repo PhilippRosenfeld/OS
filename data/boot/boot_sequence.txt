@@ -1,0 +1,37 @@
+0.05|BIOS v21.58.13 — HORUS SYSTEMS
+0.05|Copyright (c) 2087, Horus Systems Inc.
+0.00|
+0.05|Engaging Central Processing Unit...
+0.06|   {cpu_name} {cpu_cores} @ {cpu_mhz} ACTIVE
+0.55|Memory Test: {memory_count} x {memory_size} OK
+0.00|
+0.05|Detecting data drives...
+0.05|Connecting Primary Disk
+0.60|    Zero ............................. {disk1_1}
+0.20|    Alpha ............................ {disk1_2}
+0.20|    Beta ............................. {disk1_3}
+0.05|Connecting Secondary Disk
+0.60|    Zil .............................. {disk2_1}
+0.20|    Aleph ............................ {disk2_2}
+0.20|    Bet .............................. {disk2_3}
+0.05|Connecting Tertiary Disk
+0.60|    Danae ............................ {disk3_1}
+0.20|    Urizen ........................... {disk3_2}
+0.20|    Baphomet ......................... {disk3_3}
+0.00|
+0.05|Booting from {boot_disk}
+0.00|Kernel {version} booting...
+2.00|Mounting root filesystem...
+0.00|
+1.00|Auxiliary Systems...
+0.35|   COOLING ..... ONLINE
+0.25|   NETWORK ..... OFFLINE
+0.25|   Z ..... OFFLINE
+0.00|
+0.70|Starting services...
+0.85|Authorising Users...
+0.00|
+2.50|Booting Finished
+0.00|
+2.50|Welcome to horus.
+100|
