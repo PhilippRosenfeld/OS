@@ -23,6 +23,10 @@ from horus.hardware.spec import HardwareSpec
 from horus.paths import HARDWARE_SPEC_PATH
 from horus.ui.logo_screen import LogoScreen
 from pathlib import Path
+from horus.ui.main_menu_screen import MainMenuScreen
+from horus.ui.settings_screen import SettingScreen, SettingOption
+from horus.kernel.commands.cmd_menu import open_settings_menu
+from horus.ui.menu_screen import MenuScreen, MenuOption
 
 
 import horus.kernel.commands
@@ -69,7 +73,6 @@ def main() -> None:
     def get_prompt() -> str:
         return f"{context.user}@{context.cwd} > "
 
-
     def _load_boot_frames(path, context: dict[str, str] = None) -> list[BootFrame]:
         """context provides {placeholder} values substituted into each line,
         e.g. {'version': '0.3.0'}."""
@@ -111,14 +114,33 @@ def main() -> None:
 
     logo_lines = _load_logo_lines(BOOT_DIR / "logo.txt")
 
-    def _on_boot_complete():
+
+    def _start_shell() -> None:
+        screens.pop()
+
+    def _open_settings() -> None:
+        open_settings_menu(context)
+
+    def _exit_game() -> None:
+        window.close() 
+
+    main_menu = MainMenuScreen(
+        window.buffer,
+        title="H O R U S   S Y S T E M S",
+        options=[
+            MenuOption("Continue", _start_shell),
+            MenuOption("Settings", _open_settings),
+            MenuOption("Exit", _exit_game),
+        ],
+    )
+
+    def _on_boot_complete() -> None:
         screens.pop()
         screens.push(LogoScreen(window.buffer, logo_lines, on_complete=_on_logo_complete))
     
     def _on_logo_complete() -> None:
         screens.pop()
-        window.start_cursor_blink()
-        
+        screens.push(main_menu) 
 
     window.set_text_handler(
         on_text=screens.handle_text,
@@ -149,9 +171,9 @@ def main() -> None:
             "coolant_amount": hardware.coolant_amount,
             "boot_disk": boot_disk_name,
             **disk_context})
+    
     shell_screen = ShellScreen(input_handler, screens)
     screens.push(shell_screen)
-
     boot_screen = BootScreen(window.buffer, frames, on_complete=_on_boot_complete)
     screens.push(boot_screen)
 

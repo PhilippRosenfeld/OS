@@ -35,6 +35,7 @@ class LogoScreen(Screen):
 
     def on_pop(self) -> None:
         pyglet.clock.unschedule(self._advance)
+        self._buffer.clear()
 
     def on_resume(self) -> None:
         pass

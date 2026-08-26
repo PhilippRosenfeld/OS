@@ -27,7 +27,7 @@ def horus_menu(ctx, argv: list[str]) -> None:
         ctx.screens.pop()
 
     def settings() -> None:
-        _setting_menu(ctx)
+        open_setting_menu(ctx)
 
     def boot_menu() -> None:
         pass #TODO:implement
@@ -49,7 +49,7 @@ def horus_menu(ctx, argv: list[str]) -> None:
     ctx.screens.push(menu)
     
 
-def _setting_menu(ctx) -> None:
+def open_settings_menu(ctx) -> None:
     """Sub-menu for settings: window size, font size, and font, each cycled with
     Left/Right and applied live via ctx.window."""
 
