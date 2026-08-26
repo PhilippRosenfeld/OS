@@ -18,6 +18,7 @@ class ShellScreen(Screen):
         """Called when a submenu above us closes -- redraw the prompt for the line
         that was waiting underneath it."""
         self._input_handler.start_line()
+        
 
     def handle_text(self, text: str) -> None:
         self._input_handler._handle_text(text)

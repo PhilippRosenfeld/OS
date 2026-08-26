@@ -1,4 +1,4 @@
-0.05|BIOS v21.58.13 — HORUS SYSTEMS
+0.05|BIOS v21.58.13 - HORUS SYSTEMS
 0.05|Copyright (c) 2087, Horus Systems Inc.
 0.00|
 0.05|Engaging Central Processing Unit...
@@ -34,4 +34,4 @@
 2.50|Booting Finished
 0.00|
 2.50|Welcome to horus.
-100|
+00|

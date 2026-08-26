@@ -21,6 +21,9 @@ from horus.story.progress import BootProgress
 from horus.paths import BOOT_PROGRESS_PATH, BOOT_DIR
 from horus.hardware.spec import HardwareSpec
 from horus.paths import HARDWARE_SPEC_PATH
+from horus.ui.logo_screen import LogoScreen
+from pathlib import Path
+
 
 import horus.kernel.commands
 import logging
@@ -98,16 +101,24 @@ def main() -> None:
         logger.debug(f"loaded {len(frames)} boot frames from {path}")
         return frames
 
+    def _load_logo_lines(path: Path) -> list[str]:
+        with open(path, "r", encoding="utf-8") as f:
+            return [line.rstrip("\n") for line in f]
+            
     history = CommandHistory()
     input_handler = InputHandler(window.buffer, history, on_submit=on_submit, get_prompt=get_prompt)
     context.input_handler = input_handler
 
-    shell_screen = ShellScreen(input_handler, screens)
+    logo_lines = _load_logo_lines(BOOT_DIR / "logo.txt")
 
     def _on_boot_complete():
         screens.pop()
-        screens.push(shell_screen)
+        screens.push(LogoScreen(window.buffer, logo_lines, on_complete=_on_logo_complete))
+    
+    def _on_logo_complete() -> None:
+        screens.pop()
         window.start_cursor_blink()
+        
 
     window.set_text_handler(
         on_text=screens.handle_text,
@@ -116,8 +127,6 @@ def main() -> None:
         on_key=screens.handle_key,
     )
 
-
-    #------------- START -------------
     boot_progress = BootProgress.load(BOOT_PROGRESS_PATH)
     latest_disk = boot_progress.latest_ok_disk()
     boot_disk_name = f"Disk {latest_disk}" if latest_disk is not None else "Disk 0 (recovery mode)"
@@ -127,18 +136,22 @@ def main() -> None:
         for c in (1, 2, 3)
     }
     hardware = HardwareSpec.load(HARDWARE_SPEC_PATH)
+
     frames = _load_boot_frames(DATA_DIR / "boot" / "boot_sequence.txt",
-     context={
-        "version": VERSION, 
-        "memory_size": hardware.memory_kb,
-        "memory_count": hardware.memory_count,
-        "cpu_cores": hardware.cpu_cores,
-        "cpu_name": hardware.cpu_name,
-        "cpu_mhz": hardware.cpu_mhz,
-        "coolant_type": hardware.coolant_type,
-        "coolant_amount": hardware.coolant_amount,
-        "boot_disk": boot_disk_name,
-        **disk_context})
+        context={
+            "version": VERSION, 
+            "memory_size": hardware.memory_kb,
+            "memory_count": hardware.memory_count,
+            "cpu_cores": hardware.cpu_cores,
+            "cpu_name": hardware.cpu_name,
+            "cpu_mhz": hardware.cpu_mhz,
+            "coolant_type": hardware.coolant_type,
+            "coolant_amount": hardware.coolant_amount,
+            "boot_disk": boot_disk_name,
+            **disk_context})
+    shell_screen = ShellScreen(input_handler, screens)
+    screens.push(shell_screen)
+
     boot_screen = BootScreen(window.buffer, frames, on_complete=_on_boot_complete)
     screens.push(boot_screen)
 
