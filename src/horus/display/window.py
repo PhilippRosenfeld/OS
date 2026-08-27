@@ -8,17 +8,23 @@ from .renderer import Renderer
 class DisplayWindow:
     """Owns the pyglet window, moderngl context, and Renderer. Handles window events and rendering loop."""
 
-    def __init__(self, font_path: str, cols: int | None = None, rows: int | None = None, title: str = "Horus", char_width: int = 8, char_height: int = 16, width: int = 1920, height: int = 1080, margin: int = 16) -> None:
+    def __init__(self, font_path: str, cols: int | None = None, rows: int | None = None, title: str = "Horus", char_width: int = 8, char_height: int = 16, width: int = 1920, height: int = 1080, margin: int = 16, fullscreen: bool = False) -> None:
         self._char_width = char_width
         self._char_height = char_height
         self._margin = margin
         self._font_path = font_path
+        if fullscreen:
+            # let pyglet size the window to the actual screen instead of a guessed
+            # width/height, so it correctly covers whatever monitor it opens on
+            self._window: pyglet.window.Window = pyglet.window.Window(caption=title, resizable=True, fullscreen=True)
+            width, height = self._window.width, self._window.height
+        else:
+            self._window: pyglet.window.Window = pyglet.window.Window(width=width, height=height, caption=title, resizable=True)
         if cols is None:
             cols = max(1, (width - 2 * margin) // char_width)
         if rows is None:
             rows = max(1, (height - 2 * margin) // char_height)
         self.buffer = ScreenBuffer(cols, rows)
-        self._window: pyglet.window.Window = pyglet.window.Window(width=width, height=height, caption=title, resizable=True)
         self._ctx: moderngl.Context = moderngl.create_context()
         font_atlas = FontAtlas(font_path, char_width, char_height)
         self._renderer: Renderer = Renderer(self.buffer, font_atlas, self._ctx)
@@ -62,6 +68,10 @@ class DisplayWindow:
         on_resize event depends on the OS message pump, so it isn't relied on here)."""
         self._window.set_size(width, height)
         self._on_resize(width, height)
+
+    def close(self) -> None:
+        """Closes the OS window. pyglet.app.run() returns once no windows remain open."""
+        self._window.close()
 
     def set_input_handler(self, callback) -> None:
         """Set the callback function to handle key press events."""

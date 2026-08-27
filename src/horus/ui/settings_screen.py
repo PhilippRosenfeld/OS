@@ -54,6 +54,11 @@ class SettingScreen(Screen):
         return f"{option.label}: < {option.get_value()} >"
 
     def _render(self) -> None:
+        # clear() also resets _writes -- otherwise every past render (one per
+        # keypress) stays in that replay log, and a later resize (e.g. font
+        # size change) re-wraps each of them at the *current* cols, which can
+        # leave stale rows overlapping freshly rendered ones.
+        self._buffer.clear()
         self._buffer.write_string(0, 0, self._title)
         for i, option in enumerate(self._options):
             row = i + 2

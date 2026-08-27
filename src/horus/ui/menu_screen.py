@@ -44,6 +44,10 @@ class MenuScreen(Screen):
         self._buffer.restore(self._saved_screen)
 
     def _render(self) -> None:
+        # clear() also resets _writes -- see SettingScreen._render() for why
+        # that matters once a resize (e.g. font size change) can happen while
+        # this screen is showing.
+        self._buffer.clear()
         self._buffer.write_string(0, 0, self._title)
         for i, option in enumerate(self._options):
             row = i + 2

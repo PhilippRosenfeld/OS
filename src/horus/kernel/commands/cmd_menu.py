@@ -27,10 +27,11 @@ def horus_menu(ctx, argv: list[str]) -> None:
         ctx.screens.pop()
 
     def settings() -> None:
-        open_setting_menu(ctx)
+        open_settings_menu(ctx)
 
     def boot_menu() -> None:
-        pass #TODO:implement
+        ctx.screens.pop()  # close this "Menu" screen
+        ctx.screens.push(ctx.main_menu)  # back to the title screen; shell stays preserved underneath
 
     def save() -> None:
         pass #TODO:implement

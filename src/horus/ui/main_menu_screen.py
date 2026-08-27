@@ -21,12 +21,18 @@ class MainMenuScreen(Screen):
     """Vertical main menu: Up/Down moves the selection, Enter activates it.
     Mirrors SettingScreen's shape, minus the value-cycling (Left/Right)."""
 
-    def __init__(self, buffer: ScreenBuffer, title: str, options: list[MenuOption]) -> None:
+    def __init__(self, buffer: ScreenBuffer, title: str, options: list[MenuOption], sounds=None,
+                 song: str | None = None, song_volume: float = 0.05, song_fade_in: float = 2.0) -> None:
         self._buffer = buffer
         self._title = title
         self._options = options
         self._selected = 0
         self._saved_screen: dict | None = None
+        self._sounds = sounds  # anything with .fade_in(name, ...); None disables the theme
+        self._song = song
+        self._song_volume = song_volume
+        self._song_fade_in = song_fade_in
+        self._song_player = None
 
     def on_push(self) -> None:
         self._saved_screen = self._buffer.snapshot()
@@ -34,21 +40,33 @@ class MainMenuScreen(Screen):
         self._buffer.clear()
         self._selected = 0
         self._render()
+        if self._sounds is not None and self._song is not None and self._song_player is None:
+            self._song_player = self._sounds.fade_in(
+                self._song, target_volume=self._song_volume, duration=self._song_fade_in, loop=True)
 
     def on_pop(self) -> None:
         self._buffer.restore(self._saved_screen)
+        if self._song_player is not None:
+            self._song_player.pause()
+            self._song_player = None
 
     def on_resume(self) -> None:
         self._render()
+        # theme keeps looping uninterrupted while a submenu (e.g. Settings) was open
 
     def _render(self) -> None:
+        # clear() also resets _writes -- see SettingScreen._render() for why
+        # that matters once a resize (e.g. font size change) can happen while
+        # this screen is showing.
+        self._buffer.clear()
         row = max(1, (self._buffer.rows - len(self._options)) // 2 - 3)
         col = max(0, (self._buffer.cols - len(self._title)) // 2)
         self._buffer.write_string(col, row, self._title)
 
         start_row = row + 3
+        widest_option = max((len(option.label) for option in self._options), default=0) + 2  # +2 for "> "/"  " prefix
+        option_col = max(0, (self._buffer.cols - widest_option) // 2)
         for i, option in enumerate(self._options):
-            option_col = max(0, (self._buffer.cols - 20) // 2)
             if i == self._selected:
                 self._buffer.write_string(option_col, start_row + i, f"> {option.label}",
                                             fg=self._buffer.default_bg, bg=self._buffer.default_fg)

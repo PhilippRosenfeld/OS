@@ -27,6 +27,7 @@ class Context:
     window: DisplayWindow = None
     effective_user: str = None    #user that executes command, defaults to user
     input_handler: "InputHandler" = None
+    main_menu: "MainMenuScreen" = None
 
 
     def __post_init__(self):

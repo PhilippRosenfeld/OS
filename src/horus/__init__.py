@@ -12,7 +12,8 @@ from horus.filesystem.seed import seed_minimal
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.shell_screen import ShellScreen
 from horus.ui.boot_screen import BootScreen, BootFrame
-from horus.paths import SAVES_DIR, DATA_DIR
+from horus.paths import SAVES_DIR, DATA_DIR, BOOT_SOUNDS_DIR, SOUNDS_DIR
+from horus.audio.sound_manager import SoundManager
 from horus.session.user import UserRegistry, User, UserRole
 from horus.session.seed import seed_users
 from horus.session.auth import hash_password
@@ -41,8 +42,27 @@ logger = logging.getLogger(__name__)
 
 def main() -> None:
     logger.info("-------------------- Application started --------------------")
-    window = DisplayWindow(font_path = "Px437_IBM_VGA_8x16.ttf", height=1080, title="Horus OS", char_width=8*char_size, char_height=16*char_size, margin=8)
+    window = DisplayWindow(font_path = "Px437_IBM_VGA_8x16.ttf",
+                           title="Horus OS",
+                           char_width=8*char_size,
+                           char_height=16*char_size,
+                           margin=8,
+                           fullscreen=cfg['display']['fullscreen'],
+                           width=cfg['display']['width'],
+                           height=cfg['display']['height'])
     
+
+    sounds = SoundManager()
+    sounds.set_volume(cfg['sound']['volume'])
+    sounds.load("boot_tick", BOOT_SOUNDS_DIR / "boot_tick.wav")
+    sounds.load("boot_complete", BOOT_SOUNDS_DIR / "boot_complete.wav")
+    sounds.load("logo_stinger", BOOT_SOUNDS_DIR / "ont5.wav")
+    sounds.load("monitor_switch_on", BOOT_SOUNDS_DIR / "monitor_switch_on.mp3")
+    sounds.load("hard_disk_spinup", BOOT_SOUNDS_DIR / "hard_disk_spinup.mp3")
+    sounds.load("startup_up_weird_noise", BOOT_SOUNDS_DIR / "startup_up_weird_noise.mp3")
+    sounds.load("menu_music", SOUNDS_DIR / "menu_music.mp3")
+    
+
 
     bus = EventBus()
     kernel = Kernel(registry=registry, bus=bus)
@@ -132,11 +152,14 @@ def main() -> None:
             MenuOption("Settings", _open_settings),
             MenuOption("Exit", _exit_game),
         ],
+        sounds=sounds,
+        song="menu_music",
     )
+    context.main_menu = main_menu
 
     def _on_boot_complete() -> None:
         screens.pop()
-        screens.push(LogoScreen(window.buffer, logo_lines, on_complete=_on_logo_complete))
+        screens.push(LogoScreen(window.buffer, logo_lines, on_complete=_on_logo_complete, sounds=sounds))
     
     def _on_logo_complete() -> None:
         screens.pop()
@@ -174,7 +197,7 @@ def main() -> None:
     
     shell_screen = ShellScreen(input_handler, screens)
     screens.push(shell_screen)
-    boot_screen = BootScreen(window.buffer, frames, on_complete=_on_boot_complete)
+    boot_screen = BootScreen(window.buffer, frames, on_complete=_on_boot_complete, sounds=sounds)
     screens.push(boot_screen)
 
     window.run()

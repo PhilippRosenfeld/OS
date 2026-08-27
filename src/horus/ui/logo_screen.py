@@ -14,16 +14,18 @@ class LogoScreen(Screen):
 
     def __init__(self, buffer: ScreenBuffer, lines: list[str],
                  on_complete: Callable[[], None],
-                 line_delay: float = 0.10, hold_time: float = 1.5) -> None:
+                 line_delay: float = 0.10, hold_time: float = 6.5, sounds=None) -> None:
         self._buffer = buffer
         self._lines = lines
         self._on_complete = on_complete
         self._line_delay = line_delay
         self._hold_time = hold_time
+        self._sounds = sounds  # anything with .play(name); None disables sound
         self._index = 0
         self._row = 0
         self._col_offset = 0
         self._finished = False
+        self._stinger_player = None
 
     def on_push(self) -> None:
         self._buffer.clear()
@@ -31,6 +33,9 @@ class LogoScreen(Screen):
         self._index = 0
         self._finished = False
         self._center_offset()
+        if self._sounds is not None:
+            self._sounds.set_sound_volume("logo_stinger", 0.5)
+            self._stinger_player = self._sounds.play("logo_stinger")
         self._schedule_next(0.0)
 
     def on_pop(self) -> None:
@@ -64,23 +69,28 @@ class LogoScreen(Screen):
         next_delay = self._line_delay if self._index < len(self._lines) else self._hold_time
         self._schedule_next(next_delay)
 
-    def _finish(self) -> None:
+    def _finish(self, skipped: bool = False) -> None:
         if self._finished:
             return
         self._finished = True
         pyglet.clock.unschedule(self._advance)
+        if skipped and self._stinger_player is not None:
+            self._stinger_player.pause()
         self._on_complete()
 
-    # --- Screen interface: any input skips straight to completion ---
+    # --- Screen interface: only handle_key/handle_enter skip straight to
+    # completion -- see BootScreen's handle_text/handle_motion comment for why
+    # handle_text/handle_motion must stay no-ops (avoids double-firing _finish()
+    # for a single keystroke and skipping straight through to Main Menu).
 
     def handle_text(self, text: str) -> None:
-        self._finish()
+        pass
 
     def handle_motion(self, motion: int) -> None:
-        self._finish()
+        pass
 
     def handle_enter(self) -> None:
-        self._finish()
+        self._finish(skipped=True)
 
     def handle_key(self, symbol: int, modifiers: int) -> None:
-        self._finish()
+        self._finish(skipped=True)

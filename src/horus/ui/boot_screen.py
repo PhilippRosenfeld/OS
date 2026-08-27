@@ -16,10 +16,14 @@ class BootFrame:
 
 class BootScreen(Screen):
     def __init__(self, buffer: ScreenBuffer, frames: list[BootFrame],
-                 on_complete: Callable[[], None]) -> None:
+                 on_complete: Callable[[], None], sounds=None,
+                 fade_out_target: float = 0.01, fade_out_duration: float = 2.0) -> None:
         self._buffer = buffer
         self._frames = frames
         self._on_complete = on_complete
+        self._sounds = sounds
+        self._fade_out_target = fade_out_target
+        self._fade_out_duration = fade_out_duration
         self._index = 0
         self._row = 0
         self._finished = False
@@ -31,13 +35,17 @@ class BootScreen(Screen):
         self._index = 0
         self._finished = False
         self._schedule_next(0.0)
+        if self._sounds is not None:
+            self._sounds.play("monitor_switch_on")
+            self._sounds.play("hard_disk_spinup")
+            self._sounds.play_delayed("startup_up_weird_noise", 5)
 
     def on_pop(self) -> None:
         pyglet.clock.unschedule(self._advance)
         self._buffer.clear()
 
     def on_resume(self) -> None:
-        pass  # boot screen never sits underneath another screen
+        pass
 
     def _schedule_next(self, delay: float) -> None:
         pyglet.clock.schedule_once(self._advance, delay)
@@ -56,6 +64,8 @@ class BootScreen(Screen):
             self._row -= overflow
 
         self._buffer.write_string(col=0, row=self._row, string=frame.text)
+        if frame.text.strip() and self._sounds is not None:
+            self._sounds.play("boot_tick")
         self._row += 1
         self._index += 1
 
@@ -69,14 +79,25 @@ class BootScreen(Screen):
             return
         self._finished = True
         pyglet.clock.unschedule(self._advance)
+        if self._sounds is not None:
+            # whatever ambient sounds are still going (e.g. monitor_switch_on,
+            # hard_disk_spinup) fade down instead of cutting off abruptly
+            self._sounds.fade_out(self._fade_out_target, self._fade_out_duration)
+            self._sounds.play("boot_complete")
         self._on_complete()
 
-    # --- Screen interface: any input skips the animation ---
+    # --- Screen interface: any key press skips the animation. Only handle_key
+    # and handle_enter react -- pyglet dispatches on_key_press for virtually
+    # every key (including ones that also produce on_text/on_text_motion), so
+    # reacting to handle_text/handle_motion too would double-fire _finish()
+    # for a single physical keystroke: it would pop straight through this
+    # screen AND the one pushed after it (e.g. skip Boot -> Logo -> Main Menu
+    # from one keypress instead of Boot -> Logo, waiting for the next).
     def handle_text(self, text: str) -> None:
-        self._finish()
+        pass
 
     def handle_motion(self, motion: int) -> None:
-        self._finish()
+        pass
 
     def handle_enter(self) -> None:
         self._finish()

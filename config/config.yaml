@@ -1,4 +1,10 @@
 debug_level: INFO
 
 display:
-  char_size: 3
+  char_size: 2
+  width: 2560 
+  height: 1600 
+  fullscreen: false
+
+sound:
+  volume: 0.05

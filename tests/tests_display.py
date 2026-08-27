@@ -93,6 +93,14 @@ def test_set_window_size_resizes_window_and_refits_grid():
         window._window.close()
 
 
+def test_close_closes_the_underlying_window():
+    """Regression test: DisplayWindow.close() didn't exist at all, so any
+    caller (e.g. an 'Exit' menu option) crashed with AttributeError."""
+    window = DisplayWindow(font_path=FONT, char_width=8, char_height=16, width=320, height=160, margin=0)
+    window.close()  # should not raise
+    assert window._window.context is None  # pyglet clears this on close
+
+
 # --- ScreenBuffer ---
 
 def test_screen_buffer_starts_blank_and_dirty():
