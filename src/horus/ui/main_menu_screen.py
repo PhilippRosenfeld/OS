@@ -22,16 +22,18 @@ class MainMenuScreen(Screen):
     Mirrors SettingScreen's shape, minus the value-cycling (Left/Right)."""
 
     def __init__(self, buffer: ScreenBuffer, title: str, options: list[MenuOption], sounds=None,
-                 song: str | None = None, song_volume: float = 0.05, song_fade_in: float = 2.0) -> None:
+                 song: str | None = None, song_volume: float = 0.05, song_fade_in: float = 2.0,
+                 song_fade_out: float = 6.0) -> None:
         self._buffer = buffer
         self._title = title
         self._options = options
         self._selected = 0
         self._saved_screen: dict | None = None
-        self._sounds = sounds  # anything with .fade_in(name, ...); None disables the theme
+        self._sounds = sounds  # anything with .fade_in(name, ...)/.fade_out(...); None disables the theme
         self._song = song
         self._song_volume = song_volume
         self._song_fade_in = song_fade_in
+        self._song_fade_out = song_fade_out
         self._song_player = None
 
     def on_push(self) -> None:
@@ -45,10 +47,16 @@ class MainMenuScreen(Screen):
                 self._song, target_volume=self._song_volume, duration=self._song_fade_in, loop=True)
 
     def on_pop(self) -> None:
+        """Fades the theme out (e.g. picking "Continue" and returning to the
+        shell) rather than cutting it off -- but note this only fires when
+        THIS screen is popped, not when a submenu like Settings is pushed on
+        top of it, so the theme keeps looping uninterrupted while browsing
+        Settings (see on_resume)."""
         self._buffer.restore(self._saved_screen)
-        if self._song_player is not None:
-            self._song_player.pause()
-            self._song_player = None
+        if self._sounds is not None and self._song_player is not None:
+            player = self._song_player
+            self._sounds.fade_out(0.0, duration=self._song_fade_out, on_complete=player.pause)
+        self._song_player = None
 
     def on_resume(self) -> None:
         self._render()

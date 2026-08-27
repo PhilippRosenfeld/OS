@@ -121,17 +121,27 @@ class SoundManager:
         pyglet.clock.schedule_once(_fire, delay)
         return _fire
 
-    def fade_out(self, target_volume: float, duration: float = 1.5, step: float = 0.05) -> None:
+    def fade_out(self, target_volume: float, duration: float = 1.5, step: float = 0.05,
+                 on_complete: Callable[[], None] | None = None) -> None:
         """Gradually lowers the volume of every sound currently playing down to
         target_volume over `duration` seconds, then stops adjusting. Only
         touches players already active when called -- sounds started after the
         fade begins are unaffected, and the SoundManager's own volume() level
-        used for future play()/play_sequence() calls is left untouched."""
+        used for future play()/play_sequence() calls is left untouched.
+
+        Pass on_complete to run something once the fade finishes -- e.g. to
+        actually stop a looping player once it's silent, since fading it to
+        0.0 alone leaves it looping forever inaudibly:
+
+            sounds.fade_out(0.0, duration=2.0, on_complete=player.pause)
+        """
         target_volume = max(0.0, min(1.0, target_volume))
         self._players = [p for p in self._players if p.playing]
         players = list(self._players)
         starts = {id(p): p.volume for p in players}
         if not players:
+            if on_complete is not None:
+                on_complete()
             return
 
         steps = max(1, round(duration / step))
@@ -150,6 +160,11 @@ class SoundManager:
                     logger.warning("failed to update volume while fading out", exc_info=True)
             if progress >= 1.0:
                 pyglet.clock.unschedule(_tick)
+                if on_complete is not None:
+                    try:
+                        on_complete()
+                    except Exception:
+                        logger.warning("fade_out on_complete callback raised", exc_info=True)
 
         pyglet.clock.schedule_interval(_tick, step)
 

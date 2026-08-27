@@ -301,18 +301,30 @@ def test_main_menu_does_not_restart_the_song_on_resume():
     assert len(sounds.fade_ins) == 1  # still just the one fade-in from on_push()
 
 
-def test_main_menu_stops_the_song_on_pop():
+def test_main_menu_fades_out_the_song_on_pop():
+    """Regression test: on_pop() used to cut the theme off with a plain
+    .pause() -- picking 'Continue' should fade it out instead."""
     buffer = ScreenBuffer(80, 24)
     sounds = FakeSounds()
     screen = MainMenuScreen(buffer, "TITLE", [MainMenuOption("Continue", lambda: None)],
-                             sounds=sounds, song="menu_theme")
+                             sounds=sounds, song="menu_theme", song_fade_out=3.0)
     screen.on_push()
     player = screen._song_player
     assert player.playing is True
 
     screen.on_pop()
-    assert player.paused_count == 1
+    assert sounds.fades == [(0.0, 3.0)]  # faded out, not abruptly cut
+    assert player.paused_count == 1  # ...but still actually stopped once silent (FakeSounds.fade_out fires on_complete immediately)
     assert screen._song_player is None
+
+
+def test_main_menu_pop_without_a_song_does_not_touch_sounds():
+    buffer = ScreenBuffer(80, 24)
+    sounds = FakeSounds()
+    screen = MainMenuScreen(buffer, "TITLE", [MainMenuOption("Continue", lambda: None)], sounds=sounds)  # song=None
+    screen.on_push()
+    screen.on_pop()  # should not raise
+    assert sounds.fades == []
 
 
 # --- SettingScreen ---
@@ -465,8 +477,10 @@ class FakeSounds:
         self.play_players[name] = player
         return player
 
-    def fade_out(self, target_volume: float, duration: float) -> None:
+    def fade_out(self, target_volume: float, duration: float, on_complete=None) -> None:
         self.fades.append((target_volume, duration))
+        if on_complete is not None:
+            on_complete()
 
     def set_sound_volume(self, name: str, volume: float) -> None:
         self.sound_volumes[name] = volume

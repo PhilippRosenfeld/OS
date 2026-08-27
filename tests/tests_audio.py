@@ -305,6 +305,46 @@ def test_fade_out_unschedules_itself_once_target_is_reached():
             mock_unschedule.assert_called_once()
 
 
+def test_fade_out_on_complete_fires_once_the_fade_finishes():
+    sm = SoundManager()
+    sm.load("tick", BOOT_SOUNDS_DIR / "boot_tick.wav")
+    sm.play("tick")
+
+    calls = []
+    captured = {}
+    with patch("pyglet.clock.schedule_interval", side_effect=lambda func, interval: captured.update(func=func)):
+        sm.fade_out(target_volume=0.0, duration=0.2, step=0.1, on_complete=lambda: calls.append(True))
+
+    tick = captured["func"]
+    tick(0.1)  # step 1 of 2
+    assert calls == []
+    tick(0.1)  # step 2 of 2 -> done
+    assert calls == [True]
+
+
+def test_fade_out_on_complete_fires_immediately_when_nothing_is_playing():
+    sm = SoundManager()
+    calls = []
+    with patch("pyglet.clock.schedule_interval") as mock_schedule:
+        sm.fade_out(target_volume=0.0, duration=1.0, on_complete=lambda: calls.append(True))
+    mock_schedule.assert_not_called()
+    assert calls == [True]
+
+
+def test_fade_out_on_complete_exception_is_swallowed():
+    sm = SoundManager()
+    sm.load("tick", BOOT_SOUNDS_DIR / "boot_tick.wav")
+    sm.play("tick")
+
+    def boom():
+        raise RuntimeError("boom")
+
+    captured = {}
+    with patch("pyglet.clock.schedule_interval", side_effect=lambda func, interval: captured.update(func=func)):
+        sm.fade_out(target_volume=0.0, duration=0.1, step=0.1, on_complete=boom)
+    captured["func"](0.1)  # should not raise despite on_complete blowing up
+
+
 def test_fade_out_clamps_target_volume():
     sm = SoundManager()
     sm.load("tick", BOOT_SOUNDS_DIR / "boot_tick.wav")
