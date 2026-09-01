@@ -5,6 +5,7 @@ from horus.filesystem.backend.memory import InMemoryVFS
 from horus.filesystem.node import NodeType
 from horus.filesystem.permissions import AccessDeniedError
 from horus.filesystem.path_utils import resolve_path
+from horus.filesystem.cipher import WrongKeyError
 
 ROOT = "root"
 
@@ -330,6 +331,106 @@ def test_get_file_type_treats_a_leading_dot_as_no_extension(fs):
 def test_get_file_type_missing_path_raises(fs):
     with pytest.raises(FileNotFoundError):
         fs.get_file_type("/nope.txt")
+
+
+# --- encrypt_file / decrypt_file ---
+
+def test_encrypt_file_appends_crypt_extension_and_removes_old_path(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/secret.txt", "top secret", user=ROOT)
+
+    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, key="k")
+
+    assert new_path == "/home/secret.txt.crypt"
+    assert fs.exists("/home/secret.txt.crypt") is True
+    assert fs.exists("/home/secret.txt") is False
+    assert fs.get_file_type(new_path) == ".crypt"
+
+
+def test_encrypted_content_is_not_the_plaintext(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/secret.txt", "top secret", user=ROOT)
+    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, key="k")
+    assert "top secret" not in fs.read_file(new_path, user=ROOT)
+
+
+def test_decrypt_file_restores_original_path_and_content(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/secret.txt", "top secret", user=ROOT)
+    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, key="k")
+
+    restored_path = fs.decrypt_file(new_path, user=ROOT, key="k")
+
+    assert restored_path == "/home/secret.txt"
+    assert fs.exists("/home/secret.txt") is True
+    assert fs.exists(new_path) is False
+    assert fs.read_file("/home/secret.txt", user=ROOT) == "top secret"
+
+
+def test_decrypt_file_with_aes_method_round_trips(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/secret.txt", "top secret", user=ROOT)
+    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, key="k", method="aes")
+
+    restored_path = fs.decrypt_file(new_path, user=ROOT, key="k", method="aes")
+
+    assert fs.read_file(restored_path, user=ROOT) == "top secret"
+
+
+def test_decrypt_file_with_wrong_key_raises_and_leaves_file_untouched(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/secret.txt", "top secret", user=ROOT)
+    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, key="right")
+
+    with pytest.raises(WrongKeyError):
+        fs.decrypt_file(new_path, user=ROOT, key="wrong")
+    assert fs.exists(new_path) is True  # still encrypted -- nothing was silently corrupted
+
+
+def test_decrypt_file_with_wrong_method_raises_even_with_the_right_key(fs):
+    """The method is a real part of the secret, not just a hint -- decrypting
+    with the wrong one fails exactly like the wrong key would, since it's
+    never read back from the stored data."""
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/secret.txt", "top secret", user=ROOT)
+    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, key="k", method="xor")
+
+    with pytest.raises(WrongKeyError):
+        fs.decrypt_file(new_path, user=ROOT, key="k", method="aes")
+    assert fs.exists(new_path) is True  # still encrypted
+
+
+def test_encrypt_file_on_missing_path_raises(fs):
+    with pytest.raises(FileNotFoundError):
+        fs.encrypt_file("/nope.txt", user=ROOT, key="k")
+
+
+def test_encrypt_file_on_a_directory_raises(fs):
+    fs.mkdir("/home", user=ROOT)
+    with pytest.raises(FileNotFoundError):
+        fs.encrypt_file("/home", user=ROOT, key="k")
+
+
+def test_encrypt_file_already_encrypted_raises(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/secret.txt", "top secret", user=ROOT)
+    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, key="k")
+    with pytest.raises(ValueError):
+        fs.encrypt_file(new_path, user=ROOT, key="k")
+
+
+def test_decrypt_file_on_a_non_encrypted_file_raises(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/plain.txt", "hi", user=ROOT)
+    with pytest.raises(ValueError):
+        fs.decrypt_file("/home/plain.txt", user=ROOT, key="k")
+
+
+def test_encrypt_file_requires_write_permission(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/secret.txt", "top secret", user=ROOT, protected=True)
+    with pytest.raises(AccessDeniedError):
+        fs.encrypt_file("/home/secret.txt", user="alice", key="k")
 
 
 def test_timestamps_are_stored_at_second_precision(tmp_path):

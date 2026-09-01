@@ -9,7 +9,7 @@ from horus.kernel.kernel import Kernel
 from horus.kernel.registry import Registry, registry
 from horus.kernel.commands.cmd_text import echo
 from horus.kernel.commands.cmd_misc import color, su
-from horus.kernel.commands.cmd_fs import ls, cat
+from horus.kernel.commands.cmd_fs import ls, cat, encrypt, decrypt
 from horus.kernel.commands.cmd_menu import horus_menu, open_settings_menu
 from horus.display.colors import NAMED_COLORS
 from horus.filesystem.backend.memory import InMemoryVFS
@@ -503,3 +503,112 @@ def test_cat_without_read_permission_writes_error():
     cat(ctx, ["secret.txt"])
 
     assert "Permission denied" in row_text(buffer, 0)
+
+
+# --- encrypt / decrypt commands ---
+
+def make_fs_context(cols=80, rows=10):
+    ctx, buffer = make_context(cols=cols, rows=rows)
+    ctx.fs = InMemoryVFS()
+    ctx.fs.mkdir("/home", user="root")
+    ctx.fs.write_file("/home/secret.txt", "top secret", user="root")
+    ctx.cwd = "/home"
+    return ctx, buffer
+
+
+def test_encrypt_renames_the_file_with_a_crypt_extension():
+    ctx, buffer = make_fs_context()
+    encrypt(ctx, ["secret.txt", "-k", "mykey"])
+    assert ctx.fs.exists("/home/secret.txt.crypt") is True
+    assert ctx.fs.exists("/home/secret.txt") is False
+    assert "Encrypted:" in full_text(buffer)
+
+
+def test_encrypt_without_a_key_generates_one_and_reports_it():
+    ctx, buffer = make_fs_context()
+    encrypt(ctx, ["secret.txt"])
+    assert "Generated key:" in full_text(buffer)
+
+
+def test_encrypt_with_a_key_does_not_report_a_generated_key():
+    ctx, buffer = make_fs_context()
+    encrypt(ctx, ["secret.txt", "-k", "mykey"])
+    assert "Generated key:" not in full_text(buffer)
+
+
+def test_encrypted_file_can_no_longer_be_catted():
+    ctx, buffer = make_fs_context()
+    encrypt(ctx, ["secret.txt", "-k", "mykey"])
+    cat(ctx, ["secret.txt.crypt"])
+    assert "File is encrypted, decrypt it first" in full_text(buffer)
+
+
+def test_encrypt_missing_file_writes_error():
+    ctx, buffer = make_fs_context()
+    encrypt(ctx, ["nope.txt", "-k", "mykey"])
+    assert "No such file or directory" in full_text(buffer)
+
+
+def test_encrypt_a_directory_writes_error():
+    ctx, buffer = make_fs_context()
+    encrypt(ctx, ["/home", "-k", "mykey"])
+    assert "Is a directory" in full_text(buffer)
+
+
+def test_encrypt_already_encrypted_file_writes_error():
+    ctx, buffer = make_fs_context()
+    encrypt(ctx, ["secret.txt", "-k", "mykey"])
+    encrypt(ctx, ["secret.txt.crypt", "-k", "mykey"])
+    assert "already encrypted" in full_text(buffer)
+
+
+def test_decrypt_restores_the_original_file_and_content():
+    ctx, buffer = make_fs_context()
+    encrypt(ctx, ["secret.txt", "-k", "mykey"])
+    decrypt(ctx, ["secret.txt.crypt", "-k", "mykey"])
+    assert ctx.fs.exists("/home/secret.txt") is True
+    assert ctx.fs.read_file("/home/secret.txt", user="root") == "top secret"
+
+
+def test_decrypt_with_wrong_key_writes_error_and_keeps_file_encrypted():
+    ctx, buffer = make_fs_context()
+    encrypt(ctx, ["secret.txt", "-k", "mykey"])
+    decrypt(ctx, ["secret.txt.crypt", "-k", "wrongkey"])
+    assert "wrong key" in full_text(buffer)
+    assert ctx.fs.exists("/home/secret.txt.crypt") is True
+
+
+def test_decrypt_without_key_argument_reports_parse_error():
+    ctx, buffer = make_fs_context()
+    encrypt(ctx, ["secret.txt", "-k", "mykey"])
+    decrypt(ctx, ["secret.txt.crypt"])  # -k is required by argparse
+    assert ctx.fs.exists("/home/secret.txt.crypt") is True
+
+
+def test_decrypt_a_non_encrypted_file_writes_error():
+    ctx, buffer = make_fs_context()
+    decrypt(ctx, ["secret.txt", "-k", "mykey"])
+    assert "not encrypted" in full_text(buffer)
+
+
+def test_decrypt_with_wrong_method_writes_error_even_with_the_right_key():
+    """The method must match exactly like the key -- it's not auto-detected
+    or hinted at, so guessing it wrong fails the same way a wrong key does."""
+    ctx, buffer = make_fs_context()
+    encrypt(ctx, ["secret.txt", "-k", "mykey", "-m", "xor"])
+    decrypt(ctx, ["secret.txt.crypt", "-k", "mykey", "-m", "aes"])
+    assert "wrong key or method" in full_text(buffer)
+    assert ctx.fs.exists("/home/secret.txt.crypt") is True
+
+
+def test_decrypt_default_method_is_xor_matching_encrypts_default():
+    ctx, buffer = make_fs_context()
+    encrypt(ctx, ["secret.txt", "-k", "mykey"])  # default method: xor
+    decrypt(ctx, ["secret.txt.crypt", "-k", "mykey"])  # default method: xor
+    assert ctx.fs.exists("/home/secret.txt") is True
+
+
+def test_encrypt_help_flag_reports_parse_error_without_raising():
+    ctx, buffer = make_fs_context()
+    encrypt(ctx, ["--help"])
+    assert ctx.fs.exists("/home/secret.txt") is True  # untouched

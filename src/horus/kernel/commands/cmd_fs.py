@@ -4,7 +4,10 @@ from horus.kernel.commands.command_parser import CommandArgumentParser, CommandP
 from horus.kernel.registry import command
 from horus.filesystem.node import NodeType, ProtectedFileError
 from horus.filesystem.permissions import AccessDeniedError
+from horus.filesystem.file_types import FILE_TYPES
+from horus.filesystem.cipher import WrongKeyError
 import re
+import secrets
 
 _FLAG_ALIASES = {
     "p": "protected", "protected": "protected",
@@ -76,6 +79,21 @@ def _build_cat_parser() -> CommandArgumentParser:
     parser.add_argument("path")
     return parser
 
+def _build_encrypt_parser() -> CommandArgumentParser:
+    parser = CommandArgumentParser(prog="encrypt", add_help=True, description="Encrypt a file")
+    parser.add_argument("path")
+    parser.add_argument("-k", "--key", help="Optional encryption key")
+    parser.add_argument("-m", "--method", choices=["xor", "aes"], default="xor", help="Encryption method to use (default: xor)")
+    return parser
+
+def _build_decrypt_parser() -> CommandArgumentParser:
+    parser = CommandArgumentParser(prog="decrypt", add_help=True, description="Decrypt a file")
+    parser.add_argument("path")
+    parser.add_argument("-k", "--key", required=True, help="Decryption key")
+    parser.add_argument("-m", "--method", choices=["xor", "aes"], default="xor",
+                         help="Must match the method the file was encrypted with (default: xor)")
+    return parser
+
 _ls_parser = _build_ls_parser()
 _cd_parser = _build_cd_parser()
 _mkdir_parser = _build_mkdir_parser()
@@ -83,6 +101,8 @@ _rm_parser = _build_rm_parser()
 _chmod_parser = _build_chmod_parser()
 _chattr_parser = _build_chattr_parser()
 _cat_parser = _build_cat_parser()
+_encrypt_parser = _build_encrypt_parser()
+_decrypt_parser = _build_decrypt_parser()
 
 def _print_node(ctx, node, show_meta: bool) -> None:
     type = "DIRECTORY" if node.type is NodeType.DIRECTORY else "FILE"
@@ -254,8 +274,6 @@ def chattr(ctx, argv: list[str]) -> None:
 
 @command("cat", help_text="Print a file's contents")
 def cat(ctx, argv: list[str]) -> None:
-    cat_supported_types = [".txt"]
-    
     try:
         args = _cat_parser.parse_args(argv)
     except CommandParseError as e:
@@ -263,8 +281,14 @@ def cat(ctx, argv: list[str]) -> None:
         return
 
     path = ctx.resolve_path(args.path)
+    cat_supported_types = [ext for ext, category in FILE_TYPES.items() if category == "text"]
+
     try:
-        if ctx.fs.get_file_type(path) in cat_supported_types:
+        file_type = ctx.fs.get_file_type(path)
+        if file_type == ".crypt":
+            ctx.write_line(f"cat: {args.path}: File is encrypted, decrypt it first")
+            return
+        elif file_type in cat_supported_types:
             content = ctx.fs.read_file(path, user=ctx.effective_user)
         else:
             raise NotSupportedError(f"cat: {args.path}: Not a text file")
@@ -282,3 +306,64 @@ def cat(ctx, argv: list[str]) -> None:
         return
 
     ctx.write_line(content)
+
+@command("encrypt", help_text="Encrypt a file")
+def encrypt(ctx, argv: list[str]) -> None:
+    try:
+        args = _encrypt_parser.parse_args(argv)
+    except CommandParseError as e:
+        ctx.write_line(e.message or e.usage)
+        return
+
+    path = ctx.resolve_path(args.path)
+    key = args.key or secrets.token_hex(4)
+
+    try:
+        new_path = ctx.fs.encrypt_file(path, user=ctx.effective_user, key=key, method=args.method)
+    except FileNotFoundError:
+        if ctx.fs.exists(path):
+            ctx.write_line(f"encrypt: {args.path}: Is a directory")
+        else:
+            ctx.write_line(f"encrypt: {args.path}: No such file or directory")
+        return
+    except AccessDeniedError:
+        ctx.write_line(f"encrypt: {args.path}: Permission denied")
+        return
+    except (ValueError, FileExistsError) as e:
+        ctx.write_line(f"encrypt: {e}")
+        return
+
+    ctx.write_line(f"Encrypted: {args.path} -> {new_path.rsplit('/', 1)[-1]} (method={args.method})")
+    if not args.key:
+        ctx.write_line(f"Generated key: {key} -- remember it, you'll need it to decrypt")
+
+
+@command("decrypt", help_text="Decrypt a file")
+def decrypt(ctx, argv: list[str]) -> None:
+    try:
+        args = _decrypt_parser.parse_args(argv)
+    except CommandParseError as e:
+        ctx.write_line(e.message or e.usage)
+        return
+
+    path = ctx.resolve_path(args.path)
+
+    try:
+        new_path = ctx.fs.decrypt_file(path, user=ctx.effective_user, key=args.key, method=args.method)
+    except FileNotFoundError:
+        if ctx.fs.exists(path):
+            ctx.write_line(f"decrypt: {args.path}: Is a directory")
+        else:
+            ctx.write_line(f"decrypt: {args.path}: No such file or directory")
+        return
+    except AccessDeniedError:
+        ctx.write_line(f"decrypt: {args.path}: Permission denied")
+        return
+    except WrongKeyError:
+        ctx.write_line(f"decrypt: {args.path}: wrong key or method")
+        return
+    except (ValueError, FileExistsError) as e:
+        ctx.write_line(f"decrypt: {e}")
+        return
+
+    ctx.write_line(f"Decrypted: {args.path} -> {new_path.rsplit('/', 1)[-1]}")

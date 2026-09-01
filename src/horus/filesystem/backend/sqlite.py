@@ -6,6 +6,7 @@ from horus.filesystem.vfs import VFS
 from horus.filesystem.node import Node, NodeType, ProtectedFileError
 from horus.filesystem.path_utils import resolve_path as _resolve_path
 from horus.filesystem.permissions import require_write, require_read, can_write, AccessDeniedError, require_metadata_change, octal_to_permissions
+from horus.filesystem.cipher import encrypt_bytes, decrypt_bytes
 
 class SQLiteVFS(VFS):
     """SQLite-backed filesystem. Persists across app restarts: the schema is
@@ -260,3 +261,45 @@ class SQLiteVFS(VFS):
         params.append(path)
         self._conn.execute(f"UPDATE nodes SET {', '.join(updates)} WHERE path = ?", params)
         self._conn.commit()
+
+    def encrypt_file(self, path: str, user: str, key: str, method: str = "xor") -> str:
+        row = self._fetch(path)
+        if row is None or row["type"] != NodeType.FILE.value:
+            raise FileNotFoundError(path)
+        if row["name"].endswith(".crypt"):
+            raise ValueError(f"'{path}' is already encrypted")
+        require_write(self._row_to_node(row), user, path)
+
+        new_path = path + ".crypt"
+        if self.exists(new_path):
+            raise FileExistsError(new_path)
+
+        stored = encrypt_bytes((row["content"] or "").encode("utf-8"), key, method)
+        self._conn.execute(
+            "UPDATE nodes SET path = ?, name = ?, content = ?, size = ?, modified_at = ? WHERE path = ?",
+            (new_path, row["name"] + ".crypt", stored, len(stored), self._now(), path),
+        )
+        self._conn.commit()
+        return new_path
+
+    def decrypt_file(self, path: str, user: str, key: str, method: str = "xor") -> str:
+        row = self._fetch(path)
+        if row is None or row["type"] != NodeType.FILE.value:
+            raise FileNotFoundError(path)
+        if not row["name"].endswith(".crypt"):
+            raise ValueError(f"'{path}' is not encrypted")
+        require_write(self._row_to_node(row), user, path)
+
+        plaintext = decrypt_bytes(row["content"] or "", key, method)
+
+        new_path = path[:-len(".crypt")]
+        if self.exists(new_path):
+            raise FileExistsError(new_path)
+
+        content = plaintext.decode("utf-8")
+        self._conn.execute(
+            "UPDATE nodes SET path = ?, name = ?, content = ?, size = ?, modified_at = ? WHERE path = ?",
+            (new_path, row["name"][:-len(".crypt")], content, len(content), self._now(), path),
+        )
+        self._conn.commit()
+        return new_path

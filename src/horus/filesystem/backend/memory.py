@@ -4,6 +4,7 @@ from horus.filesystem.vfs import VFS
 from horus.filesystem.node import Node, NodeType, ProtectedFileError
 from horus.filesystem.path_utils import resolve_path as _resolve_path
 from horus.filesystem.permissions import require_write, require_read, require_metadata_change, can_write, can_read, AccessDeniedError, octal_to_permissions
+from horus.filesystem.cipher import encrypt_bytes, decrypt_bytes
 
 class _TreeNode:
 
@@ -164,4 +165,49 @@ class InMemoryVFS(VFS):
         if hidden is not None:
             node.meta.hidden = hidden
         if immutable is not None:
-            node.meta.immutable = immutable        
+            node.meta.immutable = immutable
+
+    def encrypt_file(self, path: str, user: str, key: str, method: str = "xor") -> str:
+        node = self._walk(path)
+        if node is None or node.meta.type != NodeType.FILE:
+            raise FileNotFoundError(path)
+        if node.meta.name.endswith(".crypt"):
+            raise ValueError(f"'{path}' is already encrypted")
+        require_write(node.meta, user, path)
+
+        parent, name = self._parent_and_name(path)
+        new_name = name + ".crypt"
+        if new_name in parent.children:
+            raise FileExistsError(path + ".crypt")
+
+        stored = encrypt_bytes(node.content.encode("utf-8"), key, method)
+        del parent.children[name]
+        node.meta.name = new_name
+        node.meta.size = len(stored)
+        node.content = stored
+        parent.children[new_name] = node
+        return path + ".crypt"
+
+    def decrypt_file(self, path: str, user: str, key: str, method: str = "xor") -> str:
+        node = self._walk(path)
+        if node is None or node.meta.type != NodeType.FILE:
+            raise FileNotFoundError(path)
+        if not node.meta.name.endswith(".crypt"):
+            raise ValueError(f"'{path}' is not encrypted")
+        require_write(node.meta, user, path)
+
+        plaintext = decrypt_bytes(node.content, key, method)
+
+        parent, name = self._parent_and_name(path)
+        new_name = name[:-len(".crypt")]
+        new_path = path[:-len(".crypt")]
+        if new_name in parent.children:
+            raise FileExistsError(new_path)
+
+        content = plaintext.decode("utf-8")
+        del parent.children[name]
+        node.meta.name = new_name
+        node.meta.size = len(content)
+        node.content = content
+        parent.children[new_name] = node
+        return new_path

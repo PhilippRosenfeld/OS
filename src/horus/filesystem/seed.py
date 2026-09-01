@@ -9,6 +9,8 @@ from horus.paths import VFS_SEED_DIR
 _TEXT_FILE_SEEDS: list[tuple[str, str]] = [
     ("readme.txt", "/home/root/readme.txt"),
     ("poem.txt", "/home/root/poem.txt"),
+    ("audio.wav", "/home/root/audio.wav"),
+    ("video.mp4", "/home/root/video.mp4")
 ]
 
 

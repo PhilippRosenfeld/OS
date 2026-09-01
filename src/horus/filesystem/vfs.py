@@ -53,3 +53,19 @@ class VFS(ABC):
         for 'notes.txt', '' for a file with no extension), or '.dir' for
         directories."""
         pass
+
+    @abstractmethod
+    def encrypt_file(self, path: str, user: str, key: str, method: str = "xor") -> str:
+        """Encrypts a file's content in place and renames it by appending
+        '.crypt' (see filesystem/file_types.py), so it's no longer treated
+        as its original type (e.g. cat refuses it). Returns the new path."""
+        pass
+
+    @abstractmethod
+    def decrypt_file(self, path: str, user: str, key: str, method: str = "xor") -> str:
+        """Reverses encrypt_file(): strips '.crypt' from the name and
+        restores the original content. `method` must be the exact one the
+        file was encrypted with -- it is not auto-detected, so the wrong
+        method fails exactly like the wrong key (cipher.WrongKeyError).
+        Returns the new (original) path."""
+        pass
