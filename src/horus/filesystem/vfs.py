@@ -29,7 +29,7 @@ class VFS(ABC):
         pass
 
     @abstractmethod
-    def read_file(self, path: str) -> str:
+    def read_file(self, path: str, user: str) -> str:
         pass
     
     @abstractmethod

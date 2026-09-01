@@ -7,18 +7,28 @@ class ShellScreen(Screen):
     """Adapts InputHandler to the Screen interface, so the normal shell is just
     the bottom-most screen on the ScreenManager's stack."""
 
-    def __init__(self, input_handler: InputHandler, screens: ScreenManager) -> None:
+    def __init__(self, input_handler: InputHandler, screens: ScreenManager, window=None) -> None:
         self._input_handler = input_handler
         self._screens = screens
+        self._window = window  # anything with .start_cursor_blink(); None skips the guard below
+        self._cursor_blink_started = False
 
     def on_push(self) -> None:
+        """Deliberately does NOT start the cursor blink -- at app start this
+        fires before Boot/Logo/Main Menu get pushed on top, and starting the
+        blink here would flip cursor_visible underneath those screens too
+        (they only set it False once in their own on_push())."""
         self._input_handler.start_line()
 
     def on_resume(self) -> None:
         """Called when a submenu above us closes -- redraw the prompt for the line
-        that was waiting underneath it."""
+        that was waiting underneath it, and start the cursor blink the first
+        time the shell is actually revealed (see on_push() for why not there)."""
         self._input_handler.start_line()
-        
+        if self._window is not None and not self._cursor_blink_started:
+            self._window.start_cursor_blink()
+            self._cursor_blink_started = True
+
 
     def handle_text(self, text: str) -> None:
         self._input_handler._handle_text(text)

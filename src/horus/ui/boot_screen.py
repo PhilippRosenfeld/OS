@@ -72,7 +72,7 @@ class BootScreen(Screen):
         if self._index < len(self._frames):
             self._schedule_next(self._frames[self._index].delay)
         else:
-            self._schedule_next(0.5)  # brief pause after the last line
+            self._schedule_next(3.5)  # brief pause after the last line
 
     def _finish(self) -> None:
         if self._finished:

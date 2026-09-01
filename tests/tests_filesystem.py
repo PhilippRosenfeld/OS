@@ -168,7 +168,7 @@ def test_write_then_read_file(tmp_path):
     fs = make(tmp_path)
     fs.mkdir("/home", user=ROOT)
     fs.write_file("/home/readme.txt", "hello", user=ROOT)
-    assert fs.read_file("/home/readme.txt") == "hello"
+    assert fs.read_file("/home/readme.txt", user=ROOT) == "hello"
 
 
 def test_write_file_missing_parent_raises(tmp_path):
@@ -182,21 +182,56 @@ def test_write_file_overwrites_existing_content_and_size(tmp_path):
     fs.mkdir("/home", user=ROOT)
     fs.write_file("/home/f.txt", "hello", user=ROOT)
     fs.write_file("/home/f.txt", "hi", user=ROOT)
-    assert fs.read_file("/home/f.txt") == "hi"
+    assert fs.read_file("/home/f.txt", user=ROOT) == "hi"
     assert fs.get_meta("/home/f.txt").size == 2
 
 
 def test_read_file_missing_raises(tmp_path):
     fs = make(tmp_path)
     with pytest.raises(FileNotFoundError):
-        fs.read_file("/nope.txt")
+        fs.read_file("/nope.txt", user=ROOT)
 
 
 def test_read_file_on_a_directory_raises(tmp_path):
     fs = make(tmp_path)
     fs.mkdir("/home", user=ROOT)
     with pytest.raises(FileNotFoundError):
-        fs.read_file("/home")
+        fs.read_file("/home", user=ROOT)
+
+
+# --- read_file permission checks ---
+
+def test_read_file_denied_without_read_permission(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/secret.txt", "eyes only", user=ROOT)
+    fs.chmod("/home/secret.txt", mode="700", user=ROOT)  # owner-only, no read for others
+
+    with pytest.raises(AccessDeniedError):
+        fs.read_file("/home/secret.txt", user="user1")
+
+
+def test_read_file_allowed_with_default_permissions(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/notes.txt", "hi", user=ROOT)  # default rwxr-xr-x: others can read
+    assert fs.read_file("/home/notes.txt", user="user1") == "hi"
+
+
+def test_read_file_owner_can_read_their_own_file_regardless_of_other_bits(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.chmod("/home", mode="777", user=ROOT)  # let user1 create things in here
+    fs.mkdir("/home/user1", user="user1")
+    fs.write_file("/home/user1/notes.txt", "mine", user="user1")
+    fs.chmod("/home/user1/notes.txt", mode="700", user="user1")  # locks out everyone but the owner
+    assert fs.read_file("/home/user1/notes.txt", user="user1") == "mine"
+
+
+def test_root_can_always_read_a_file(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.chmod("/home", mode="777", user=ROOT)
+    fs.mkdir("/home/user1", user="user1")
+    fs.write_file("/home/user1/notes.txt", "mine", user="user1")
+    fs.chmod("/home/user1/notes.txt", mode="700", user="user1")
+    assert fs.read_file("/home/user1/notes.txt", user=ROOT) == "mine"
 
 
 # --- list_dir ---
@@ -310,7 +345,7 @@ def test_protected_file_cannot_be_written_by_non_root(fs):
 
     with pytest.raises(AccessDeniedError):
         fs.write_file("/home/f.txt", "changed", user="user1")
-    assert fs.read_file("/home/f.txt") == "original"
+    assert fs.read_file("/home/f.txt", user=ROOT) == "original"
 
 
 def test_protected_file_can_still_be_written_by_root(fs):
@@ -318,7 +353,7 @@ def test_protected_file_can_still_be_written_by_root(fs):
     fs.write_file("/home/f.txt", "original", user=ROOT, protected=True)
 
     fs.write_file("/home/f.txt", "changed", user=ROOT)
-    assert fs.read_file("/home/f.txt") == "changed"
+    assert fs.read_file("/home/f.txt", user=ROOT) == "changed"
 
 
 def test_write_file_protected_flag_only_applies_on_creation():
@@ -328,7 +363,7 @@ def test_write_file_protected_flag_only_applies_on_creation():
     fs.write_file("/home/f.txt", "original", user=ROOT)
     fs.write_file("/home/f.txt", "changed", user=ROOT, protected=True)  # ignored on update
     fs.write_file("/home/f.txt", "changed again", user=ROOT)  # still not protected -> should work
-    assert fs.read_file("/home/f.txt") == "changed again"
+    assert fs.read_file("/home/f.txt", user=ROOT) == "changed again"
 
 
 def test_protected_directory_cannot_be_removed_by_non_root(fs):
@@ -358,7 +393,7 @@ def test_non_owner_cannot_write_into_a_directory_without_write_permission(fs):
 def test_root_can_always_write_into_an_unprotected_directory(fs):
     fs.mkdir("/home", user=ROOT)
     fs.write_file("/home/f.txt", "x", user=ROOT)
-    assert fs.read_file("/home/f.txt") == "x"
+    assert fs.read_file("/home/f.txt", user=ROOT) == "x"
 
 
 def test_removing_a_file_inside_a_protected_directory_by_non_root_raises(fs):
@@ -398,4 +433,20 @@ def test_content_persists_across_reconnect(tmp_path):
 
     fs2 = SQLiteVFS(db_path)
     assert fs2.is_empty() is False
-    assert fs2.read_file("/home/readme.txt") == "welcome"
+
+
+# --- seed_minimal / disk-sourced text files ---
+
+def test_seed_minimal_reads_readme_content_from_disk():
+    """readme.txt's content is authored as a real file under VFS_SEED_DIR,
+    not a Python string literal -- this pins down that the seed step actually
+    reads it rather than silently falling back to something else."""
+    from horus.filesystem.seed import seed_minimal
+    from horus.paths import VFS_SEED_DIR
+
+    fs = InMemoryVFS()
+    seed_minimal(fs)
+
+    expected = (VFS_SEED_DIR / "readme.txt").read_text(encoding="utf-8")
+    assert fs.read_file("/home/root/readme.txt", user=ROOT) == expected
+    assert expected.strip() != ""  # sanity: the seed file itself isn't empty

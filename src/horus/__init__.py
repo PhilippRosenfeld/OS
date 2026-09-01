@@ -158,12 +158,10 @@ def main() -> None:
     context.main_menu = main_menu
 
     def _on_boot_complete() -> None:
-        screens.pop()
-        screens.push(LogoScreen(window.buffer, logo_lines, on_complete=_on_logo_complete, sounds=sounds))
-    
+        screens.replace(LogoScreen(window.buffer, logo_lines, on_complete=_on_logo_complete, sounds=sounds))
+
     def _on_logo_complete() -> None:
-        screens.pop()
-        screens.push(main_menu) 
+        screens.replace(main_menu)
 
     window.set_text_handler(
         on_text=screens.handle_text,
@@ -195,7 +193,7 @@ def main() -> None:
             "boot_disk": boot_disk_name,
             **disk_context})
     
-    shell_screen = ShellScreen(input_handler, screens)
+    shell_screen = ShellScreen(input_handler, screens, window)
     screens.push(shell_screen)
     boot_screen = BootScreen(window.buffer, frames, on_complete=_on_boot_complete, sounds=sounds)
     screens.push(boot_screen)

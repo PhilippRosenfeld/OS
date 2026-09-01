@@ -30,8 +30,10 @@ def horus_menu(ctx, argv: list[str]) -> None:
         open_settings_menu(ctx)
 
     def boot_menu() -> None:
-        ctx.screens.pop()  # close this "Menu" screen
-        ctx.screens.push(ctx.main_menu)  # back to the title screen; shell stays preserved underneath
+        # replace(), not pop()+push(): the latter would briefly reveal the
+        # shell underneath and fire its on_resume() (e.g. restarting the
+        # cursor blink) even though it's immediately covered again here
+        ctx.screens.replace(ctx.main_menu)
 
     def save() -> None:
         pass #TODO:implement

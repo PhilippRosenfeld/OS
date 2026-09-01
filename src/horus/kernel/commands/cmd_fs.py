@@ -69,12 +69,18 @@ def _build_chattr_parser() -> CommandArgumentParser:
                                     description="Toggle protected/hidden/immutable flags")
     return parser
 
+def _build_cat_parser() -> CommandArgumentParser:
+    parser = CommandArgumentParser(prog="cat", add_help=True, description="Print a file's contents")
+    parser.add_argument("path")
+    return parser
+
 _ls_parser = _build_ls_parser()
 _cd_parser = _build_cd_parser()
 _mkdir_parser = _build_mkdir_parser()
 _rm_parser = _build_rm_parser()
 _chmod_parser = _build_chmod_parser()
 _chattr_parser = _build_chattr_parser()
+_cat_parser = _build_cat_parser()
 
 def _print_node(ctx, node, show_meta: bool) -> None:
     type = "DIRECTORY" if node.type is NodeType.DIRECTORY else "FILE"
@@ -242,3 +248,27 @@ def chattr(ctx, argv: list[str]) -> None:
         ctx.write_line(f"chattr: cannot access '{raw_path}': No such file or directory")
     except AccessDeniedError:
         ctx.write_line(f"chattr: changing attributes of '{raw_path}': Operation not permitted")
+
+
+@command("cat", help_text="Print a file's contents")
+def cat(ctx, argv: list[str]) -> None:
+    try:
+        args = _cat_parser.parse_args(argv)
+    except CommandParseError as e:
+        ctx.write_line(e.message or e.usage)
+        return
+
+    path = ctx.resolve_path(args.path)
+    try:
+        content = ctx.fs.read_file(path, user=ctx.effective_user)
+    except FileNotFoundError:
+        if ctx.fs.exists(path):
+            ctx.write_line(f"cat: {args.path}: Is a directory")
+        else:
+            ctx.write_line(f"cat: {args.path}: No such file or directory")
+        return
+    except AccessDeniedError:
+        ctx.write_line(f"cat: {args.path}: Permission denied")
+        return
+
+    ctx.write_line(content)

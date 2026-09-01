@@ -1,6 +1,7 @@
 import pyglet
 
 from horus.display.screen_buffer import ScreenBuffer
+from horus.ui.screen import Screen
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.shell_screen import ShellScreen
 from horus.ui.menu_screen import MenuScreen, MenuOption
@@ -51,6 +52,76 @@ def test_screen_manager_pop_on_empty_stack_is_a_no_op():
     manager = ScreenManager()
     manager.pop()  # should not raise
     assert manager.active is None
+
+
+class RecordingScreen(Screen):
+    """Minimal Screen that logs which lifecycle hooks fired, for pinning down
+    exactly when on_push/on_pop/on_resume get called."""
+
+    def __init__(self, name: str, events: list[str]) -> None:
+        self._name = name
+        self._events = events
+
+    def on_push(self) -> None:
+        self._events.append(f"{self._name}.on_push")
+
+    def on_pop(self) -> None:
+        self._events.append(f"{self._name}.on_pop")
+
+    def on_resume(self) -> None:
+        self._events.append(f"{self._name}.on_resume")
+
+    def handle_text(self, text: str) -> None:
+        pass
+
+    def handle_motion(self, motion: int) -> None:
+        pass
+
+    def handle_enter(self) -> None:
+        pass
+
+    def handle_key(self, symbol: int, modifiers: int) -> None:
+        pass
+
+
+def test_replace_swaps_the_top_screen():
+    manager = ScreenManager()
+    events = []
+    first = RecordingScreen("first", events)
+    second = RecordingScreen("second", events)
+    manager.push(first)
+    manager.replace(second)
+    assert manager.active is second
+
+
+def test_replace_does_not_fire_on_resume_on_the_screen_underneath():
+    """Regression test: replace() must swap atomically -- pop() immediately
+    followed by push() would synchronously (if briefly) reveal whatever is
+    underneath and fire its on_resume(), which is exactly what caused the
+    shell's cursor blink to start while the Logo screen was still covering it
+    (Boot -> Logo used pop()+push() instead of replace())."""
+    manager = ScreenManager()
+    events = []
+    bottom = RecordingScreen("bottom", events)
+    top = RecordingScreen("top", events)
+    manager.push(bottom)
+    events.clear()
+
+    manager.push(top)
+    events.clear()
+    manager.replace(RecordingScreen("replacement", events))
+
+    assert "bottom.on_resume" not in events
+    assert events == ["top.on_pop", "replacement.on_push"]
+
+
+def test_replace_on_empty_stack_just_pushes():
+    manager = ScreenManager()
+    events = []
+    screen = RecordingScreen("only", events)
+    manager.replace(screen)
+    assert manager.active is screen
+    assert events == ["only.on_push"]
 
 
 def test_shell_screen_writes_prompt_on_push():
@@ -109,6 +180,79 @@ def test_shell_screen_redraws_prompt_when_menu_above_it_closes():
     manager.handle_enter()  # activates "Back", pops the menu
     assert manager.active is shell
     assert row_text(buffer, 0) == ">"  # prompt redrawn, not left as "Menu"
+
+
+class FakeWindow:
+    """Records .start_cursor_blink() calls instead of touching a real
+    pyglet window/clock."""
+
+    def __init__(self) -> None:
+        self.blink_started_count = 0
+
+    def start_cursor_blink(self) -> None:
+        self.blink_started_count += 1
+
+
+def test_shell_screen_on_push_does_not_start_cursor_blink():
+    """Regression test: on_push() fires at app start, right before Boot gets
+    pushed on top -- starting the blink there would flip cursor_visible
+    underneath Boot/Logo/Main Menu too."""
+    buffer = ScreenBuffer(20, 5)
+    manager = ScreenManager()
+    history = CommandHistory()
+    handler = InputHandler(buffer, history)
+    window = FakeWindow()
+    shell = ShellScreen(handler, manager, window)
+    manager.push(shell)  # on_push()
+    assert window.blink_started_count == 0
+
+
+def test_shell_screen_on_resume_starts_cursor_blink():
+    buffer = ScreenBuffer(20, 5)
+    manager = ScreenManager()
+    history = CommandHistory()
+    handler = InputHandler(buffer, history)
+    window = FakeWindow()
+    shell = ShellScreen(handler, manager, window)
+    manager.push(shell)
+    assert window.blink_started_count == 0
+
+    menu = MenuScreen(buffer, "Menu", [MenuOption("Back", lambda: manager.pop())], manager)
+    manager.push(menu)
+    manager.handle_enter()  # pops the menu -> shell.on_resume()
+    assert window.blink_started_count == 1
+
+
+def test_shell_screen_only_starts_cursor_blink_once():
+    """Returning to the shell repeatedly (e.g. via the in-game menu) must not
+    schedule a second concurrent blink timer -- that would make it flicker
+    faster instead of blinking normally."""
+    buffer = ScreenBuffer(20, 5)
+    manager = ScreenManager()
+    history = CommandHistory()
+    handler = InputHandler(buffer, history)
+    window = FakeWindow()
+    shell = ShellScreen(handler, manager, window)
+    manager.push(shell)
+
+    for _ in range(3):
+        menu = MenuScreen(buffer, "Menu", [MenuOption("Back", lambda: manager.pop())], manager)
+        manager.push(menu)
+        manager.handle_enter()
+
+    assert window.blink_started_count == 1
+
+
+def test_shell_screen_without_window_does_not_raise():
+    buffer = ScreenBuffer(20, 5)
+    manager = ScreenManager()
+    history = CommandHistory()
+    handler = InputHandler(buffer, history)
+    shell = ShellScreen(handler, manager)  # window=None
+    manager.push(shell)
+    menu = MenuScreen(buffer, "Menu", [MenuOption("Back", lambda: manager.pop())], manager)
+    manager.push(menu)
+    manager.handle_enter()  # should not raise
 
 
 def test_screen_manager_only_forwards_to_top_screen():

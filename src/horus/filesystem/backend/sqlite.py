@@ -5,7 +5,7 @@ from pathlib import Path
 from horus.filesystem.vfs import VFS
 from horus.filesystem.node import Node, NodeType, ProtectedFileError
 from horus.filesystem.path_utils import resolve_path as _resolve_path
-from horus.filesystem.permissions import require_write, can_write, AccessDeniedError, require_metadata_change, octal_to_permissions
+from horus.filesystem.permissions import require_write, require_read, can_write, AccessDeniedError, require_metadata_change, octal_to_permissions
 
 class SQLiteVFS(VFS):
     """SQLite-backed filesystem. Persists across app restarts: the schema is
@@ -124,11 +124,12 @@ class SQLiteVFS(VFS):
                 entries.extend(self.list_dir(child_path, show_all=show_all, recursive=True))
         return entries
 
-    def read_file(self, path: str) -> str:
+    def read_file(self, path: str, user: str) -> str:
         """Reads the content of a file and returns it as a string."""
         row = self._fetch(path)
         if row is None or row["type"] != NodeType.FILE.value:
             raise FileNotFoundError(path)
+        require_read(self._row_to_node(row), user, path)
         return row["content"] or ""
 
     def write_file(self, path: str, content: str, user: str, protected: bool = False, immutable: bool = False) -> None:

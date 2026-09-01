@@ -1,7 +1,7 @@
 from horus.filesystem.vfs import VFS
 from horus.filesystem.node import Node, NodeType, ProtectedFileError
 from horus.filesystem.path_utils import resolve_path as _resolve_path
-from horus.filesystem.permissions import require_write, require_read, can_write, can_read, AccessDeniedError
+from horus.filesystem.permissions import require_write, require_read, require_metadata_change, can_write, can_read, AccessDeniedError, octal_to_permissions
 
 class _TreeNode:
 
@@ -77,14 +77,16 @@ class InMemoryVFS(VFS):
 
         return entries
 
-    def read_file(self, path: str) -> str:
+    def read_file(self, path: str, user: str) -> str:
         """Reads the content of a file and returns it as a string.
         #TODO: Implement handlers for different file types"""
         file = self._walk(path)
 
         if file is None or file.meta.type != NodeType.FILE:
             raise FileNotFoundError(path)
-        
+
+        require_read(file.meta, user, path)
+
         return file.content
 
     def write_file(self, path: str, content: str, user: str, protected: bool = False) -> None:

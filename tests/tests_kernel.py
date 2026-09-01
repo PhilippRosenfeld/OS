@@ -8,7 +8,7 @@ from horus.kernel.kernel import Kernel
 from horus.kernel.registry import Registry, registry
 from horus.kernel.commands.cmd_text import echo
 from horus.kernel.commands.cmd_misc import color
-from horus.kernel.commands.cmd_fs import ls
+from horus.kernel.commands.cmd_fs import ls, cat
 from horus.display.colors import NAMED_COLORS
 from horus.filesystem.backend.memory import InMemoryVFS
 
@@ -220,3 +220,61 @@ def test_ls_with_meta_shows_timestamps_without_fractional_seconds():
     ls(ctx, ["-m"])
 
     assert "." not in full_text(buffer)  # no fractional-second remainder anywhere in the output
+
+
+# --- cat command ---
+
+def test_cat_prints_file_contents():
+    ctx, buffer = make_context()
+    ctx.fs = InMemoryVFS()
+    ctx.fs.mkdir("/home", user="root")
+    ctx.fs.write_file("/home/notes.txt", "hello there\n", user="root")
+    ctx.cwd = "/home"
+
+    cat(ctx, ["notes.txt"])
+
+    assert "hello there" in full_text(buffer)
+
+
+def test_cat_missing_file_writes_error():
+    ctx, buffer = make_context(cols=60)
+    ctx.fs = InMemoryVFS()
+
+    cat(ctx, ["nope.txt"])
+
+    assert "No such file or directory" in row_text(buffer, 0)
+
+
+def test_cat_on_a_directory_writes_error():
+    ctx, buffer = make_context(cols=60)
+    ctx.fs = InMemoryVFS()
+    ctx.fs.mkdir("/home", user="root")
+    ctx.cwd = "/"
+
+    cat(ctx, ["home"])
+
+    assert "Is a directory" in row_text(buffer, 0)
+
+
+def test_cat_help_flag_reports_parse_error_without_raising():
+    ctx, buffer = make_context()
+    ctx.fs = InMemoryVFS()
+
+    cat(ctx, ["--help"])  # should not raise, writes usage/help instead
+
+    assert row_text(buffer, 0).strip() != ""
+
+
+def test_cat_without_read_permission_writes_error():
+    ctx, buffer = make_context(cols=60)
+    ctx.fs = InMemoryVFS()
+    ctx.fs.mkdir("/home", user="root")
+    ctx.fs.write_file("/home/secret.txt", "eyes only", user="root")
+    ctx.fs.chmod("/home/secret.txt", mode="700", user="root")
+    ctx.cwd = "/home"
+    ctx.user = "user1"
+    ctx.effective_user = "user1"
+
+    cat(ctx, ["secret.txt"])
+
+    assert "Permission denied" in row_text(buffer, 0)
