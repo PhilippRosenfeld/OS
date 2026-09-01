@@ -13,7 +13,7 @@ from horus.filesystem.seed import seed_minimal
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.shell_screen import ShellScreen
 from horus.ui.boot_screen import BootScreen, BootFrame
-from horus.paths import SAVES_DIR, DATA_DIR, BOOT_SOUNDS_DIR, SOUNDS_DIR
+from horus.paths import SAVES_DIR, DATA_DIR, BOOT_SOUNDS_DIR, SOUNDS_DIR, SHELL_SOUNDS_DIR
 from horus.audio.sound_manager import SoundManager
 from horus.session.user import UserRegistry, User, UserRole
 from horus.session.seed import seed_users
@@ -62,6 +62,7 @@ def main() -> None:
     sounds.load("hard_disk_spinup", BOOT_SOUNDS_DIR / "hard_disk_spinup.mp3")
     sounds.load("startup_up_weird_noise", BOOT_SOUNDS_DIR / "startup_up_weird_noise.mp3")
     sounds.load("menu_music", SOUNDS_DIR / "menu_music.mp3")
+    sounds.load("crypt", SHELL_SOUNDS_DIR / "crypt.mp3")
     
 
 
@@ -82,6 +83,7 @@ def main() -> None:
         fs=fs,
         screen=window.buffer,
         events=bus,
+        sounds=sounds,
         screens=screens,
         window=window,
         users=users,

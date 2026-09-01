@@ -20,6 +20,7 @@ class Context:
 
     fs: VFS = None
     events: EventBus = None
+    sounds: "SoundManager" = None
     screen: ScreenBuffer = None
     screens: ScreenManager = None
     users: "UserRegistry" = None

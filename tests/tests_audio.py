@@ -399,3 +399,41 @@ def test_play_delayed_with_unloaded_name_does_not_raise_once_fired():
     with patch("pyglet.clock.schedule_once", side_effect=lambda func, delay: captured.update(func=func)):
         sm.play_delayed("never_loaded", 1.0)
     captured["func"](1.0)  # should not raise -- play() is a no-op for unknown names
+
+
+# --- play_looped ---
+
+def test_play_looped_unloaded_name_returns_none():
+    sm = SoundManager()
+    assert sm.play_looped("never_loaded") is None
+
+
+def test_play_looped_sets_the_player_to_loop():
+    sm = SoundManager()
+    sm.load("tick", BOOT_SOUNDS_DIR / "boot_tick.wav")
+    player = sm.play_looped("tick")
+    assert player.loop is True
+
+
+def test_play_looped_does_not_stop_on_its_own_until_paused():
+    sm = SoundManager()
+    sm.load("tick", BOOT_SOUNDS_DIR / "boot_tick.wav")
+    player = sm.play_looped("tick")
+    assert player in sm._players
+    player.pause()  # caller-driven stop, mirroring how a loading bar would use this
+
+
+def test_play_looped_applies_effective_volume():
+    sm = SoundManager()
+    sm.load("tick", BOOT_SOUNDS_DIR / "boot_tick.wav")
+    sm.set_volume(0.5)
+    sm.set_sound_volume("tick", 0.4)
+    player = sm.play_looped("tick")
+    assert player.volume == pytest.approx(0.2)
+
+
+def test_play_looped_swallows_driver_errors():
+    sm = SoundManager()
+    sm.load("tick", BOOT_SOUNDS_DIR / "boot_tick.wav")
+    with patch("pyglet.media.Player", side_effect=RuntimeError("no audio device")):
+        assert sm.play_looped("tick") is None  # should not raise

@@ -100,6 +100,36 @@ class SoundManager:
             logger.warning(f"failed to play sound '{name}'", exc_info=True)
             return None
 
+    def play_looped(self, name: str) -> pyglet.media.Player | None:
+        """Plays a loaded sound on a continuous loop until stopped, unlike
+        play() which stops on its own once the clip ends. Useful for a sound
+        that should last exactly as long as some process takes (e.g. a
+        loading bar) rather than for a fixed clip length:
+
+            player = sounds.play_looped("decrypt")
+            ...
+            player.pause()  # stop it once the process finishes
+
+        Returns None (and does nothing) if the sound was never loaded, same
+        as play(). A looped sound never ends on its own and won't be pruned
+        automatically -- the caller is responsible for pausing it."""
+        source = self._sources.get(name)
+        if source is None:
+            return None
+        try:
+            self._prune()
+            player = pyglet.media.Player()
+            player.loop = True
+            player.volume = self._effective_volume(name)
+            player.queue(source)
+            player.play()
+            self._players.append(player)
+            self._player_names[id(player)] = _PlayingName(name)
+            return player
+        except Exception:
+            logger.warning(f"failed to loop sound '{name}'", exc_info=True)
+            return None
+
     def play_delayed(self, name: str, delay: float) -> Callable[[float], None]:
         """Plays a loaded sound after `delay` seconds -- e.g. a sound that
         should kick in partway through some other ongoing sequence, like a

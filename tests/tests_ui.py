@@ -5,6 +5,7 @@ from horus.ui.screen import Screen
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.shell_screen import ShellScreen
 from horus.ui.menu_screen import MenuScreen, MenuOption
+from horus.ui.loading_screen import LoadingScreen
 from horus.ui.settings_screen import SettingScreen, SettingOption
 from horus.ui.boot_screen import BootScreen, BootFrame
 from horus.ui.logo_screen import LogoScreen
@@ -268,6 +269,62 @@ def test_screen_manager_only_forwards_to_top_screen():
     manager.push(menu)
     manager.handle_text("more")  # MenuScreen ignores text; must NOT reach the shell underneath
     assert handler.current_line == "hi"
+
+
+# --- LoadingScreen ---
+
+def test_loading_screen_disables_cursor_and_restores_it_on_pop():
+    buffer = ScreenBuffer(30, 10)
+    buffer.cursor_enabled = True
+    manager = ScreenManager()
+    loading = LoadingScreen(buffer, manager)
+    manager.push(loading)
+    assert buffer.cursor_enabled is False
+    manager.pop()
+    assert buffer.cursor_enabled is True
+
+
+def test_loading_screen_swallows_all_input():
+    buffer = ScreenBuffer(30, 10)
+    manager = ScreenManager()
+    manager.push(LoadingScreen(buffer, manager))
+    manager.handle_text("hi")  # should not raise, and not go anywhere
+    manager.handle_motion(key.MOTION_UP)
+    manager.handle_enter()
+    manager.handle_key(key.A, 0)
+    assert manager.active is not None  # enter didn't pop it or anything else weird
+
+
+def test_shell_does_not_redraw_its_prompt_while_a_loading_screen_is_up():
+    """Regression test: a command (like encrypt/decrypt) that defers its real
+    work via pyglet.clock and shows a progress bar in the meantime must push a
+    screen over the shell for that duration -- otherwise ShellScreen.handle_enter()
+    immediately redraws the prompt and re-enables the cursor on the very row
+    the bar is animating on, since the command function itself already
+    returned by then."""
+    buffer = ScreenBuffer(40, 5)
+    manager = ScreenManager()
+
+    def on_submit(line):
+        if line == "encrypt secret.txt":
+            manager.push(LoadingScreen(buffer, manager))
+
+    history = CommandHistory()
+    handler = InputHandler(buffer, history, on_submit=on_submit, get_prompt=lambda: "> ")
+    shell = ShellScreen(handler, manager)
+    manager.push(shell)
+
+    manager.handle_text("encrypt secret.txt")
+    manager.handle_enter()
+
+    assert isinstance(manager.active, LoadingScreen)
+    assert buffer.cursor_enabled is False
+    assert row_text(buffer, 1) == ""  # no fresh "> " prompt drawn over the bar's row
+
+    manager.pop()  # simulates the bar completing
+    assert manager.active is shell
+    assert buffer.cursor_enabled is True
+    assert row_text(buffer, 1) == ">"  # prompt only appears now
 
 
 # --- MenuScreen ---

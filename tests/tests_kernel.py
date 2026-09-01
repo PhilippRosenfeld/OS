@@ -1,5 +1,6 @@
 import pytest
 import pyglet
+from unittest.mock import patch
 
 from horus.display.screen_buffer import ScreenBuffer
 from horus.session.context import Context
@@ -507,18 +508,192 @@ def test_cat_without_read_permission_writes_error():
 
 # --- encrypt / decrypt commands ---
 
+class FakePlayer:
+    def __init__(self) -> None:
+        self.playing = True
+
+    def pause(self) -> None:
+        self.playing = False
+
+
+class FakeSoundManager:
+    """Records play_looped() calls instead of touching pyglet's audio
+    backend, and returns a fake Player so tests can check it was paused
+    (stopped) once the progress bar completes."""
+
+    def __init__(self) -> None:
+        self.looped: list[str] = []
+        self.players: list[FakePlayer] = []
+
+    def play_looped(self, name: str) -> FakePlayer:
+        self.looped.append(name)
+        player = FakePlayer()
+        self.players.append(player)
+        return player
+
+
 def make_fs_context(cols=80, rows=10):
     ctx, buffer = make_context(cols=cols, rows=rows)
     ctx.fs = InMemoryVFS()
     ctx.fs.mkdir("/home", user="root")
     ctx.fs.write_file("/home/secret.txt", "top secret", user="root")
     ctx.cwd = "/home"
+    ctx.sounds = FakeSoundManager()
     return ctx, buffer
+
+
+def _run_immediately(fn, *args):
+    """encrypt/decrypt show a progress bar via pyglet.clock.schedule_interval
+    (see _run_with_progress_bar in cmd_fs.py) that ticks forward by a random
+    amount -- occasionally not at all, a stutter -- until it reaches 100%.
+    Tests don't want that randomness or a real event loop, so this forces
+    the very first tick to jump straight to completion (no stall, full
+    100-point step) and fires it immediately."""
+    with patch("pyglet.clock.schedule_interval") as mock_schedule, \
+         patch("random.random", return_value=1.0), \
+         patch("random.uniform", return_value=100.0):
+        fn(*args)
+        assert mock_schedule.call_count == 1
+        callback, interval = mock_schedule.call_args[0]
+        callback(0.0)
+
+
+def test_encrypt_writes_an_immediate_processing_message_and_bar_and_loops_a_sound():
+    ctx, buffer = make_fs_context()
+    with patch("pyglet.clock.schedule_interval"):  # don't fire it -- check the *immediate* state
+        encrypt(ctx, ["secret.txt", "-k", "mykey"])
+    assert "Encrypting secret.txt..." in full_text(buffer)
+    assert "[" in full_text(buffer) and "0%" in full_text(buffer)  # bar drawn at 0%
+    # the actual encryption already happened (checked up front, before any
+    # loading UI) -- only *revealing* the "Encrypted:" result is deferred
+    assert ctx.fs.exists("/home/secret.txt.crypt") is True
+    assert "Encrypted:" not in full_text(buffer)
+    assert ctx.sounds.looped == ["crypt"]
+    assert ctx.sounds.players[-1].playing is True  # still looping while the bar runs
+
+
+def test_encrypt_stops_the_looped_sound_once_the_bar_completes():
+    ctx, buffer = make_fs_context()
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])
+    assert ctx.sounds.players[-1].playing is False
+
+
+def test_decrypt_writes_an_immediate_processing_message_and_loops_a_sound():
+    ctx, buffer = make_fs_context()
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])
+    with patch("pyglet.clock.schedule_interval"):
+        decrypt(ctx, ["secret.txt.crypt", "-k", "mykey"])
+    assert "Decrypting secret.txt.crypt..." in full_text(buffer)
+    # already restored -- only revealing the "Decrypted:" result is deferred
+    assert ctx.fs.exists("/home/secret.txt") is True
+    assert "Decrypted:" not in full_text(buffer)
+    assert ctx.sounds.looped == ["crypt", "crypt"]
+
+
+def test_progress_bar_stalls_delay_revealing_the_result():
+    ctx, buffer = make_fs_context()
+    with patch("pyglet.clock.schedule_interval") as mock_schedule, \
+         patch("random.random", return_value=0.0), \
+         patch("random.uniform", return_value=50.0):  # 0.0 < stall chance -> always stalls
+        encrypt(ctx, ["secret.txt", "-k", "mykey"])
+        callback, _ = mock_schedule.call_args[0]
+        callback(0.0)
+        callback(0.0)
+    assert "0%" in full_text(buffer)  # never advanced past the initial render
+    assert "Encrypted:" not in full_text(buffer)  # result still not revealed
+
+
+def test_progress_bar_reveals_the_result_only_after_completion():
+    ctx, buffer = make_fs_context()
+    with patch("pyglet.clock.schedule_interval") as mock_schedule, \
+         patch("random.random", return_value=1.0), \
+         patch("random.uniform", return_value=30.0):  # never stalls, +30% per tick
+        encrypt(ctx, ["secret.txt", "-k", "mykey"])
+        callback, _ = mock_schedule.call_args[0]
+        callback(0.0)  # 30%
+        callback(0.0)  # 60%
+        assert "Encrypted:" not in full_text(buffer)
+        callback(0.0)  # 90%
+        assert "Encrypted:" not in full_text(buffer)
+        callback(0.0)  # 120% -> clamped, done
+    assert "Encrypted:" in full_text(buffer)
+
+
+def test_encrypt_checks_before_showing_any_loading_ui():
+    """The encryption is attempted up front -- a failure must be reported
+    immediately, without ever printing 'Encrypting...' or scheduling a bar."""
+    ctx, buffer = make_fs_context()
+    with patch("pyglet.clock.schedule_interval") as mock_schedule:
+        encrypt(ctx, ["nope.txt", "-k", "mykey"])
+    mock_schedule.assert_not_called()
+    assert "No such file or directory" in full_text(buffer)
+    assert "Encrypting" not in full_text(buffer)
+
+
+def test_decrypt_checks_before_showing_any_loading_ui():
+    ctx, buffer = make_fs_context()
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])
+    with patch("pyglet.clock.schedule_interval") as mock_schedule:
+        decrypt(ctx, ["secret.txt.crypt", "-k", "wrongkey"])
+    mock_schedule.assert_not_called()
+    assert "wrong key" in full_text(buffer)
+    assert "Decrypting" not in full_text(buffer)
+
+
+# --- encrypt/decrypt key logging ---
+
+def test_encrypt_with_explicit_key_logs_it(caplog):
+    ctx, buffer = make_fs_context()
+    with caplog.at_level("INFO"):
+        encrypt(ctx, ["secret.txt", "-k", "mykey"])
+    assert "key='mykey'" in caplog.text
+
+
+def test_encrypt_with_generated_key_logs_the_generated_one(caplog):
+    ctx, buffer = make_fs_context()
+    with caplog.at_level("INFO"), patch("pyglet.clock.schedule_interval") as mock_schedule:
+        encrypt(ctx, ["secret.txt"])
+        callback, _ = mock_schedule.call_args[0]
+        with patch("random.random", return_value=1.0), patch("random.uniform", return_value=100.0):
+            callback(0.0)  # let the bar finish so "Generated key:" is revealed
+    generated_key = full_text(buffer).split("Generated key: ")[1].split(" ")[0]
+    assert f"key='{generated_key}'" in caplog.text
+
+
+def test_encrypt_failure_does_not_log_a_key(caplog):
+    ctx, buffer = make_fs_context()
+    with caplog.at_level("INFO"):
+        encrypt(ctx, ["nope.txt", "-k", "mykey"])
+    assert "key=" not in caplog.text
+
+
+def test_decrypt_with_correct_key_logs_it(caplog):
+    ctx, buffer = make_fs_context()
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])
+    caplog.clear()
+    with caplog.at_level("INFO"):
+        decrypt(ctx, ["secret.txt.crypt", "-k", "mykey"])
+    assert "key='mykey'" in caplog.text
+
+
+def test_decrypt_with_wrong_key_does_not_log_it(caplog):
+    """A failed attempt never actually decrypts anything -- logging the
+    guessed key here would just be noise, not a record of what was used."""
+    ctx, buffer = make_fs_context()
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])
+    caplog.clear()
+    with caplog.at_level("INFO"):
+        decrypt(ctx, ["secret.txt.crypt", "-k", "wrongkey"])
+    assert "key=" not in caplog.text
+    ctx, buffer = make_fs_context()
+    ctx.sounds = None
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])
+    assert ctx.fs.exists("/home/secret.txt.crypt") is True
 
 
 def test_encrypt_renames_the_file_with_a_crypt_extension():
     ctx, buffer = make_fs_context()
-    encrypt(ctx, ["secret.txt", "-k", "mykey"])
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])
     assert ctx.fs.exists("/home/secret.txt.crypt") is True
     assert ctx.fs.exists("/home/secret.txt") is False
     assert "Encrypted:" in full_text(buffer)
@@ -526,26 +701,26 @@ def test_encrypt_renames_the_file_with_a_crypt_extension():
 
 def test_encrypt_without_a_key_generates_one_and_reports_it():
     ctx, buffer = make_fs_context()
-    encrypt(ctx, ["secret.txt"])
+    _run_immediately(encrypt, ctx, ["secret.txt"])
     assert "Generated key:" in full_text(buffer)
 
 
 def test_encrypt_with_a_key_does_not_report_a_generated_key():
     ctx, buffer = make_fs_context()
-    encrypt(ctx, ["secret.txt", "-k", "mykey"])
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])
     assert "Generated key:" not in full_text(buffer)
 
 
 def test_encrypted_file_can_no_longer_be_catted():
     ctx, buffer = make_fs_context()
-    encrypt(ctx, ["secret.txt", "-k", "mykey"])
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])
     cat(ctx, ["secret.txt.crypt"])
     assert "File is encrypted, decrypt it first" in full_text(buffer)
 
 
 def test_encrypt_missing_file_writes_error():
     ctx, buffer = make_fs_context()
-    encrypt(ctx, ["nope.txt", "-k", "mykey"])
+    encrypt(ctx, ["nope.txt", "-k", "mykey"])  # fails the up-front check -- no bar involved
     assert "No such file or directory" in full_text(buffer)
 
 
@@ -557,22 +732,22 @@ def test_encrypt_a_directory_writes_error():
 
 def test_encrypt_already_encrypted_file_writes_error():
     ctx, buffer = make_fs_context()
-    encrypt(ctx, ["secret.txt", "-k", "mykey"])
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])
     encrypt(ctx, ["secret.txt.crypt", "-k", "mykey"])
     assert "already encrypted" in full_text(buffer)
 
 
 def test_decrypt_restores_the_original_file_and_content():
     ctx, buffer = make_fs_context()
-    encrypt(ctx, ["secret.txt", "-k", "mykey"])
-    decrypt(ctx, ["secret.txt.crypt", "-k", "mykey"])
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])
+    _run_immediately(decrypt, ctx, ["secret.txt.crypt", "-k", "mykey"])
     assert ctx.fs.exists("/home/secret.txt") is True
     assert ctx.fs.read_file("/home/secret.txt", user="root") == "top secret"
 
 
 def test_decrypt_with_wrong_key_writes_error_and_keeps_file_encrypted():
     ctx, buffer = make_fs_context()
-    encrypt(ctx, ["secret.txt", "-k", "mykey"])
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])
     decrypt(ctx, ["secret.txt.crypt", "-k", "wrongkey"])
     assert "wrong key" in full_text(buffer)
     assert ctx.fs.exists("/home/secret.txt.crypt") is True
@@ -580,8 +755,8 @@ def test_decrypt_with_wrong_key_writes_error_and_keeps_file_encrypted():
 
 def test_decrypt_without_key_argument_reports_parse_error():
     ctx, buffer = make_fs_context()
-    encrypt(ctx, ["secret.txt", "-k", "mykey"])
-    decrypt(ctx, ["secret.txt.crypt"])  # -k is required by argparse
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])
+    decrypt(ctx, ["secret.txt.crypt"])  # -k is required by argparse -- fails before any scheduling happens
     assert ctx.fs.exists("/home/secret.txt.crypt") is True
 
 
@@ -595,7 +770,7 @@ def test_decrypt_with_wrong_method_writes_error_even_with_the_right_key():
     """The method must match exactly like the key -- it's not auto-detected
     or hinted at, so guessing it wrong fails the same way a wrong key does."""
     ctx, buffer = make_fs_context()
-    encrypt(ctx, ["secret.txt", "-k", "mykey", "-m", "xor"])
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey", "-m", "xor"])
     decrypt(ctx, ["secret.txt.crypt", "-k", "mykey", "-m", "aes"])
     assert "wrong key or method" in full_text(buffer)
     assert ctx.fs.exists("/home/secret.txt.crypt") is True
@@ -603,12 +778,12 @@ def test_decrypt_with_wrong_method_writes_error_even_with_the_right_key():
 
 def test_decrypt_default_method_is_xor_matching_encrypts_default():
     ctx, buffer = make_fs_context()
-    encrypt(ctx, ["secret.txt", "-k", "mykey"])  # default method: xor
-    decrypt(ctx, ["secret.txt.crypt", "-k", "mykey"])  # default method: xor
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])  # default method: xor
+    _run_immediately(decrypt, ctx, ["secret.txt.crypt", "-k", "mykey"])  # default method: xor
     assert ctx.fs.exists("/home/secret.txt") is True
 
 
 def test_encrypt_help_flag_reports_parse_error_without_raising():
     ctx, buffer = make_fs_context()
-    encrypt(ctx, ["--help"])
+    encrypt(ctx, ["--help"])  # fails during parsing, before any scheduling happens
     assert ctx.fs.exists("/home/secret.txt") is True  # untouched

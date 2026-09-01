@@ -1,13 +1,73 @@
 from sqlite3 import NotSupportedError
 
+import pyglet
+
 from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
 from horus.kernel.registry import command
 from horus.filesystem.node import NodeType, ProtectedFileError
 from horus.filesystem.permissions import AccessDeniedError
 from horus.filesystem.file_types import FILE_TYPES
 from horus.filesystem.cipher import WrongKeyError
+from horus.ui.loading_screen import LoadingScreen
 import re
 import secrets
+import random
+import logging
+
+logger = logging.getLogger(__name__)
+
+_PROGRESS_BAR_WIDTH = 24
+_PROGRESS_STALL_CHANCE = 0.35  # chance a tick makes no progress at all -- a stutter
+_PROGRESS_MIN_STEP = 3  # percentage points gained on a non-stalled tick
+_PROGRESS_MAX_STEP = 12
+
+
+def _render_progress_bar(ctx, row: int, percent: float) -> None:
+    percent = max(0.0, min(100.0, percent))
+    filled = round(_PROGRESS_BAR_WIDTH * percent / 100)
+    bar = "#" * filled + "-" * (_PROGRESS_BAR_WIDTH - filled)
+    ctx.screen.write_string(0, row, f"[{bar}] {percent:3.0f}%")
+
+
+def _run_with_progress_bar(ctx, sound_name: str, on_complete, interval: float) -> None:
+    """Shows a progress bar on the line right after the cursor's current
+    position, ticking forward at random (and sometimes stalling entirely --
+    a stutter, not steady progress) until it hits 100%, then calls
+    on_complete(). Plays `sound_name` on loop for exactly as long as the bar
+    takes, stopping the instant it completes. Total duration is therefore
+    different every time, not a fixed animation length.
+
+    Only call this once the operation is already known to succeed -- it's a
+    purely cosmetic delay before revealing a result that's already decided,
+    not a validation step. Pushes a LoadingScreen for the duration so the
+    shell underneath doesn't print a fresh prompt or blink its cursor over
+    the animation (the calling command has already returned by the time the
+    ticks are still running)."""
+    bar_row = ctx.screen.cursor_row
+    player = ctx.sounds.play_looped(sound_name) if ctx.sounds is not None else None
+    loading_screen = LoadingScreen(ctx.screen, ctx.screens) if ctx.screens is not None else None
+    if loading_screen is not None:
+        ctx.screens.push(loading_screen)
+
+    state = {"percent": 0.0}
+    _render_progress_bar(ctx, bar_row, 0.0)
+
+    def _tick(dt: float) -> None:
+        if random.random() < _PROGRESS_STALL_CHANCE:
+            return  # stutter: this tick makes no progress
+
+        state["percent"] += random.uniform(_PROGRESS_MIN_STEP, _PROGRESS_MAX_STEP)
+        if state["percent"] >= 100:
+            pyglet.clock.unschedule(_tick)
+            if player is not None:
+                player.pause()
+            on_complete()  # writes the result at bar_row before start_line() below overwrites it
+            if loading_screen is not None:
+                ctx.screens.pop()
+        else:
+            _render_progress_bar(ctx, bar_row, state["percent"])
+
+    pyglet.clock.schedule_interval(_tick, interval)
 
 _FLAG_ALIASES = {
     "p": "protected", "protected": "protected",
@@ -333,9 +393,16 @@ def encrypt(ctx, argv: list[str]) -> None:
         ctx.write_line(f"encrypt: {e}")
         return
 
-    ctx.write_line(f"Encrypted: {args.path} -> {new_path.rsplit('/', 1)[-1]} (method={args.method})")
-    if not args.key:
-        ctx.write_line(f"Generated key: {key} -- remember it, you'll need it to decrypt")
+    logger.info(f"encrypt: '{path}' -> '{new_path}' key='{key}' method='{args.method}'")
+    ctx.write_line(f"Encrypting {args.path}...")
+
+    def _reveal_encrypt_result() -> None:
+        ctx.write_line(f"Encrypted: {args.path} -> {new_path.rsplit('/', 1)[-1]} (method={args.method})")
+        if not args.key:
+            ctx.write_line(f"Generated key: {key} -- remember it, you'll need it to decrypt")
+            
+
+    _run_with_progress_bar(ctx, "crypt", _reveal_encrypt_result, 0.15)
 
 
 @command("decrypt", help_text="Decrypt a file")
@@ -366,4 +433,10 @@ def decrypt(ctx, argv: list[str]) -> None:
         ctx.write_line(f"decrypt: {e}")
         return
 
-    ctx.write_line(f"Decrypted: {args.path} -> {new_path.rsplit('/', 1)[-1]}")
+    logger.info(f"decrypt: '{path}' -> '{new_path}' key='{args.key}' method='{args.method}'")
+    ctx.write_line(f"Decrypting {args.path}...")
+
+    def _reveal_decrypt_result() -> None:
+        ctx.write_line(f"Decrypted: {args.path} -> {new_path.rsplit('/', 1)[-1]}")
+
+    _run_with_progress_bar(ctx, "crypt", _reveal_decrypt_result, 0.5)
