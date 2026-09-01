@@ -9,17 +9,23 @@ logger = logging.getLogger(__name__)
 
 class InputHandler:
     
-    def __init__(self, buffer: ScreenBuffer, history: CommandHistory, on_submit: Callable[[str], None] | None = None, get_prompt: Callable[[], str] | None = None) -> None:
+    def __init__(self, buffer: ScreenBuffer, history: CommandHistory, on_submit: Callable[[str], None] | None = None,
+                 get_prompt: Callable[[], str] | None = None, complete: Callable[[str], list[str]] | None = None) -> None:
         self.buffer = buffer
         self.history = history
         self.current_line: str = ""
         self._on_submit = on_submit
         self._get_prompt = get_prompt
+        self._complete = complete  # word (prefix) -> sorted list of candidate replacements; None disables Tab completion
         self.insert_mode: bool = False
         self.line_cursor: int = 0
         self.start_line()
         self._pending_submit: Callable[[str], None] | None = None
         self.masked: bool = False
+        self._tab_word_start: int | None = None
+        self._tab_candidates: list[str] = []
+        self._tab_index: int = -1
+        self._tab_press_count: int = 0
         self._sync_cursor()
 
 
@@ -91,6 +97,83 @@ class InputHandler:
         while i > 0 and self.current_line[i - 1].isalnum():  # skip the previous word
             i -= 1
         return i
+
+    def _current_word_start(self) -> int:
+        """Index in current_line where the word ending at line_cursor begins
+        (the character right after the nearest preceding space, or 0)."""
+        return self.current_line.rfind(" ", 0, self.line_cursor) + 1
+
+    def _handle_tab(self) -> None:
+        """Completes the word at the cursor against self._complete's candidates.
+        One candidate: completes it outright. Multiple candidates: the first
+        Tab inserts the first match, a second consecutive Tab (nothing else
+        typed in between) prints the full candidate list without changing the
+        line -- like bash's double-Tab -- and every Tab after that cycles to
+        the next candidate, wrapping around."""
+        if self._complete is None or self.masked:
+            return
+
+        word_start = self._current_word_start()
+        current_word = self.current_line[word_start:self.line_cursor]
+
+        continuing = (
+            self._tab_word_start == word_start
+            and bool(self._tab_candidates)
+            and current_word == self._tab_candidates[self._tab_index]
+        )
+
+        if continuing:
+            self._tab_press_count += 1
+        else:
+            self._tab_word_start = word_start
+            self._tab_candidates = sorted(self._complete(current_word))
+            self._tab_index = 0
+            self._tab_press_count = 1
+
+        if not self._tab_candidates:
+            return
+
+        if len(self._tab_candidates) == 1:
+            self._replace_current_word(word_start, self._tab_candidates[0])
+            self._tab_candidates = []  # nothing left to cycle through
+            return
+
+        if continuing and self._tab_press_count == 2:
+            self._show_completion_list(self._tab_candidates)
+            return
+
+        if continuing:
+            self._tab_index = (self._tab_index + 1) % len(self._tab_candidates)
+        self._replace_current_word(word_start, self._tab_candidates[self._tab_index])
+
+    def _replace_current_word(self, word_start: int, replacement: str) -> None:
+        """Replaces current_line[word_start:line_cursor] with `replacement`,
+        reusing the same backspace/type paths as regular editing so the
+        screen, current_line and cursor all stay in sync automatically."""
+        for _ in range(self.line_cursor - word_start):
+            self._handle_motion(pyglet.window.key.MOTION_BACKSPACE)
+        self._handle_text(replacement)
+
+    def _reprint_current_line(self) -> None:
+        """Redraws the prompt and current_line on a fresh row, preserving
+        line_cursor -- unlike start_line(), which resets current_line for a
+        brand new input. Used after printing a completion list mid-edit."""
+        self._advance_row(1)
+        self.buffer.cursor_col = 0
+        prompt = self._get_prompt() if self._get_prompt is not None else ""
+        if prompt:
+            self.buffer.write_string(col=0, row=self.buffer.cursor_row, string=prompt)
+        self.buffer.cursor_col = len(prompt)
+        if self.current_line:
+            self.buffer.write_string(col=self.buffer.cursor_col, row=self.buffer.cursor_row, string=self._display(self.current_line))
+        target = self.line_cursor
+        self.line_cursor = 0
+        self._adjust_cursor(target)
+
+    def _show_completion_list(self, candidates: list[str]) -> None:
+        self._advance_row(1)
+        self.buffer.write_string(col=0, row=self.buffer.cursor_row, string="  ".join(candidates))
+        self._reprint_current_line()
 
     def _handle_text(self, text: str):
         """Handles simple text input key presses, not correlating to any pyglet models."""
@@ -205,6 +288,9 @@ class InputHandler:
 
         elif symbol == pyglet.window.key.DOWN and ctrl_held:
             self.buffer.scroll_view(-1)
+
+        elif symbol == pyglet.window.key.TAB:
+            self._handle_tab()
 
     def _handle_enter(self):
         """Handles enter key presses. Leaves writing the prompt for the next line to

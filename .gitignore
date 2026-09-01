@@ -1,5 +1,7 @@
 saves
-__pycache__/  
+__pycache__/
 venv/
 .venv/
 *.log
+.coverage
+htmlcov/

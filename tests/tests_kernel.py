@@ -1,4 +1,5 @@
 import pytest
+import pyglet
 
 from horus.display.screen_buffer import ScreenBuffer
 from horus.session.context import Context
@@ -7,10 +8,19 @@ from horus.events.types import CommandExecutedEvent
 from horus.kernel.kernel import Kernel
 from horus.kernel.registry import Registry, registry
 from horus.kernel.commands.cmd_text import echo
-from horus.kernel.commands.cmd_misc import color
+from horus.kernel.commands.cmd_misc import color, su
 from horus.kernel.commands.cmd_fs import ls, cat
+from horus.kernel.commands.cmd_menu import horus_menu, open_settings_menu
 from horus.display.colors import NAMED_COLORS
 from horus.filesystem.backend.memory import InMemoryVFS
+from horus.session.user import UserRegistry
+from horus.session.seed import seed_users
+from horus.session.auth import verify_password
+from horus.session.history import CommandHistory
+from horus.shell.input_handler import InputHandler
+from horus.ui.screen_manager import ScreenManager
+from horus.ui.menu_screen import MenuScreen
+from horus.ui.settings_screen import SettingScreen
 
 
 def make_context(cols=20, rows=5):
@@ -205,6 +215,218 @@ def test_color_with_no_arguments_is_a_no_op():
     original_fg = buffer.default_fg
     color(ctx, [])
     assert buffer.default_fg == original_fg
+
+
+# --- su command ---
+
+def make_user_context(cols=60, rows=10):
+    buffer = ScreenBuffer(cols, rows)
+    history = CommandHistory()
+    input_handler = InputHandler(buffer, history)
+    users = UserRegistry()
+    seed_users(users)
+    ctx = Context(session_id="s", user="root", cwd="/", screen=buffer, users=users, input_handler=input_handler)
+    return ctx, buffer, input_handler
+
+
+def test_su_to_unknown_user_writes_error():
+    ctx, buffer, _ = make_user_context()
+    su(ctx, ["nobody"])
+    assert "does not exist" in row_text(buffer, 0)
+    assert ctx.effective_user == "root"
+
+
+def test_su_default_argument_is_root():
+    ctx, buffer, _ = make_user_context()
+    ctx.user = ctx.effective_user = "user1"
+    su(ctx, [])  # no username given -> defaults to "root", and user1 has no rights over root...
+    # ...but seed's root has no password, so switching *to* root never asks for one
+    assert ctx.effective_user == "root"
+
+
+def test_root_can_switch_to_anyone_without_a_password():
+    ctx, buffer, input_handler = make_user_context()
+    su(ctx, ["user1"])  # user1 has a password, but root never needs one
+    assert ctx.user == "user1"
+    assert ctx.effective_user == "user1"
+    assert "switched to user 'user1'" in row_text(buffer, 0)
+    assert input_handler._pending_submit is None  # no password prompt happened
+
+
+def test_switching_to_a_passwordless_user_needs_no_password():
+    ctx, buffer, input_handler = make_user_context()
+    ctx.user = ctx.effective_user = "user1"  # not root
+    su(ctx, ["user2"])  # user2 has no password set
+    assert ctx.effective_user == "user2"
+    assert input_handler._pending_submit is None
+
+
+def test_switching_to_a_password_protected_user_prompts_for_one():
+    ctx, buffer, input_handler = make_user_context()
+    ctx.user = ctx.effective_user = "user2"  # not root, target has a password
+    su(ctx, ["user1"])
+    assert "Password:" in row_text(buffer, 0)
+    assert input_handler._pending_submit is not None
+    assert input_handler.masked is True
+    assert ctx.effective_user == "user2"  # not switched yet -- still waiting on the password
+
+
+def test_correct_password_completes_the_switch():
+    ctx, buffer, input_handler = make_user_context()
+    ctx.user = ctx.effective_user = "user2"
+    su(ctx, ["user1"])
+    input_handler._pending_submit("password")  # user1's seeded password
+    assert ctx.effective_user == "user1"
+    assert "switched to user 'user1'" in full_text(buffer)
+
+
+def test_wrong_password_does_not_switch():
+    ctx, buffer, input_handler = make_user_context()
+    ctx.user = ctx.effective_user = "user2"
+    su(ctx, ["user1"])
+    input_handler._pending_submit("wrong-password")
+    assert ctx.effective_user == "user2"
+    assert "authentication failure" in full_text(buffer)
+
+
+def test_su_help_flag_reports_parse_error_without_raising():
+    ctx, buffer, _ = make_user_context()
+    su(ctx, ["--help"])  # argparse's --help exits via CommandParseError; must not propagate
+    assert ctx.effective_user == "root"  # no user switch happened
+
+
+# --- horus / settings menu commands ---
+
+class FakeMenuWindow:
+    """Duck-typed stand-in for DisplayWindow, covering exactly what
+    open_settings_menu needs, without a real pyglet window/GL context."""
+
+    def __init__(self, width=1920, height=1080, char_width=8, font_path="Px437_IBM_VGA_8x16.ttf"):
+        self._window_size = (width, height)
+        self.char_width = char_width
+        self.font_path = font_path
+        self.calls: list[tuple] = []
+
+    @property
+    def window_size(self):
+        return self._window_size
+
+    def set_window_size(self, w, h):
+        self._window_size = (w, h)
+        self.calls.append(("set_window_size", w, h))
+
+    def set_char_size(self, w, h):
+        self.char_width = w
+        self.calls.append(("set_char_size", w, h))
+
+    def set_font(self, path):
+        self.font_path = path
+        self.calls.append(("set_font", path))
+
+
+def make_menu_context(cols=80, rows=24):
+    buffer = ScreenBuffer(cols, rows)
+    screens = ScreenManager()
+    window = FakeMenuWindow()
+    ctx = Context(session_id="s", user="root", cwd="/", screen=buffer, screens=screens, window=window)
+    return ctx, buffer, screens, window
+
+
+def test_horus_menu_pushes_a_menu_with_the_expected_options():
+    ctx, buffer, screens, window = make_menu_context()
+    horus_menu(ctx, [])
+    assert isinstance(screens.active, MenuScreen)
+    assert [o.label for o in screens.active._options] == [
+        "Back to Shell", "Settings", "Save", "To Boot Menu", "Shutdown"]
+
+
+def test_horus_menu_back_to_shell_pops():
+    ctx, buffer, screens, window = make_menu_context()
+    screens.push(MenuScreen(buffer, "Shell", [], screens))  # something underneath to reveal
+    horus_menu(ctx, [])
+    screens.active.handle_enter()  # "Back to Shell" is selected by default
+    assert screens.active._title == "Shell"
+
+
+def test_horus_menu_settings_opens_settings_screen():
+    ctx, buffer, screens, window = make_menu_context()
+    horus_menu(ctx, [])
+    screens.active.handle_motion(pyglet.window.key.MOTION_DOWN)  # select "Settings"
+    screens.active.handle_enter()
+    assert isinstance(screens.active, SettingScreen)
+
+
+def test_horus_menu_shutdown_exits_the_app():
+    from unittest.mock import patch
+    ctx, buffer, screens, window = make_menu_context()
+    horus_menu(ctx, [])
+    menu = screens.active
+    with patch("pyglet.app.exit") as mock_exit:
+        for _ in range(4):  # move selection down to "Shutdown" (last option)
+            menu.handle_motion(pyglet.window.key.MOTION_DOWN)
+        menu.handle_enter()
+    mock_exit.assert_called_once()
+
+
+def test_horus_menu_to_boot_menu_replaces_with_main_menu():
+    ctx, buffer, screens, window = make_menu_context()
+    sentinel = MenuScreen(buffer, "Main Menu", [], screens)
+    ctx.main_menu = sentinel
+    horus_menu(ctx, [])
+    menu = screens.active
+    for _ in range(3):  # move selection to "To Boot Menu"
+        menu.handle_motion(pyglet.window.key.MOTION_DOWN)
+    menu.handle_enter()
+    assert screens.active is sentinel
+
+
+def test_open_settings_menu_shows_current_window_state():
+    ctx, buffer, screens, window = make_menu_context()
+    window.char_width = 16  # -> font size "2"
+    open_settings_menu(ctx)
+    labels = [screens.active._label_for(o) for o in screens.active._options]
+    assert "Window Size: < 1920x1080 >" in labels
+    assert "Font Size: < 2 >" in labels
+    assert "Font: < VGA 8x16 >" in labels
+
+
+def test_open_settings_menu_right_cycles_window_size():
+    import pyglet
+    ctx, buffer, screens, window = make_menu_context()
+    open_settings_menu(ctx)
+    screens.active.handle_motion(pyglet.window.key.MOTION_RIGHT)  # "Window Size" selected by default
+    assert window.calls[0][0] == "set_window_size"
+    assert window.calls[0][1:] != (1920, 1080)  # moved to a different preset
+
+
+def test_open_settings_menu_font_size_calls_set_char_size():
+    import pyglet
+    ctx, buffer, screens, window = make_menu_context()
+    open_settings_menu(ctx)
+    screens.active.handle_motion(pyglet.window.key.MOTION_DOWN)  # select "Font Size"
+    screens.active.handle_motion(pyglet.window.key.MOTION_RIGHT)
+    assert window.calls[0][0] == "set_char_size"
+
+
+def test_open_settings_menu_font_calls_set_font():
+    import pyglet
+    ctx, buffer, screens, window = make_menu_context()
+    open_settings_menu(ctx)
+    screens.active.handle_motion(pyglet.window.key.MOTION_DOWN)
+    screens.active.handle_motion(pyglet.window.key.MOTION_DOWN)  # select "Font"
+    screens.active.handle_motion(pyglet.window.key.MOTION_RIGHT)
+    assert window.calls[0] == ("set_font", "Terminus (TTF) 500.ttf")
+
+
+def test_open_settings_menu_return_pops():
+    import pyglet
+    ctx, buffer, screens, window = make_menu_context()
+    screens.push(MenuScreen(buffer, "Menu", [], screens))
+    open_settings_menu(ctx)
+    for _ in range(3):  # move selection to "Return"
+        screens.active.handle_motion(pyglet.window.key.MOTION_DOWN)
+    screens.active.handle_enter()
+    assert isinstance(screens.active, MenuScreen)
 
 
 # --- ls command ---

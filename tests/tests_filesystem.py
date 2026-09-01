@@ -471,6 +471,9 @@ def test_content_persists_across_reconnect(tmp_path):
 
     fs2 = SQLiteVFS(db_path)
     assert fs2.is_empty() is False
+    assert fs2.read_file("/home/readme.txt", user=ROOT) == "welcome"  # not just "something survived"
+    assert fs2.get_meta("/home").type == NodeType.DIRECTORY
+    fs2.close()
 
 
 # --- seed_minimal / disk-sourced text files ---

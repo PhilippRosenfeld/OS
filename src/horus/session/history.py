@@ -15,7 +15,7 @@ class CommandHistory:
         self._entries.append(line)
 
         if len(self._entries) > self._max_size:
-            self._entries.pop()
+            self._entries.pop(0)  # evict the oldest entry, not the one just added
 
         self._cursor = None
 

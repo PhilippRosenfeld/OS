@@ -326,3 +326,91 @@ def test_backspace_and_home_cannot_reach_into_the_prompt():
     handler._handle_text("ab")
     handler._handle_motion(key.MOTION_BEGINNING_OF_LINE)
     assert buffer.cursor_col == len("> ")
+
+
+# --- Tab completion ---
+
+def make_completing(files, cols=60, rows=10):
+    buffer = ScreenBuffer(cols, rows)
+    history = CommandHistory()
+    handler = InputHandler(buffer, history, complete=lambda prefix: [f for f in files if f.startswith(prefix)])
+    return handler, buffer
+
+
+def test_tab_completes_a_single_match_outright():
+    handler, buffer = make_completing(["poem.txt", "readme.txt"])
+    handler._handle_text("cat p")
+    handler._handle_key(key.TAB, 0)
+    assert handler.current_line == "cat poem.txt"
+    assert handler.line_cursor == len("cat poem.txt")
+
+
+def test_tab_completes_the_first_word_too():
+    handler, buffer = make_completing(["poem.txt"])
+    handler._handle_text("po")
+    handler._handle_key(key.TAB, 0)
+    assert handler.current_line == "poem.txt"
+
+
+def test_tab_with_multiple_matches_inserts_the_first_one_alphabetically():
+    handler, buffer = make_completing(["avocado.txt", "apple.txt", "alpha.txt"])
+    handler._handle_text("cat a")
+    handler._handle_key(key.TAB, 0)
+    assert handler.current_line == "cat alpha.txt"
+
+
+def test_second_tab_shows_the_full_list_without_changing_the_line():
+    handler, buffer = make_completing(["avocado.txt", "apple.txt", "alpha.txt"])
+    handler._handle_text("cat a")
+    handler._handle_key(key.TAB, 0)  # 1st: completes to "cat alpha.txt"
+    handler._handle_key(key.TAB, 0)  # 2nd: shows the list instead of cycling
+
+    assert handler.current_line == "cat alpha.txt"  # untouched by the listing
+    listing = row_text(buffer, 1).rstrip()
+    assert "alpha.txt" in listing and "apple.txt" in listing and "avocado.txt" in listing
+    assert row_text(buffer, 2).rstrip() == "cat alpha.txt"  # line reprinted below the list
+    assert buffer.cursor_row == 2
+
+
+def test_third_and_further_tabs_cycle_through_candidates():
+    handler, buffer = make_completing(["avocado.txt", "apple.txt", "alpha.txt"])
+    handler._handle_text("cat a")
+    handler._handle_key(key.TAB, 0)  # 1st -> alpha.txt
+    handler._handle_key(key.TAB, 0)  # 2nd -> shows list, line unchanged
+    handler._handle_key(key.TAB, 0)  # 3rd -> cycle to apple.txt
+    assert handler.current_line == "cat apple.txt"
+    handler._handle_key(key.TAB, 0)  # 4th -> cycle to avocado.txt
+    assert handler.current_line == "cat avocado.txt"
+    handler._handle_key(key.TAB, 0)  # 5th -> wraps back to alpha.txt
+    assert handler.current_line == "cat alpha.txt"
+
+
+def test_tab_with_no_matches_is_a_noop():
+    handler, buffer = make_completing(["poem.txt"])
+    handler._handle_text("cat zzz")
+    handler._handle_key(key.TAB, 0)
+    assert handler.current_line == "cat zzz"
+
+
+def test_typing_between_tabs_starts_a_fresh_completion():
+    handler, buffer = make_completing(["alpha.txt", "apple.txt"])
+    handler._handle_text("cat a")
+    handler._handle_key(key.TAB, 0)  # -> "cat alpha.txt"
+    handler._handle_text("!")  # something else typed -> breaks the cycling streak
+    handler._handle_key(key.TAB, 0)  # fresh completion for "alpha.txt!" -> no matches
+    assert handler.current_line == "cat alpha.txt!"
+
+
+def test_tab_without_a_completer_does_not_raise():
+    handler, buffer = make()
+    handler._handle_text("cat p")
+    handler._handle_key(key.TAB, 0)  # complete=None -> should not raise
+    assert handler.current_line == "cat p"
+
+
+def test_tab_is_disabled_while_masked():
+    handler, buffer = make_completing(["poem.txt"])
+    handler.masked = True
+    handler._handle_text("p")
+    handler._handle_key(key.TAB, 0)
+    assert handler.current_line == "p"

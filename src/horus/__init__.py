@@ -1,5 +1,6 @@
 from horus.display.window import DisplayWindow
 from horus.shell.input_handler import InputHandler
+from horus.shell.completion import complete_path
 from horus.utils.config_manager import load_config
 from horus.utils.logging_setup import setup_logging
 from horus.kernel.kernel import Kernel
@@ -93,6 +94,9 @@ def main() -> None:
     def get_prompt() -> str:
         return f"{context.user}@{context.cwd} > "
 
+    def complete_file(prefix: str) -> list[str]:
+        return complete_path(fs, context.cwd, prefix)
+
     def _load_boot_frames(path, context: dict[str, str] = None) -> list[BootFrame]:
         """context provides {placeholder} values substituted into each line,
         e.g. {'version': '0.3.0'}."""
@@ -129,7 +133,7 @@ def main() -> None:
             return [line.rstrip("\n") for line in f]
             
     history = CommandHistory()
-    input_handler = InputHandler(window.buffer, history, on_submit=on_submit, get_prompt=get_prompt)
+    input_handler = InputHandler(window.buffer, history, on_submit=on_submit, get_prompt=get_prompt, complete=complete_file)
     context.input_handler = input_handler
 
     logo_lines = _load_logo_lines(BOOT_DIR / "logo.txt")

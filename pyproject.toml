@@ -27,7 +27,15 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
 ]
 
 [tool.pytest.ini_options]
 python_files = ["test_*.py", "tests_*.py"]
+addopts = "--cov=src/horus --cov-report=term-missing --cov-report=html"
+
+[tool.coverage.run]
+source = ["src/horus"]
+
+[tool.coverage.html]
+directory = "htmlcov"
