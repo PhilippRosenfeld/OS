@@ -294,6 +294,44 @@ def test_get_meta_reflects_written_file(tmp_path):
     assert meta.size == 5
 
 
+# --- get_file_type ---
+
+def test_get_file_type_returns_extension_with_leading_dot(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/notes.txt", "hi", user=ROOT)
+    assert fs.get_file_type("/home/notes.txt") == ".txt"
+
+
+def test_get_file_type_returns_dot_dir_for_directories(fs):
+    fs.mkdir("/home", user=ROOT)
+    assert fs.get_file_type("/home") == ".dir"
+
+
+def test_get_file_type_with_no_extension_returns_empty_string(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/README", "hi", user=ROOT)
+    assert fs.get_file_type("/home/README") == ""
+
+
+def test_get_file_type_uses_only_the_last_extension(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/archive.tar.gz", "hi", user=ROOT)
+    assert fs.get_file_type("/home/archive.tar.gz") == ".gz"
+
+
+def test_get_file_type_treats_a_leading_dot_as_no_extension(fs):
+    """A dotfile like '.bashrc' isn't 'extension bashrc' -- matches
+    pathlib.Path.suffix's own convention for leading-dot names."""
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/.bashrc", "hi", user=ROOT)
+    assert fs.get_file_type("/home/.bashrc") == ""
+
+
+def test_get_file_type_missing_path_raises(fs):
+    with pytest.raises(FileNotFoundError):
+        fs.get_file_type("/nope.txt")
+
+
 def test_timestamps_are_stored_at_second_precision(tmp_path):
     fs = make(tmp_path)
     fs.mkdir("/home", user=ROOT)

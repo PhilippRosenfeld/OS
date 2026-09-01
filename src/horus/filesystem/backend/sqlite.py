@@ -193,7 +193,13 @@ class SQLiteVFS(VFS):
         if row is None:
             raise FileNotFoundError(path)
         return self._row_to_node(row)
-    
+
+    def get_file_type(self, path: str) -> str:
+        node = self.get_meta(path)
+        if node.type == NodeType.DIRECTORY:
+            return ".dir"
+        return Path(node.name).suffix
+
     def remove(self, path: str, user: str) -> None:
         """Removes a file or directory at the given path. If it's a directory,
         it must be empty."""

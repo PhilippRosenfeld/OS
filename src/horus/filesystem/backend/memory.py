@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from horus.filesystem.vfs import VFS
 from horus.filesystem.node import Node, NodeType, ProtectedFileError
 from horus.filesystem.path_utils import resolve_path as _resolve_path
@@ -122,6 +124,12 @@ class InMemoryVFS(VFS):
         if node is None:
             raise FileNotFoundError(path)
         return node.meta
+
+    def get_file_type(self, path: str) -> str:
+        node = self.get_meta(path)
+        if node.type == NodeType.DIRECTORY:
+            return ".dir"
+        return Path(node.name).suffix
 
     def remove(self, path: str, user: str) -> None:
         """Removes a file or directory at the given path. If it's a directory,

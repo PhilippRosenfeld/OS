@@ -1,3 +1,5 @@
+from sqlite3 import NotSupportedError
+
 from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
 from horus.kernel.registry import command
 from horus.filesystem.node import NodeType, ProtectedFileError
@@ -252,6 +254,8 @@ def chattr(ctx, argv: list[str]) -> None:
 
 @command("cat", help_text="Print a file's contents")
 def cat(ctx, argv: list[str]) -> None:
+    cat_supported_types = [".txt"]
+    
     try:
         args = _cat_parser.parse_args(argv)
     except CommandParseError as e:
@@ -260,7 +264,10 @@ def cat(ctx, argv: list[str]) -> None:
 
     path = ctx.resolve_path(args.path)
     try:
-        content = ctx.fs.read_file(path, user=ctx.effective_user)
+        if ctx.fs.get_file_type(path) in cat_supported_types:
+            content = ctx.fs.read_file(path, user=ctx.effective_user)
+        else:
+            raise NotSupportedError(f"cat: {args.path}: Not a text file")
     except FileNotFoundError:
         if ctx.fs.exists(path):
             ctx.write_line(f"cat: {args.path}: Is a directory")
@@ -269,6 +276,9 @@ def cat(ctx, argv: list[str]) -> None:
         return
     except AccessDeniedError:
         ctx.write_line(f"cat: {args.path}: Permission denied")
+        return
+    except NotSupportedError:
+        ctx.write_line(f"cat: {args.path}: Not a text file, supported file types: {cat_supported_types}")
         return
 
     ctx.write_line(content)

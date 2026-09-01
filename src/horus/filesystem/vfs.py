@@ -46,3 +46,10 @@ class VFS(ABC):
                         hidden: bool = None, immutable: bool = None) -> None:
         """Updates only the attributes explicitly passed (non-None)."""
         pass
+    
+    @abstractmethod
+    def get_file_type(self, path: str) -> str:
+        """Returns the file's extension with the leading dot (e.g. '.txt'
+        for 'notes.txt', '' for a file with no extension), or '.dir' for
+        directories."""
+        pass

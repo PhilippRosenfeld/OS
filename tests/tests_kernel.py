@@ -246,6 +246,9 @@ def test_cat_missing_file_writes_error():
 
 
 def test_cat_on_a_directory_writes_error():
+    """cat checks get_file_type() before reading -- a directory's type is
+    '.dir', which isn't in cat's supported list, so it's rejected as 'not a
+    text file' rather than reaching the read step at all."""
     ctx, buffer = make_context(cols=60)
     ctx.fs = InMemoryVFS()
     ctx.fs.mkdir("/home", user="root")
@@ -253,7 +256,7 @@ def test_cat_on_a_directory_writes_error():
 
     cat(ctx, ["home"])
 
-    assert "Is a directory" in row_text(buffer, 0)
+    assert "Not a text file" in row_text(buffer, 0)
 
 
 def test_cat_help_flag_reports_parse_error_without_raising():
