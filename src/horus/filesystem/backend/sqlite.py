@@ -5,8 +5,9 @@ from pathlib import Path
 from horus.filesystem.vfs import VFS
 from horus.filesystem.node import Node, NodeType, ProtectedFileError
 from horus.filesystem.path_utils import resolve_path as _resolve_path
-from horus.filesystem.permissions import require_write, require_read, can_write, AccessDeniedError, require_metadata_change, octal_to_permissions
+from horus.filesystem.permissions import require_write, require_read, can_write, AccessDeniedError, require_metadata_change, require_write_encrypted, octal_to_permissions
 from horus.filesystem.cipher import encrypt_bytes, decrypt_bytes
+from horus.session.user import UserRole
 
 class SQLiteVFS(VFS):
     """SQLite-backed filesystem. Persists across app restarts: the schema is
@@ -262,13 +263,13 @@ class SQLiteVFS(VFS):
         self._conn.execute(f"UPDATE nodes SET {', '.join(updates)} WHERE path = ?", params)
         self._conn.commit()
 
-    def encrypt_file(self, path: str, user: str, key: str, method: str = "xor") -> str:
+    def encrypt_file(self, path: str, user: str, role: UserRole, key: str, method: str = "xor") -> str:
         row = self._fetch(path)
         if row is None or row["type"] != NodeType.FILE.value:
             raise FileNotFoundError(path)
         if row["name"].endswith(".crypt"):
             raise ValueError(f"'{path}' is already encrypted")
-        require_write(self._row_to_node(row), user, path)
+        require_write_encrypted(self._row_to_node(row), user, role, path)
 
         new_path = path + ".crypt"
         if self.exists(new_path):
@@ -282,13 +283,13 @@ class SQLiteVFS(VFS):
         self._conn.commit()
         return new_path
 
-    def decrypt_file(self, path: str, user: str, key: str, method: str = "xor") -> str:
+    def decrypt_file(self, path: str, user: str, role: UserRole, key: str, method: str = "xor") -> str:
         row = self._fetch(path)
         if row is None or row["type"] != NodeType.FILE.value:
             raise FileNotFoundError(path)
         if not row["name"].endswith(".crypt"):
             raise ValueError(f"'{path}' is not encrypted")
-        require_write(self._row_to_node(row), user, path)
+        require_write_encrypted(self._row_to_node(row), user, role, path)
 
         plaintext = decrypt_bytes(row["content"] or "", key, method)
 

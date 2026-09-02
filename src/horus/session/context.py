@@ -5,6 +5,7 @@ from horus.events.bus import EventBus
 from horus.filesystem.vfs import VFS
 from horus.display.screen_buffer import ScreenBuffer
 from horus.display.window import DisplayWindow
+from horus.processes.processTable import ProcessTable
 from horus.ui.screen_manager import ScreenManager
 
 @dataclass
@@ -29,6 +30,7 @@ class Context:
     effective_user: str = None    #user that executes command, defaults to user
     input_handler: "InputHandler" = None
     main_menu: "MainMenuScreen" = None
+    process_table: "ProcessTable" = None
 
 
     def __post_init__(self):

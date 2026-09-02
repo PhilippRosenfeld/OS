@@ -3,8 +3,9 @@ from pathlib import Path
 from horus.filesystem.vfs import VFS
 from horus.filesystem.node import Node, NodeType, ProtectedFileError
 from horus.filesystem.path_utils import resolve_path as _resolve_path
-from horus.filesystem.permissions import require_write, require_read, require_metadata_change, can_write, can_read, AccessDeniedError, octal_to_permissions
+from horus.filesystem.permissions import require_write, require_read, require_metadata_change, require_write_encrypted, can_write, can_read, AccessDeniedError, octal_to_permissions
 from horus.filesystem.cipher import encrypt_bytes, decrypt_bytes
+from horus.session.user import UserRole
 
 class _TreeNode:
 
@@ -167,13 +168,13 @@ class InMemoryVFS(VFS):
         if immutable is not None:
             node.meta.immutable = immutable
 
-    def encrypt_file(self, path: str, user: str, key: str, method: str = "xor") -> str:
+    def encrypt_file(self, path: str, user: str, role: UserRole, key: str, method: str = "xor") -> str:
         node = self._walk(path)
         if node is None or node.meta.type != NodeType.FILE:
             raise FileNotFoundError(path)
         if node.meta.name.endswith(".crypt"):
             raise ValueError(f"'{path}' is already encrypted")
-        require_write(node.meta, user, path)
+        require_write_encrypted(node.meta, user, role, path)
 
         parent, name = self._parent_and_name(path)
         new_name = name + ".crypt"
@@ -188,13 +189,13 @@ class InMemoryVFS(VFS):
         parent.children[new_name] = node
         return path + ".crypt"
 
-    def decrypt_file(self, path: str, user: str, key: str, method: str = "xor") -> str:
+    def decrypt_file(self, path: str, user: str, role: UserRole, key: str, method: str = "xor") -> str:
         node = self._walk(path)
         if node is None or node.meta.type != NodeType.FILE:
             raise FileNotFoundError(path)
         if not node.meta.name.endswith(".crypt"):
             raise ValueError(f"'{path}' is not encrypted")
-        require_write(node.meta, user, path)
+        require_write_encrypted(node.meta, user, role, path)
 
         plaintext = decrypt_bytes(node.content, key, method)
 

@@ -15,9 +15,8 @@ from horus.ui.shell_screen import ShellScreen
 from horus.ui.boot_screen import BootScreen, BootFrame
 from horus.paths import SAVES_DIR, DATA_DIR, BOOT_SOUNDS_DIR, SOUNDS_DIR, SHELL_SOUNDS_DIR
 from horus.audio.sound_manager import SoundManager
-from horus.session.user import UserRegistry, User, UserRole
+from horus.session.user import UserRegistry
 from horus.session.seed import seed_users
-from horus.session.auth import hash_password
 from horus.__about__ import VERSION
 from horus.story.progress import BootProgress
 from horus.paths import BOOT_PROGRESS_PATH, BOOT_DIR
@@ -26,9 +25,10 @@ from horus.paths import HARDWARE_SPEC_PATH
 from horus.ui.logo_screen import LogoScreen
 from pathlib import Path
 from horus.ui.main_menu_screen import MainMenuScreen
-from horus.ui.settings_screen import SettingScreen, SettingOption
 from horus.kernel.commands.cmd_menu import open_settings_menu
-from horus.ui.menu_screen import MenuScreen, MenuOption
+from horus.ui.menu_screen import MenuOption
+from horus.processes.seed_process import seed_processes
+from horus.processes.processTable import ProcessTable
 
 
 import horus.kernel.commands
@@ -63,9 +63,8 @@ def main() -> None:
     sounds.load("startup_up_weird_noise", BOOT_SOUNDS_DIR / "startup_up_weird_noise.mp3")
     sounds.load("menu_music", SOUNDS_DIR / "menu_music.mp3")
     sounds.load("crypt", SHELL_SOUNDS_DIR / "crypt.mp3")
+    sounds.load("background", SHELL_SOUNDS_DIR / "background.mp3")
     
-
-
     bus = EventBus()
     kernel = Kernel(registry=registry, bus=bus)
     fs = SQLiteVFS(SAVES_DIR / "horus.db")
@@ -75,6 +74,10 @@ def main() -> None:
     screens = ScreenManager()
     users = UserRegistry()
     seed_users(users)
+    
+    process_table = ProcessTable()
+    seed_processes(process_table)
+    process_table.start_fluctuating()
 
     context = Context(
         session_id = "local",
@@ -88,6 +91,7 @@ def main() -> None:
         window=window,
         users=users,
         kernel=kernel,
+        process_table=process_table
     )
 
     def on_submit(line: str) -> None:
@@ -143,6 +147,10 @@ def main() -> None:
 
     def _start_shell() -> None:
         screens.pop()
+        # BootScreen only fades hard_disk_spinup down to near-silent (not
+        # off) at boot _finish(), so it can still be quietly running all the
+        # way through Logo and the Main Menu -- actually silence it here
+        sounds.fade_out(0.0, duration=2.0, name="hard_disk_spinup")
 
     def _open_settings() -> None:
         open_settings_menu(context)
@@ -168,6 +176,7 @@ def main() -> None:
 
     def _on_logo_complete() -> None:
         screens.replace(main_menu)
+        sounds.fade_in("background", target_volume=0.075, duration=5.0, loop=True)
 
     window.set_text_handler(
         on_text=screens.handle_text,

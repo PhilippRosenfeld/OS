@@ -55,7 +55,7 @@ class MainMenuScreen(Screen):
         self._buffer.restore(self._saved_screen)
         if self._sounds is not None and self._song_player is not None:
             player = self._song_player
-            self._sounds.fade_out(0.0, duration=self._song_fade_out, on_complete=player.pause)
+            self._sounds.fade_out(0.0, duration=self._song_fade_out, on_complete=player.pause, player=player)
         self._song_player = None
 
     def on_resume(self) -> None:

@@ -8,6 +8,7 @@ from horus.filesystem.node import NodeType, ProtectedFileError
 from horus.filesystem.permissions import AccessDeniedError
 from horus.filesystem.file_types import FILE_TYPES
 from horus.filesystem.cipher import WrongKeyError
+from horus.session.user import UserRole
 from horus.ui.loading_screen import LoadingScreen
 import re
 import secrets
@@ -15,6 +16,18 @@ import random
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _role_of(ctx) -> UserRole:
+    """Resolves the effective user's role for permission checks that need it
+    (currently just encrypt/decrypt -- see permissions.can_write_encrypted).
+    Defaults to the least-privileged role if there's no UserRegistry on this
+    context or the user isn't registered in it, so an unusual setup fails
+    closed rather than open."""
+    if ctx.users is None:
+        return UserRole.USER
+    user = ctx.users.get(ctx.effective_user)
+    return user.role if user is not None else UserRole.USER
 
 _PROGRESS_BAR_WIDTH = 24
 _PROGRESS_STALL_CHANCE = 0.35  # chance a tick makes no progress at all -- a stutter
@@ -379,7 +392,7 @@ def encrypt(ctx, argv: list[str]) -> None:
     key = args.key or secrets.token_hex(4)
 
     try:
-        new_path = ctx.fs.encrypt_file(path, user=ctx.effective_user, key=key, method=args.method)
+        new_path = ctx.fs.encrypt_file(path, user=ctx.effective_user, role=_role_of(ctx), key=key, method=args.method)
     except FileNotFoundError:
         if ctx.fs.exists(path):
             ctx.write_line(f"encrypt: {args.path}: Is a directory")
@@ -416,7 +429,7 @@ def decrypt(ctx, argv: list[str]) -> None:
     path = ctx.resolve_path(args.path)
 
     try:
-        new_path = ctx.fs.decrypt_file(path, user=ctx.effective_user, key=args.key, method=args.method)
+        new_path = ctx.fs.decrypt_file(path, user=ctx.effective_user, role=_role_of(ctx), key=args.key, method=args.method)
     except FileNotFoundError:
         if ctx.fs.exists(path):
             ctx.write_line(f"decrypt: {args.path}: Is a directory")

@@ -359,6 +359,115 @@ def test_fade_out_clamps_target_volume():
     assert player.volume == pytest.approx(1.0)  # clamped to the valid max, not 5.0
 
 
+def test_fade_out_with_explicit_player_only_affects_that_player():
+    """Regression test: without scoping, fading out one sound (e.g. the menu
+    theme on 'Continue') swept up every other currently-playing sound too --
+    including an unrelated one still mid fade_in (e.g. a background track),
+    fighting its ramp and leaving it stuck instead of reaching full volume."""
+    sm = SoundManager()
+    sm.load("tick", BOOT_SOUNDS_DIR / "boot_tick.wav")
+    sm.play("tick")
+    other = sm._players[-1]
+    other.volume = 0.6
+
+    target = sm.play("tick")
+    target.volume = 1.0
+
+    captured = {}
+    with patch("pyglet.clock.schedule_interval", side_effect=lambda func, interval: captured.update(func=func)):
+        sm.fade_out(target_volume=0.0, duration=1.0, step=0.5, player=target)
+
+    tick = captured["func"]
+    tick(0.5)
+    assert target.volume == pytest.approx(0.5)
+    assert other.volume == pytest.approx(0.6)  # untouched
+    tick(0.5)
+    assert target.volume == pytest.approx(0.0)
+    assert other.volume == pytest.approx(0.6)  # still untouched
+
+
+def test_fade_out_with_explicit_player_that_is_not_playing_is_a_noop():
+    sm = SoundManager()
+    sm.load("tick", BOOT_SOUNDS_DIR / "boot_tick.wav")
+    sm.play("tick")
+    player = sm._players[-1]
+    player.pause()
+
+    calls = []
+    with patch("pyglet.clock.schedule_interval") as mock_schedule:
+        sm.fade_out(target_volume=0.0, duration=1.0, player=player, on_complete=lambda: calls.append(True))
+    mock_schedule.assert_not_called()
+    assert calls == [True]
+
+
+def test_fade_out_without_a_player_still_affects_everything_currently_playing():
+    """The default (no `player`) behavior -- used e.g. by BootScreen to fade
+    several ambient sounds out together -- must still work as before."""
+    sm = SoundManager()
+    sm.load("tick", BOOT_SOUNDS_DIR / "boot_tick.wav")
+    sm.play("tick")
+    sm.play("tick")
+    players = list(sm._players)
+    for p in players:
+        p.volume = 1.0
+
+    captured = {}
+    with patch("pyglet.clock.schedule_interval", side_effect=lambda func, interval: captured.update(func=func)):
+        sm.fade_out(target_volume=0.0, duration=1.0, step=1.0)
+
+    captured["func"](1.0)
+    for p in players:
+        assert p.volume == pytest.approx(0.0)
+
+
+def test_fade_out_with_name_only_affects_players_playing_that_sound():
+    """Regression test: fading out an ambient boot sound once the shell is
+    reached (the caller no longer holds its Player) must not sweep up an
+    unrelated sound that happens to be playing at the same time (e.g. a
+    separately looping background track)."""
+    sm = SoundManager()
+    sm.load("hdd", BOOT_SOUNDS_DIR / "boot_tick.wav")
+    sm.load("bg", BOOT_SOUNDS_DIR / "boot_tick.wav")
+    hdd_player = sm.play("hdd")
+    hdd_player.volume = 1.0
+    bg_player = sm.play("bg")
+    bg_player.volume = 1.0
+
+    captured = {}
+    with patch("pyglet.clock.schedule_interval", side_effect=lambda func, interval: captured.update(func=func)):
+        sm.fade_out(target_volume=0.0, duration=1.0, step=1.0, name="hdd")
+
+    captured["func"](1.0)
+    assert hdd_player.volume == pytest.approx(0.0)
+    assert bg_player.volume == pytest.approx(1.0)  # untouched
+
+
+def test_fade_out_with_name_matching_nothing_playing_is_a_noop():
+    sm = SoundManager()
+    calls = []
+    with patch("pyglet.clock.schedule_interval") as mock_schedule:
+        sm.fade_out(target_volume=0.0, duration=1.0, name="never_loaded", on_complete=lambda: calls.append(True))
+    mock_schedule.assert_not_called()
+    assert calls == [True]
+
+
+def test_fade_out_player_takes_priority_over_name_when_both_given():
+    sm = SoundManager()
+    sm.load("hdd", BOOT_SOUNDS_DIR / "boot_tick.wav")
+    first = sm.play("hdd")
+    first.volume = 1.0
+    second = sm.play("hdd")
+    second.volume = 1.0
+
+    captured = {}
+    with patch("pyglet.clock.schedule_interval", side_effect=lambda func, interval: captured.update(func=func)):
+        sm.fade_out(target_volume=0.0, duration=1.0, step=1.0, player=first, name="hdd")
+
+    captured["func"](1.0)
+    assert first.volume == pytest.approx(0.0)
+    assert second.volume == pytest.approx(1.0)  # not touched, even though it matches by name
+
+
 # --- play_delayed ---
 
 def test_play_delayed_schedules_via_pyglet_clock():

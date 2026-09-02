@@ -12,6 +12,10 @@ from horus.kernel.commands.cmd_text import echo
 from horus.kernel.commands.cmd_misc import color, su
 from horus.kernel.commands.cmd_fs import ls, cat, encrypt, decrypt
 from horus.kernel.commands.cmd_menu import horus_menu, open_settings_menu
+from horus.kernel.commands.cmd_proc import top
+from horus.processes.processTable import ProcessTable
+from horus.processes.process import process as Process
+from horus.ui.top_screen import TopScreen
 from horus.display.colors import NAMED_COLORS
 from horus.filesystem.backend.memory import InMemoryVFS
 from horus.session.user import UserRegistry
@@ -787,3 +791,90 @@ def test_encrypt_help_flag_reports_parse_error_without_raising():
     ctx, buffer = make_fs_context()
     encrypt(ctx, ["--help"])  # fails during parsing, before any scheduling happens
     assert ctx.fs.exists("/home/secret.txt") is True  # untouched
+
+
+# --- encrypt/decrypt permission checks (protected -> ADMIN+, immutable -> ROOT) ---
+
+def make_fs_context_with_users(cols=80, rows=10):
+    ctx, buffer = make_fs_context(cols=cols, rows=rows)
+    ctx.users = UserRegistry()
+    seed_users(ctx.users)
+    return ctx, buffer
+
+
+def test_encrypt_protected_file_denies_a_plain_user():
+    ctx, buffer = make_fs_context_with_users()
+    ctx.fs.set_attributes("/home/secret.txt", user="root", protected=True)
+    ctx.user = ctx.effective_user = "user1"
+    encrypt(ctx, ["secret.txt", "-k", "mykey"])
+    assert "Permission denied" in full_text(buffer)
+    assert ctx.fs.exists("/home/secret.txt.crypt") is False
+
+
+def test_encrypt_protected_file_allows_admin():
+    ctx, buffer = make_fs_context_with_users()
+    ctx.fs.set_attributes("/home/secret.txt", user="root", protected=True)
+    ctx.user = ctx.effective_user = "admin"
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])
+    assert ctx.fs.exists("/home/secret.txt.crypt") is True
+
+
+def test_encrypt_immutable_file_denies_admin():
+    """Immutable is a stricter tier than protected -- ADMIN is enough for a
+    protected file, but not for an immutable one."""
+    ctx, buffer = make_fs_context_with_users()
+    ctx.fs.set_attributes("/home/secret.txt", user="root", immutable=True)
+    ctx.user = ctx.effective_user = "admin"
+    encrypt(ctx, ["secret.txt", "-k", "mykey"])
+    assert "Permission denied" in full_text(buffer)
+    assert ctx.fs.exists("/home/secret.txt.crypt") is False
+
+
+def test_encrypt_immutable_file_allows_root_directly():
+    ctx, buffer = make_fs_context_with_users()
+    ctx.fs.set_attributes("/home/secret.txt", user="root", immutable=True)
+    ctx.user = ctx.effective_user = "root"
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])
+    assert ctx.fs.exists("/home/secret.txt.crypt") is True
+
+
+def test_encrypt_without_a_user_registry_falls_back_to_least_privilege():
+    """No ctx.users at all (e.g. a minimal test context) must fail closed --
+    a protected file stays out of reach rather than silently allowing it."""
+    ctx, buffer = make_fs_context()  # no .users set
+    ctx.fs.set_attributes("/home/secret.txt", user="root", protected=True)
+    ctx.user = ctx.effective_user = "someone"
+    encrypt(ctx, ["secret.txt", "-k", "mykey"])
+    assert "Permission denied" in full_text(buffer)
+
+
+# --- top command ---
+
+def make_proc_context(cols=60, rows=10):
+    buffer = ScreenBuffer(cols, rows)
+    screens = ScreenManager()
+    table = ProcessTable()
+    table.add_process(Process(name="init", pid=0, owner="root", cpu_percent=0.1, mem_kb=1024))
+    ctx = Context(session_id="s", user="root", cwd="/", screen=buffer, screens=screens, process_table=table)
+    return ctx, buffer, screens, table
+
+
+def test_top_pushes_a_live_top_screen():
+    ctx, buffer, screens, table = make_proc_context()
+    top(ctx, [])
+    assert isinstance(screens.active, TopScreen)
+
+
+def test_top_without_a_screen_stack_falls_back_to_a_one_shot_snapshot():
+    ctx, buffer = make_context()
+    ctx.process_table = ProcessTable()
+    ctx.process_table.add_process(Process(name="init", pid=0, owner="root", cpu_percent=0.1, mem_kb=1024))
+    top(ctx, [])
+    assert "init" in full_text(buffer)
+    assert ctx.screens is None  # nothing to push onto -- confirms the fallback path ran
+
+
+def test_top_help_flag_reports_parse_error_without_pushing_a_screen():
+    ctx, buffer, screens, table = make_proc_context()
+    top(ctx, ["--help"])
+    assert screens.active is None

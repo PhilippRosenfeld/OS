@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from horus.filesystem.node import Node
+from horus.session.user import UserRole
 
 
 class VFS(ABC):
@@ -55,17 +56,23 @@ class VFS(ABC):
         pass
 
     @abstractmethod
-    def encrypt_file(self, path: str, user: str, key: str, method: str = "xor") -> str:
+    def encrypt_file(self, path: str, user: str, role: UserRole, key: str, method: str = "xor") -> str:
         """Encrypts a file's content in place and renames it by appending
         '.crypt' (see filesystem/file_types.py), so it's no longer treated
-        as its original type (e.g. cat refuses it). Returns the new path."""
+        as its original type (e.g. cat refuses it). Returns the new path.
+
+        Permission check is stricter/different from every other write path
+        (see permissions.can_write_encrypted): a protected file only needs
+        `role` to be ADMIN or higher (not literally the 'root' account), and
+        an immutable file can be acted on directly by ROOT (no chattr-first
+        step needed)."""
         pass
 
     @abstractmethod
-    def decrypt_file(self, path: str, user: str, key: str, method: str = "xor") -> str:
+    def decrypt_file(self, path: str, user: str, role: UserRole, key: str, method: str = "xor") -> str:
         """Reverses encrypt_file(): strips '.crypt' from the name and
         restores the original content. `method` must be the exact one the
         file was encrypted with -- it is not auto-detected, so the wrong
         method fails exactly like the wrong key (cipher.WrongKeyError).
-        Returns the new (original) path."""
+        Returns the new (original) path. See encrypt_file() for `role`."""
         pass

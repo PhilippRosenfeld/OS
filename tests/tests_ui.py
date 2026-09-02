@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pyglet
 
 from horus.display.screen_buffer import ScreenBuffer
@@ -6,6 +8,9 @@ from horus.ui.screen_manager import ScreenManager
 from horus.ui.shell_screen import ShellScreen
 from horus.ui.menu_screen import MenuScreen, MenuOption
 from horus.ui.loading_screen import LoadingScreen
+from horus.ui.top_screen import TopScreen
+from horus.processes.processTable import ProcessTable
+from horus.processes.process import process as Process
 from horus.ui.settings_screen import SettingScreen, SettingOption
 from horus.ui.boot_screen import BootScreen, BootFrame
 from horus.ui.logo_screen import LogoScreen
@@ -327,6 +332,104 @@ def test_shell_does_not_redraw_its_prompt_while_a_loading_screen_is_up():
     assert row_text(buffer, 1) == ">"  # prompt only appears now
 
 
+# --- TopScreen ---
+
+def make_table():
+    table = ProcessTable()
+    table.add_process(Process(name="init", pid=0, owner="root", cpu_percent=0.1, mem_kb=1024))
+    return table
+
+
+def test_top_screen_renders_the_process_table_on_push():
+    buffer = ScreenBuffer(60, 10)
+    manager = ScreenManager()
+    with patch("pyglet.clock.schedule_interval"):
+        manager.push(TopScreen(buffer, make_table(), manager))
+    assert "init" in row_text(buffer, 2)
+
+
+def test_top_screen_disables_cursor_and_restores_it_on_pop():
+    buffer = ScreenBuffer(60, 10)
+    buffer.cursor_enabled = True
+    manager = ScreenManager()
+    with patch("pyglet.clock.schedule_interval"):
+        manager.push(TopScreen(buffer, make_table(), manager))
+    assert buffer.cursor_enabled is False
+    manager.pop()
+    assert buffer.cursor_enabled is True
+
+
+def test_top_screen_schedules_a_recurring_refresh():
+    buffer = ScreenBuffer(60, 10)
+    manager = ScreenManager()
+    with patch("pyglet.clock.schedule_interval") as mock_schedule:
+        screen = TopScreen(buffer, make_table(), manager, refresh_interval=2.0)
+        manager.push(screen)
+    callback, interval = mock_schedule.call_args[0]
+    assert interval == 2.0
+    assert callback == screen._tick
+
+
+def test_top_screen_refresh_reflects_new_processes():
+    buffer = ScreenBuffer(60, 10)
+    manager = ScreenManager()
+    table = make_table()
+    with patch("pyglet.clock.schedule_interval") as mock_schedule:
+        screen = TopScreen(buffer, table, manager)
+        manager.push(screen)
+    table.add_process(Process(name="new_proc", pid=0, owner="user1", cpu_percent=2.5, mem_kb=4096))
+    callback, _ = mock_schedule.call_args[0]
+    callback(0.0)
+    assert "new_proc" in row_text(buffer, 3)
+
+
+def test_top_screen_ctrl_c_pops_back_to_the_shell():
+    buffer = ScreenBuffer(60, 10)
+    manager = ScreenManager()
+    history = CommandHistory()
+    handler = InputHandler(buffer, history, get_prompt=lambda: "> ")
+    shell = ShellScreen(handler, manager)
+    manager.push(shell)
+    with patch("pyglet.clock.schedule_interval"):
+        manager.push(TopScreen(buffer, make_table(), manager))
+    assert manager.active is not shell
+
+    manager.handle_key(key.C, key.MOD_CTRL)
+    assert manager.active is shell
+
+
+def test_top_screen_plain_c_without_ctrl_does_not_exit():
+    buffer = ScreenBuffer(60, 10)
+    manager = ScreenManager()
+    with patch("pyglet.clock.schedule_interval"):
+        screen = TopScreen(buffer, make_table(), manager)
+        manager.push(screen)
+    manager.handle_key(key.C, 0)
+    assert manager.active is screen
+
+
+def test_top_screen_unschedules_the_refresh_on_pop():
+    buffer = ScreenBuffer(60, 10)
+    manager = ScreenManager()
+    with patch("pyglet.clock.schedule_interval"):
+        screen = TopScreen(buffer, make_table(), manager)
+        manager.push(screen)
+    with patch("pyglet.clock.unschedule") as mock_unschedule:
+        manager.pop()
+    mock_unschedule.assert_called_once_with(screen._tick)
+
+
+def test_top_screen_ignores_text_motion_and_enter():
+    buffer = ScreenBuffer(60, 10)
+    manager = ScreenManager()
+    with patch("pyglet.clock.schedule_interval"):
+        manager.push(TopScreen(buffer, make_table(), manager))
+    manager.handle_text("hi")  # should not raise, and not act on it
+    manager.handle_motion(key.MOTION_UP)
+    manager.handle_enter()
+    assert isinstance(manager.active, TopScreen)
+
+
 # --- MenuScreen ---
 
 def make_menu(cols=30, rows=10, labels=("Resume", "Settings", "Quit")):
@@ -519,6 +622,22 @@ def test_main_menu_fades_out_the_song_on_pop():
     assert screen._song_player is None
 
 
+def test_main_menu_fade_out_is_scoped_to_its_own_player():
+    """Regression test: on_pop() used to call fade_out() without a `player`,
+    which fades every currently-playing sound -- if another track (e.g. a
+    separately looping background song) happened to be playing/fading in at
+    the same time, it got dragged into the menu theme's fade-out too."""
+    buffer = ScreenBuffer(80, 24)
+    sounds = FakeSounds()
+    screen = MainMenuScreen(buffer, "TITLE", [MainMenuOption("Continue", lambda: None)],
+                             sounds=sounds, song="menu_theme")
+    screen.on_push()
+    player = screen._song_player
+
+    screen.on_pop()
+    assert sounds.faded_players == [player]
+
+
 def test_main_menu_pop_without_a_song_does_not_touch_sounds():
     buffer = ScreenBuffer(80, 24)
     sounds = FakeSounds()
@@ -668,6 +787,7 @@ class FakeSounds:
     def __init__(self) -> None:
         self.played: list[str] = []
         self.fades: list[tuple[float, float]] = []
+        self.faded_players: list = []  # the `player=` each fade_out() call was scoped to (or None)
         self.sound_volumes: dict[str, float] = {}
         self.fade_ins: list[tuple[str, float, float, bool]] = []
         self.play_players: dict[str, FakePlayer] = {}  # name -> the player returned by play()
@@ -678,8 +798,9 @@ class FakeSounds:
         self.play_players[name] = player
         return player
 
-    def fade_out(self, target_volume: float, duration: float, on_complete=None) -> None:
+    def fade_out(self, target_volume: float, duration: float, on_complete=None, player=None) -> None:
         self.fades.append((target_volume, duration))
+        self.faded_players.append(player)
         if on_complete is not None:
             on_complete()
 

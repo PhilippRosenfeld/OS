@@ -152,12 +152,28 @@ class SoundManager:
         return _fire
 
     def fade_out(self, target_volume: float, duration: float = 1.5, step: float = 0.05,
-                 on_complete: Callable[[], None] | None = None) -> None:
+                 on_complete: Callable[[], None] | None = None,
+                 player: pyglet.media.Player | None = None,
+                 name: str | None = None) -> None:
         """Gradually lowers the volume of every sound currently playing down to
         target_volume over `duration` seconds, then stops adjusting. Only
         touches players already active when called -- sounds started after the
         fade begins are unaffected, and the SoundManager's own volume() level
         used for future play()/play_sequence() calls is left untouched.
+
+        Pass `player` (e.g. the Player returned by fade_in()/play()) to scope
+        this to just that one instead of every currently-playing sound --
+        otherwise, if something else happens to be playing at the same time
+        (e.g. a separately looping background track that's still mid fade_in),
+        it gets swept into this fade too and fights the other one for control
+        of its own volume, leaving it stuck instead of completing.
+
+        Pass `name` instead when the caller never held onto the Player (e.g.
+        fading out an ambient sound from BootScreen once the shell is reached,
+        long after BootScreen itself is gone) -- scopes this to whatever is
+        currently playing under that loaded sound name:
+
+            sounds.fade_out(0.0, duration=2.0, name="hard_disk_spinup")
 
         Pass on_complete to run something once the fade finishes -- e.g. to
         actually stop a looping player once it's silent, since fading it to
@@ -166,8 +182,15 @@ class SoundManager:
             sounds.fade_out(0.0, duration=2.0, on_complete=player.pause)
         """
         target_volume = max(0.0, min(1.0, target_volume))
-        self._players = [p for p in self._players if p.playing]
-        players = list(self._players)
+        if player is not None:
+            players = [player] if player.playing else []
+        elif name is not None:
+            self._players = [p for p in self._players if p.playing]
+            players = [p for p in self._players
+                       if (tracker := self._player_names.get(id(p))) is not None and tracker.current == name]
+        else:
+            self._players = [p for p in self._players if p.playing]
+            players = list(self._players)
         starts = {id(p): p.volume for p in players}
         if not players:
             if on_complete is not None:

@@ -1,4 +1,5 @@
 from horus.filesystem.node import Node
+from horus.session.user import UserRole
 
 class AccessDeniedError(Exception):
     def __init__(self, path: str, action: str):
@@ -32,6 +33,30 @@ def can_change_metadata(node: Node, user: str) -> bool:
 
 def require_write(node: Node, user: str, path: str) -> None:
     if not can_write(node, user):
+        raise AccessDeniedError(path, "write to")
+
+def can_write_encrypted(node: Node, user: str, role: UserRole) -> bool:
+    """Like can_write(), but for encrypt/decrypt specifically: immutable
+    requires ROOT directly (no chattr-then-modify two-step needed -- root
+    can act on it right away), and protected only requires ADMIN or higher,
+    not literally being the 'root' account. Plain (unflagged) files still
+    fall back to the normal owner/other permission bits, same as can_write().
+
+    This is intentionally separate from can_write() rather than changing it --
+    every other write path (rm, chmod, write_file, mkdir, ...) keeps the
+    existing name-based rules unchanged."""
+    if node.immutable:
+        return role >= UserRole.ROOT
+    if node.protected:
+        return role >= UserRole.ADMIN
+    if user == "root":
+        return True
+    if node.owner == user:
+        return "w" in node.permissions[0:3] #owner bits
+    return "w" in node.permissions[6:9] #other bits
+
+def require_write_encrypted(node: Node, user: str, role: UserRole, path: str) -> None:
+    if not can_write_encrypted(node, user, role):
         raise AccessDeniedError(path, "write to")
 
 def require_read(node: Node, user: str, path: str) -> None:

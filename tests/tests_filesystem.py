@@ -6,8 +6,10 @@ from horus.filesystem.node import NodeType
 from horus.filesystem.permissions import AccessDeniedError
 from horus.filesystem.path_utils import resolve_path
 from horus.filesystem.cipher import WrongKeyError
+from horus.session.user import UserRole
 
 ROOT = "root"
+ROOT_ROLE = UserRole.ROOT
 
 
 def make(tmp_path):
@@ -339,7 +341,7 @@ def test_encrypt_file_appends_crypt_extension_and_removes_old_path(fs):
     fs.mkdir("/home", user=ROOT)
     fs.write_file("/home/secret.txt", "top secret", user=ROOT)
 
-    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, key="k")
+    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, role=ROOT_ROLE, key="k")
 
     assert new_path == "/home/secret.txt.crypt"
     assert fs.exists("/home/secret.txt.crypt") is True
@@ -350,16 +352,16 @@ def test_encrypt_file_appends_crypt_extension_and_removes_old_path(fs):
 def test_encrypted_content_is_not_the_plaintext(fs):
     fs.mkdir("/home", user=ROOT)
     fs.write_file("/home/secret.txt", "top secret", user=ROOT)
-    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, key="k")
+    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, role=ROOT_ROLE, key="k")
     assert "top secret" not in fs.read_file(new_path, user=ROOT)
 
 
 def test_decrypt_file_restores_original_path_and_content(fs):
     fs.mkdir("/home", user=ROOT)
     fs.write_file("/home/secret.txt", "top secret", user=ROOT)
-    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, key="k")
+    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, role=ROOT_ROLE, key="k")
 
-    restored_path = fs.decrypt_file(new_path, user=ROOT, key="k")
+    restored_path = fs.decrypt_file(new_path, user=ROOT, role=ROOT_ROLE, key="k")
 
     assert restored_path == "/home/secret.txt"
     assert fs.exists("/home/secret.txt") is True
@@ -370,9 +372,9 @@ def test_decrypt_file_restores_original_path_and_content(fs):
 def test_decrypt_file_with_aes_method_round_trips(fs):
     fs.mkdir("/home", user=ROOT)
     fs.write_file("/home/secret.txt", "top secret", user=ROOT)
-    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, key="k", method="aes")
+    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, role=ROOT_ROLE, key="k", method="aes")
 
-    restored_path = fs.decrypt_file(new_path, user=ROOT, key="k", method="aes")
+    restored_path = fs.decrypt_file(new_path, user=ROOT, role=ROOT_ROLE, key="k", method="aes")
 
     assert fs.read_file(restored_path, user=ROOT) == "top secret"
 
@@ -380,10 +382,10 @@ def test_decrypt_file_with_aes_method_round_trips(fs):
 def test_decrypt_file_with_wrong_key_raises_and_leaves_file_untouched(fs):
     fs.mkdir("/home", user=ROOT)
     fs.write_file("/home/secret.txt", "top secret", user=ROOT)
-    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, key="right")
+    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, role=ROOT_ROLE, key="right")
 
     with pytest.raises(WrongKeyError):
-        fs.decrypt_file(new_path, user=ROOT, key="wrong")
+        fs.decrypt_file(new_path, user=ROOT, role=ROOT_ROLE, key="wrong")
     assert fs.exists(new_path) is True  # still encrypted -- nothing was silently corrupted
 
 
@@ -393,44 +395,106 @@ def test_decrypt_file_with_wrong_method_raises_even_with_the_right_key(fs):
     never read back from the stored data."""
     fs.mkdir("/home", user=ROOT)
     fs.write_file("/home/secret.txt", "top secret", user=ROOT)
-    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, key="k", method="xor")
+    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, role=ROOT_ROLE, key="k", method="xor")
 
     with pytest.raises(WrongKeyError):
-        fs.decrypt_file(new_path, user=ROOT, key="k", method="aes")
+        fs.decrypt_file(new_path, user=ROOT, role=ROOT_ROLE, key="k", method="aes")
     assert fs.exists(new_path) is True  # still encrypted
 
 
 def test_encrypt_file_on_missing_path_raises(fs):
     with pytest.raises(FileNotFoundError):
-        fs.encrypt_file("/nope.txt", user=ROOT, key="k")
+        fs.encrypt_file("/nope.txt", user=ROOT, role=ROOT_ROLE, key="k")
 
 
 def test_encrypt_file_on_a_directory_raises(fs):
     fs.mkdir("/home", user=ROOT)
     with pytest.raises(FileNotFoundError):
-        fs.encrypt_file("/home", user=ROOT, key="k")
+        fs.encrypt_file("/home", user=ROOT, role=ROOT_ROLE, key="k")
 
 
 def test_encrypt_file_already_encrypted_raises(fs):
     fs.mkdir("/home", user=ROOT)
     fs.write_file("/home/secret.txt", "top secret", user=ROOT)
-    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, key="k")
+    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, role=ROOT_ROLE, key="k")
     with pytest.raises(ValueError):
-        fs.encrypt_file(new_path, user=ROOT, key="k")
+        fs.encrypt_file(new_path, user=ROOT, role=ROOT_ROLE, key="k")
 
 
 def test_decrypt_file_on_a_non_encrypted_file_raises(fs):
     fs.mkdir("/home", user=ROOT)
     fs.write_file("/home/plain.txt", "hi", user=ROOT)
     with pytest.raises(ValueError):
-        fs.decrypt_file("/home/plain.txt", user=ROOT, key="k")
+        fs.decrypt_file("/home/plain.txt", user=ROOT, role=ROOT_ROLE, key="k")
 
 
 def test_encrypt_file_requires_write_permission(fs):
     fs.mkdir("/home", user=ROOT)
     fs.write_file("/home/secret.txt", "top secret", user=ROOT, protected=True)
     with pytest.raises(AccessDeniedError):
-        fs.encrypt_file("/home/secret.txt", user="alice", key="k")
+        fs.encrypt_file("/home/secret.txt", user="alice", role=UserRole.USER, key="k")
+
+
+# --- encrypt_file / decrypt_file: protected/immutable use a role-based check,
+# not the plain username-based one every other write path uses ---
+
+def test_encrypt_file_on_a_protected_file_allows_admin_role(fs):
+    """Unlike every other write path (rm, chmod, write_file, ...), which only
+    ever allows the literal 'root' account on a protected node, encrypt/decrypt
+    accept ADMIN or higher."""
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/secret.txt", "top secret", user=ROOT, protected=True)
+    new_path = fs.encrypt_file("/home/secret.txt", user="bob", role=UserRole.ADMIN, key="k")
+    assert fs.exists(new_path) is True
+
+
+def test_encrypt_file_on_a_protected_file_rejects_plain_user_role(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/secret.txt", "top secret", user=ROOT, protected=True)
+    with pytest.raises(AccessDeniedError):
+        fs.encrypt_file("/home/secret.txt", user="bob", role=UserRole.USER, key="k")
+
+
+def test_encrypt_file_on_an_immutable_file_requires_root_role(fs):
+    """Unlike can_write() (used by every other write path), which blocks
+    immutable files for everyone -- even root -- unless chattr clears the
+    flag first, encrypt/decrypt let ROOT act on it directly."""
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/secret.txt", "top secret", user=ROOT)
+    fs.set_attributes("/home/secret.txt", user=ROOT, immutable=True)
+
+    with pytest.raises(AccessDeniedError):
+        fs.encrypt_file("/home/secret.txt", user="bob", role=UserRole.ADMIN, key="k")
+
+    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, role=UserRole.ROOT, key="k")
+    assert fs.exists(new_path) is True
+
+
+def test_decrypt_file_on_an_immutable_encrypted_file_requires_root_role(fs):
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/secret.txt", "top secret", user=ROOT)
+    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, role=ROOT_ROLE, key="k")
+    fs.set_attributes(new_path, user=ROOT, immutable=True)
+
+    with pytest.raises(AccessDeniedError):
+        fs.decrypt_file(new_path, user="bob", role=UserRole.ADMIN, key="k")
+
+    restored_path = fs.decrypt_file(new_path, user=ROOT, role=UserRole.ROOT, key="k")
+    assert fs.exists(restored_path) is True
+
+
+def test_encrypt_file_on_a_plain_file_still_uses_permission_bits(fs):
+    """Non-protected, non-immutable files fall back to the normal owner/other
+    rwx bits -- role doesn't enter into it, same as can_write()."""
+    fs.mkdir("/home", user=ROOT)
+    fs.write_file("/home/secret.txt", "top secret", user=ROOT)
+    fs.chmod("/home/secret.txt", mode="600", user=ROOT)
+
+    with pytest.raises(AccessDeniedError):
+        fs.encrypt_file("/home/secret.txt", user="bob", role=UserRole.ADMIN, key="k")
+
+    new_path = fs.encrypt_file("/home/secret.txt", user=ROOT, role=ROOT_ROLE, key="k")
+    assert fs.exists(new_path) is True
 
 
 def test_timestamps_are_stored_at_second_precision(tmp_path):
