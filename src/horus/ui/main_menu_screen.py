@@ -4,7 +4,6 @@ import pyglet
 
 from horus.display.screen_buffer import ScreenBuffer
 from horus.ui.screen import Screen
-from horus.ui.screen_manager import ScreenManager
 
 key = pyglet.window.key
 

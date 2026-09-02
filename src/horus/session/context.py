@@ -1,12 +1,23 @@
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
-from horus.events.bus import EventBus
-from horus.filesystem.vfs import VFS
 from horus.display.screen_buffer import ScreenBuffer
 from horus.display.window import DisplayWindow
+from horus.events.bus import EventBus
+from horus.filesystem.vfs import VFS
 from horus.processes.processTable import ProcessTable
 from horus.ui.screen_manager import ScreenManager
+
+if TYPE_CHECKING:
+    # deferred to avoid circular imports at runtime -- these modules import
+    # (directly or transitively) back into session/kernel code that depends
+    # on Context, so only a type checker (never actual execution) sees them
+    from horus.audio.sound_manager import SoundManager
+    from horus.kernel.kernel import Kernel
+    from horus.session.user import UserRegistry
+    from horus.shell.input_handler import InputHandler
+    from horus.ui.main_menu_screen import MainMenuScreen
+
 
 @dataclass
 class Context:

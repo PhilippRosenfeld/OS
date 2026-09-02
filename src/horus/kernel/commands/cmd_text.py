@@ -1,6 +1,5 @@
 from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
-from horus.kernel.registry import command
-from horus.kernel.registry import registry
+from horus.kernel.registry import command, registry
 
 
 def _build_echo_parser() -> CommandArgumentParser:
@@ -34,7 +33,7 @@ def echo(ctx, argv: list[str]) -> None:
 @command("whoami", help_text="Who are you?")
 def whoami(ctx, argv: list[str]) -> None:
     try:
-        args = _whoami_parser.parse_args(argv)
+        _whoami_parser.parse_args(argv)  # only used for its --help/error side effect
     except CommandParseError as e:
         ctx.write_line(e.message or e.usage)
         return
@@ -44,7 +43,7 @@ def whoami(ctx, argv: list[str]) -> None:
 @command("help", help_text="Displays all usable commands")
 def help(ctx, argv: list[str]) -> None:
     try:
-        args = _help_parser.parse_args(argv)
+        _help_parser.parse_args(argv)  # only used for its --help/error side effect
     except CommandParseError as e:
         ctx.write_line(e.message or e.usage)
         return

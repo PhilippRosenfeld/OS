@@ -1,5 +1,6 @@
 from horus.session.auth import hash_password
-from horus.session.user import UserRegistry, User, UserRole
+from horus.session.user import User, UserRegistry, UserRole
+
 
 def seed_users(registry: UserRegistry) -> None:
     registry.register(User(name="root", role = UserRole.ROOT))

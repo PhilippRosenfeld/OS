@@ -1,10 +1,10 @@
-from horus.kernel.registry import Registry
-from horus.events.bus import EventBus
-from horus.session.context import Context
-from horus.events.types import CommandExecutedEvent
-import shlex
 import logging
+import shlex
 
+from horus.events.bus import EventBus
+from horus.events.types import CommandExecutedEvent
+from horus.kernel.registry import Registry
+from horus.session.context import Context
 
 logger = logging.getLogger(__name__)
 

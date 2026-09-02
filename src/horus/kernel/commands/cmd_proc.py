@@ -2,6 +2,7 @@ from horus.kernel.commands.command_parser import CommandArgumentParser, CommandP
 from horus.kernel.registry import command
 from horus.ui.top_screen import TopScreen
 
+
 def _render_top(ctx) -> None:
     """One-shot fallback for when there's no screen stack to take over (e.g.
     a minimal test Context) -- prints a single snapshot via ctx.write_line
@@ -27,7 +28,7 @@ _ps_parser = _build_ps_parser()
 @command("top", help_text="Display system processes, live, until Ctrl+C")
 def top(ctx, argv: list[str]) -> None:
     try:
-        args = _top_parser.parse_args(argv)
+        _top_parser.parse_args(argv)  # only used for its --help/error side effect
     except CommandParseError as e:
         ctx.write_line(e.message or e.usage)
         return
@@ -41,7 +42,7 @@ def top(ctx, argv: list[str]) -> None:
 @command("ps", help_text="Display system processes snapshot")
 def ps(ctx, argv: list[str]) -> None:
     try:
-        args = _ps_parser.parse_args(argv)
+        _ps_parser.parse_args(argv)  # only used for its --help/error side effect
     except CommandParseError as e:
         ctx.write_line(e.message or e.usage)
         return

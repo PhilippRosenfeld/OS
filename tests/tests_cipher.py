@@ -1,6 +1,6 @@
 import pytest
 
-from horus.filesystem.cipher import encrypt_bytes, decrypt_bytes, WrongKeyError
+from horus.filesystem.cipher import WrongKeyError, decrypt_bytes, encrypt_bytes
 
 
 @pytest.mark.parametrize("method", ["xor", "aes"])

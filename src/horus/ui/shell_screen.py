@@ -1,6 +1,6 @@
+from horus.shell.input_handler import InputHandler
 from horus.ui.screen import Screen
 from horus.ui.screen_manager import ScreenManager
-from horus.shell.input_handler import InputHandler
 
 
 class ShellScreen(Screen):

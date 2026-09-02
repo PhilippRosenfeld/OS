@@ -3,10 +3,10 @@ import struct
 import moderngl
 import pytest
 
-from horus.display.window import DisplayWindow
-from horus.display.screen_buffer import ScreenBuffer, Cell
 from horus.display.font_atlas import FontAtlas, FontRegistry
 from horus.display.renderer import Renderer
+from horus.display.screen_buffer import Cell, ScreenBuffer
+from horus.display.window import DisplayWindow
 
 FONT = "Px437_IBM_VGA_8x16.ttf"
 

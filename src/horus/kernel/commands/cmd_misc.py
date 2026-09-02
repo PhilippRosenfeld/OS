@@ -1,6 +1,6 @@
+from horus.display.colors import NAMED_COLORS
 from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
 from horus.kernel.registry import command
-from horus.display.colors import NAMED_COLORS
 from horus.session.auth import verify_password
 
 

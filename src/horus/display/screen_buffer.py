@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+
 from horus.display.colors import NAMED_COLORS
+
 
 @dataclass
 class Cell: 

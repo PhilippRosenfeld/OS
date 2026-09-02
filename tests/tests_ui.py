@@ -3,20 +3,21 @@ from unittest.mock import patch
 import pyglet
 
 from horus.display.screen_buffer import ScreenBuffer
+from horus.processes.process import process as Process
+from horus.processes.processTable import ProcessTable
+from horus.session.history import CommandHistory
+from horus.shell.input_handler import InputHandler
+from horus.ui.boot_screen import BootFrame, BootScreen
+from horus.ui.loading_screen import LoadingScreen
+from horus.ui.logo_screen import LogoScreen
+from horus.ui.main_menu_screen import MainMenuScreen
+from horus.ui.main_menu_screen import MenuOption as MainMenuOption
+from horus.ui.menu_screen import MenuOption, MenuScreen
 from horus.ui.screen import Screen
 from horus.ui.screen_manager import ScreenManager
+from horus.ui.settings_screen import SettingOption, SettingScreen
 from horus.ui.shell_screen import ShellScreen
-from horus.ui.menu_screen import MenuScreen, MenuOption
-from horus.ui.loading_screen import LoadingScreen
 from horus.ui.top_screen import TopScreen
-from horus.processes.processTable import ProcessTable
-from horus.processes.process import process as Process
-from horus.ui.settings_screen import SettingScreen, SettingOption
-from horus.ui.boot_screen import BootScreen, BootFrame
-from horus.ui.logo_screen import LogoScreen
-from horus.ui.main_menu_screen import MainMenuScreen, MenuOption as MainMenuOption
-from horus.shell.input_handler import InputHandler
-from horus.session.history import CommandHistory
 
 key = pyglet.window.key
 
@@ -34,7 +35,6 @@ def test_screen_manager_starts_with_no_active_screen():
 
 def test_screen_manager_push_makes_screen_active_and_calls_on_push():
     manager = ScreenManager()
-    events = []
     screen = MenuScreen(ScreenBuffer(20, 5), "T", [MenuOption("A", lambda: None)], manager)
     manager.push(screen)
     assert manager.active is screen
@@ -436,7 +436,7 @@ def make_menu(cols=30, rows=10, labels=("Resume", "Settings", "Quit")):
     buffer = ScreenBuffer(cols, rows)
     manager = ScreenManager()
     selections = []
-    options = [MenuOption(label, (lambda l=label: selections.append(l))) for label in labels]
+    options = [MenuOption(label, (lambda selected=label: selections.append(selected))) for label in labels]
     menu = MenuScreen(buffer, "Horus Menu", options, manager)
     manager.push(menu)
     return menu, buffer, manager, selections

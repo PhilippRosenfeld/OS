@@ -1,9 +1,8 @@
 import pytest
 
 from horus.session.auth import hash_password, verify_password
-from horus.session.user import User, UserRegistry, UserRole
 from horus.session.seed import seed_users
-
+from horus.session.user import User, UserRegistry, UserRole
 
 # --- hash_password / verify_password ---
 

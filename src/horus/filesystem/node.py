@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
+
 class NodeType(Enum):
     FILE = "file"
     DIRECTORY = "directory"

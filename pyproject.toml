@@ -28,6 +28,7 @@ build-backend = "uv_build"
 dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
+    "ruff>=0.16.5",
 ]
 
 [tool.pytest.ini_options]
@@ -39,3 +40,16 @@ source = ["src/horus"]
 
 [tool.coverage.html]
 directory = "htmlcov"
+
+[tool.ruff]
+line-length = 200  # this codebase doesn't wrap at 79/88 -- avoid noise on every long f-string/docstring
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]  # pycodestyle errors, pyflakes (real bugs), import sorting
+
+[tool.ruff.lint.per-file-ignores]
+# these imports exist purely for their side effect of running @command(...)
+# decorators at import time, registering commands into the global Registry --
+# nothing in the file itself ever references the imported names directly
+"src/horus/kernel/commands/__init__.py" = ["F401"]
+"src/horus/__init__.py" = ["F401"]

@@ -1,6 +1,7 @@
 import hashlib
 import os
 
+
 def hash_password(password: str, salt: bytes | None = None) -> str:
     """Returns 'salt_hex:digest_hex', suitable for storing in User.password_hash."""
     salt = salt or os.urandom(16)

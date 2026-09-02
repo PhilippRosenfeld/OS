@@ -1,6 +1,5 @@
 from horus.story.progress import BootProgress
 
-
 # --- status / mark_ok / mark_failed ---
 
 def test_status_defaults_to_failed_for_unknown_sector():

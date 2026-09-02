@@ -5,7 +5,6 @@ import pytest
 from horus.processes.process import process as Process
 from horus.processes.processTable import ProcessTable
 
-
 # --- ProcessTable: add/remove/list/get ---
 
 def test_add_process_assigns_an_incrementing_pid():
@@ -126,8 +125,8 @@ def test_fluctuate_never_drops_memory_below_the_floor():
 
 def test_fluctuate_scales_cpu_step_by_volatility():
     table = ProcessTable()
-    calm = table.add_process(Process(name="calm", pid=0, cpu_percent=10.0, volatility=0.2))
-    jumpy = table.add_process(Process(name="jumpy", pid=0, cpu_percent=10.0, volatility=2.0))
+    table.add_process(Process(name="calm", pid=0, cpu_percent=10.0, volatility=0.2))
+    table.add_process(Process(name="jumpy", pid=0, cpu_percent=10.0, volatility=2.0))
 
     captured_ranges = []
     def fake_uniform(low, high):
@@ -144,8 +143,8 @@ def test_fluctuate_scales_cpu_step_by_volatility():
 
 def test_fluctuate_scales_mem_step_by_volatility():
     table = ProcessTable()
-    calm = table.add_process(Process(name="calm", pid=0, mem_kb=1000, volatility=0.5))
-    jumpy = table.add_process(Process(name="jumpy", pid=0, mem_kb=1000, volatility=3.0))
+    table.add_process(Process(name="calm", pid=0, mem_kb=1000, volatility=0.5))
+    table.add_process(Process(name="jumpy", pid=0, mem_kb=1000, volatility=3.0))
 
     captured_ranges = []
     def fake_uniform(low, high):

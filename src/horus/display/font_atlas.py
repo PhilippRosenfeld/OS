@@ -5,6 +5,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from ..paths import FONTS_DIR
 
+
 class FontAtlas:
     """Rasterizes a font into a texture atlas and provides glyph metrics for rendering text."""
 

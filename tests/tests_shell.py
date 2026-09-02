@@ -2,8 +2,8 @@ import pyglet
 import pytest
 
 from horus.display.screen_buffer import ScreenBuffer
-from horus.shell.input_handler import InputHandler
 from horus.session.history import CommandHistory
+from horus.shell.input_handler import InputHandler
 
 key = pyglet.window.key
 

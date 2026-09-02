@@ -1,9 +1,10 @@
+import logging
 from typing import Callable
-from horus.display.screen_buffer import ScreenBuffer
-from horus.session.history import CommandHistory
 
 import pyglet
-import logging
+
+from horus.display.screen_buffer import ScreenBuffer
+from horus.session.history import CommandHistory
 
 logger = logging.getLogger(__name__)
 

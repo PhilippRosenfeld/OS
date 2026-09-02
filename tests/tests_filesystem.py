@@ -1,11 +1,11 @@
 import pytest
 
-from horus.filesystem.backend.sqlite import SQLiteVFS
 from horus.filesystem.backend.memory import InMemoryVFS
-from horus.filesystem.node import NodeType
-from horus.filesystem.permissions import AccessDeniedError
-from horus.filesystem.path_utils import resolve_path
+from horus.filesystem.backend.sqlite import SQLiteVFS
 from horus.filesystem.cipher import WrongKeyError
+from horus.filesystem.node import NodeType
+from horus.filesystem.path_utils import resolve_path
+from horus.filesystem.permissions import AccessDeniedError
 from horus.session.user import UserRole
 
 ROOT = "root"

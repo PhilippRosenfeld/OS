@@ -1,9 +1,10 @@
-import pyglet
 import moderngl
+import pyglet
 
-from .screen_buffer import ScreenBuffer
 from .font_atlas import FontAtlas
 from .renderer import Renderer
+from .screen_buffer import ScreenBuffer
+
 
 class DisplayWindow:
     """Owns the pyglet window, moderngl context, and Renderer. Handles window events and rendering loop."""

@@ -1,19 +1,19 @@
+import logging
+import random
+import re
+import secrets
 from sqlite3 import NotSupportedError
 
 import pyglet
 
-from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
-from horus.kernel.registry import command
+from horus.filesystem.cipher import WrongKeyError
+from horus.filesystem.file_types import FILE_TYPES
 from horus.filesystem.node import NodeType, ProtectedFileError
 from horus.filesystem.permissions import AccessDeniedError
-from horus.filesystem.file_types import FILE_TYPES
-from horus.filesystem.cipher import WrongKeyError
+from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
+from horus.kernel.registry import command
 from horus.session.user import UserRole
 from horus.ui.loading_screen import LoadingScreen
-import re
-import secrets
-import random
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +87,17 @@ _FLAG_ALIASES = {
     "h": "hidden", "hidden": "hidden",
     "i": "immutable", "immutable": "immutable",
 }
+
+_CHATTR_HELP = """usage: chattr <flags> <path>
+
+Toggles protected/hidden/immutable flags on a file or directory.
+Flags are a sign ('+' or '-') followed by either a shorthand letter
+(p, h, i) or the full name, and can be combined:
+
+  chattr +p secret.txt          protect secret.txt
+  chattr -h notes.txt           unhide notes.txt
+  chattr +pi archive/           protect and make archive/ immutable
+  chattr +protected-hidden f    protect and unhide f in one call"""
 
 # One sign followed by either one long name, or a run of one-letter shorthands.
 _FLAG_GROUP = re.compile(r"([+-])(protected|hidden|immutable|[phi]+)")
@@ -309,9 +320,9 @@ def chmod(ctx, argv: list[str]) -> None:
         ctx.fs.chmod(path, mode=args.mode, user=ctx.effective_user)
     except ValueError as e:
         ctx.write_line(f"chmod: {e}")
-    except FileNotFoundError as e:
+    except FileNotFoundError:
         ctx.write_line(f"chmod: cannot access '{args.path}': No such file or directory")
-    except AccessDeniedError as e:
+    except AccessDeniedError:
         ctx.write_line(f"chmod: changing permissions of '{args.path}': Operation not permitted")
 
 @command("chattr", help_text="Toggle protected/hidden/immutable flags")

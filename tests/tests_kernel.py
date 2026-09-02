@@ -1,31 +1,31 @@
-import pytest
-import pyglet
 from unittest.mock import patch
 
+import pyglet
+import pytest
+
+from horus.display.colors import NAMED_COLORS
 from horus.display.screen_buffer import ScreenBuffer
-from horus.session.context import Context
 from horus.events.bus import EventBus
 from horus.events.types import CommandExecutedEvent
-from horus.kernel.kernel import Kernel
-from horus.kernel.registry import Registry, registry
-from horus.kernel.commands.cmd_text import echo
-from horus.kernel.commands.cmd_misc import color, su
-from horus.kernel.commands.cmd_fs import ls, cat, encrypt, decrypt
-from horus.kernel.commands.cmd_menu import horus_menu, open_settings_menu
-from horus.kernel.commands.cmd_proc import top
-from horus.processes.processTable import ProcessTable
-from horus.processes.process import process as Process
-from horus.ui.top_screen import TopScreen
-from horus.display.colors import NAMED_COLORS
 from horus.filesystem.backend.memory import InMemoryVFS
-from horus.session.user import UserRegistry
-from horus.session.seed import seed_users
-from horus.session.auth import verify_password
+from horus.kernel.commands.cmd_fs import cat, chattr, decrypt, encrypt, ls
+from horus.kernel.commands.cmd_menu import horus_menu, open_settings_menu
+from horus.kernel.commands.cmd_misc import color, su
+from horus.kernel.commands.cmd_proc import top
+from horus.kernel.commands.cmd_text import echo
+from horus.kernel.kernel import Kernel
+from horus.kernel.registry import Registry
+from horus.processes.process import process as Process
+from horus.processes.processTable import ProcessTable
+from horus.session.context import Context
 from horus.session.history import CommandHistory
+from horus.session.seed import seed_users
+from horus.session.user import UserRegistry
 from horus.shell.input_handler import InputHandler
-from horus.ui.screen_manager import ScreenManager
 from horus.ui.menu_screen import MenuScreen
+from horus.ui.screen_manager import ScreenManager
 from horus.ui.settings_screen import SettingScreen
+from horus.ui.top_screen import TopScreen
 
 
 def make_context(cols=20, rows=5):
@@ -47,7 +47,7 @@ def full_text(buffer):
 
 def test_registry_register_and_lookup():
     reg = Registry()
-    handler = lambda ctx, argv: None
+    def handler(ctx, argv): pass
     reg.register("foo", handler, help_text="does foo")
     assert reg.lookup("foo") is handler
     assert reg.names() == ["foo"]
@@ -81,7 +81,7 @@ def test_registry_register_duplicate_name_raises():
 
 def test_registry_unregister_removes_command():
     reg = Registry()
-    handler = lambda ctx, argv: None
+    def handler(ctx, argv): pass
     reg.register("foo", handler, help_text="does foo")
     assert reg.unregister("foo") is handler
     assert reg.lookup("foo") is None
@@ -447,6 +447,41 @@ def test_ls_with_meta_shows_timestamps_without_fractional_seconds():
     ls(ctx, ["-m"])
 
     assert "." not in full_text(buffer)  # no fractional-second remainder anywhere in the output
+
+
+# --- chattr command ---
+
+def test_chattr_with_no_arguments_shows_help():
+    """Regression test: this used to raise NameError (_CHATTR_HELP was
+    referenced but never defined) instead of showing usage."""
+    ctx, buffer = make_context(cols=60, rows=15)  # tall enough that the multi-line help doesn't scroll row 0 out of view
+    ctx.fs = InMemoryVFS()
+    chattr(ctx, [])  # should not raise
+    assert "usage: chattr" in full_text(buffer)
+
+
+def test_chattr_help_flag_shows_help():
+    ctx, buffer = make_context(cols=60, rows=15)
+    ctx.fs = InMemoryVFS()
+    chattr(ctx, ["--help"])  # should not raise
+    assert "usage: chattr" in full_text(buffer)
+
+
+def test_chattr_sets_a_flag():
+    ctx, buffer = make_context(cols=60, rows=10)
+    ctx.fs = InMemoryVFS()
+    ctx.fs.mkdir("/home", user="root")
+    ctx.fs.write_file("/home/secret.txt", "hi", user="root")
+    ctx.cwd = "/home"
+    chattr(ctx, ["+p", "secret.txt"])
+    assert ctx.fs.get_meta("/home/secret.txt").protected is True
+
+
+def test_chattr_wrong_argument_count_shows_usage():
+    ctx, buffer = make_context(cols=60, rows=10)
+    ctx.fs = InMemoryVFS()
+    chattr(ctx, ["+p"])  # missing path
+    assert "usage: chattr <flags> <path>" in full_text(buffer)
 
 
 # --- cat command ---

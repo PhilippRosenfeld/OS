@@ -5,8 +5,8 @@ this used to produce have since been replaced by a single real recording
 running this script no longer does anything.
 """
 
-import wave
 import struct
+import wave
 from pathlib import Path
 
 import numpy as np

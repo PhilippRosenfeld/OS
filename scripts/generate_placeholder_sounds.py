@@ -6,8 +6,8 @@ been replaced by a real recording (ont5.wav, wired up separately in __init__.py)
 and is no longer generated here.
 """
 
-import wave
 import struct
+import wave
 from pathlib import Path
 
 import numpy as np

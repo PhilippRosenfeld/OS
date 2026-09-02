@@ -1,12 +1,10 @@
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable
 
 import pyglet
 
-from horus.ui.screen import Screen
-from horus.ui.screen_manager import ScreenManager
 from horus.display.screen_buffer import ScreenBuffer
+from horus.ui.screen import Screen
 
 
 @dataclass

@@ -1,10 +1,9 @@
-from pathlib import Path
 from typing import Callable
 
 import pyglet
 
-from horus.ui.screen import Screen
 from horus.display.screen_buffer import ScreenBuffer
+from horus.ui.screen import Screen
 
 
 class LogoScreen(Screen):
@@ -47,7 +46,7 @@ class LogoScreen(Screen):
 
     def _center_offset(self) -> None:
         """Roughly horizontally centers the logo based on its widest line."""
-        widest = max((len(l) for l in self._lines), default=0)
+        widest = max((len(line) for line in self._lines), default=0)
         self._col_offset = max(0, (self._buffer.cols - widest) // 2)
         self._row = max(0, (self._buffer.rows - len(self._lines)) // 2)
 

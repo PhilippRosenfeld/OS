@@ -1,11 +1,12 @@
 from pathlib import Path
 
-from horus.filesystem.vfs import VFS
-from horus.filesystem.node import Node, NodeType, ProtectedFileError
+from horus.filesystem.cipher import decrypt_bytes, encrypt_bytes
+from horus.filesystem.node import Node, NodeType
 from horus.filesystem.path_utils import resolve_path as _resolve_path
-from horus.filesystem.permissions import require_write, require_read, require_metadata_change, require_write_encrypted, can_write, can_read, AccessDeniedError, octal_to_permissions
-from horus.filesystem.cipher import encrypt_bytes, decrypt_bytes
+from horus.filesystem.permissions import octal_to_permissions, require_metadata_change, require_read, require_write, require_write_encrypted
+from horus.filesystem.vfs import VFS
 from horus.session.user import UserRole
+
 
 class _TreeNode:
 

@@ -1,6 +1,7 @@
 from horus.filesystem.node import Node
 from horus.session.user import UserRole
 
+
 class AccessDeniedError(Exception):
     def __init__(self, path: str, action: str):
         self.path = path

@@ -3,8 +3,8 @@ from pathlib import Path
 import moderngl
 import numpy as np
 
-from .screen_buffer import ScreenBuffer
 from .font_atlas import FontAtlas
+from .screen_buffer import ScreenBuffer
 
 SHADER_DIR = Path(__file__).parent / "shaders"
 

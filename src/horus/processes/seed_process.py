@@ -1,6 +1,7 @@
 from horus.processes.process import process
 from horus.processes.processTable import ProcessTable
 
+
 def seed_processes(process_table: ProcessTable) -> None:
     """Seed the process table with some initial processes."""
     # init barely moves -- a stable system process. bash fluctuates

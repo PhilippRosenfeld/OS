@@ -1,5 +1,1 @@
-from horus.kernel.commands import cmd_text
-from horus.kernel.commands import cmd_misc
-from horus.kernel.commands import cmd_fs
-from horus.kernel.commands import cmd_menu
-from horus.kernel.commands import cmd_proc
+from horus.kernel.commands import cmd_fs, cmd_menu, cmd_misc, cmd_proc, cmd_text

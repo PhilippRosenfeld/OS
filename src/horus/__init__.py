@@ -1,39 +1,35 @@
+import logging
+from pathlib import Path
+
+import horus.kernel.commands
+from horus.__about__ import VERSION
+from horus.audio.sound_manager import SoundManager
 from horus.display.window import DisplayWindow
-from horus.shell.input_handler import InputHandler
-from horus.shell.completion import complete_path
-from horus.utils.config_manager import load_config
-from horus.utils.logging_setup import setup_logging
-from horus.kernel.kernel import Kernel
-from horus.kernel.registry import registry
-from horus.session.context import Context
-from horus.session.history import CommandHistory
 from horus.events.bus import EventBus
 from horus.filesystem.backend.sqlite import SQLiteVFS
 from horus.filesystem.seed import seed_minimal
+from horus.hardware.spec import HardwareSpec
+from horus.kernel.commands.cmd_menu import open_settings_menu
+from horus.kernel.kernel import Kernel
+from horus.kernel.registry import registry
+from horus.paths import BOOT_DIR, BOOT_PROGRESS_PATH, BOOT_SOUNDS_DIR, DATA_DIR, HARDWARE_SPEC_PATH, SAVES_DIR, SHELL_SOUNDS_DIR, SOUNDS_DIR
+from horus.processes.processTable import ProcessTable
+from horus.processes.seed_process import seed_processes
+from horus.session.context import Context
+from horus.session.history import CommandHistory
+from horus.session.seed import seed_users
+from horus.session.user import UserRegistry
+from horus.shell.completion import complete_path
+from horus.shell.input_handler import InputHandler
+from horus.story.progress import BootProgress
+from horus.ui.boot_screen import BootFrame, BootScreen
+from horus.ui.logo_screen import LogoScreen
+from horus.ui.main_menu_screen import MainMenuScreen
+from horus.ui.menu_screen import MenuOption
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.shell_screen import ShellScreen
-from horus.ui.boot_screen import BootScreen, BootFrame
-from horus.paths import SAVES_DIR, DATA_DIR, BOOT_SOUNDS_DIR, SOUNDS_DIR, SHELL_SOUNDS_DIR
-from horus.audio.sound_manager import SoundManager
-from horus.session.user import UserRegistry
-from horus.session.seed import seed_users
-from horus.__about__ import VERSION
-from horus.story.progress import BootProgress
-from horus.paths import BOOT_PROGRESS_PATH, BOOT_DIR
-from horus.hardware.spec import HardwareSpec
-from horus.paths import HARDWARE_SPEC_PATH
-from horus.ui.logo_screen import LogoScreen
-from pathlib import Path
-from horus.ui.main_menu_screen import MainMenuScreen
-from horus.kernel.commands.cmd_menu import open_settings_menu
-from horus.ui.menu_screen import MenuOption
-from horus.processes.seed_process import seed_processes
-from horus.processes.processTable import ProcessTable
-
-
-import horus.kernel.commands
-import logging
-
+from horus.utils.config_manager import load_config
+from horus.utils.logging_setup import setup_logging
 
 cfg = load_config()
 char_size = cfg['display']['char_size']

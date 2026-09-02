@@ -1,7 +1,7 @@
 import pyglet
 
 from horus.kernel.registry import command
-from horus.ui.menu_screen import MenuScreen, MenuOption
+from horus.ui.menu_screen import MenuOption, MenuScreen
 from horus.ui.settings_screen import SettingOption, SettingScreen
 
 _WINDOW_SIZES = [(1280, 720), (1600, 900), (1920, 1080), (2560, 1440), (3840, 2160)]
