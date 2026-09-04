@@ -381,7 +381,8 @@ def test_top_screen_refresh_reflects_new_processes():
     table.add_process(Process(name="new_proc", pid=0, owner="user1", cpu_percent=2.5, mem_kb=4096))
     callback, _ = mock_schedule.call_args[0]
     callback(0.0)
-    assert "new_proc" in row_text(buffer, 3)
+    screen_text = "".join(row_text(buffer, r) for r in range(buffer.rows))
+    assert "new_proc" in screen_text  # row position isn't fixed -- rows are sorted by cpu usage
 
 
 def test_top_screen_ctrl_c_pops_back_to_the_shell():

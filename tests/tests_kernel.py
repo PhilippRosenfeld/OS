@@ -968,6 +968,47 @@ def test_top_pushes_a_live_top_screen():
     assert isinstance(screens.active, TopScreen)
 
 
+def test_top_defaults_to_sorting_by_cpu():
+    ctx, buffer = make_context(cols=60, rows=10)
+    ctx.process_table = ProcessTable()
+    ctx.process_table.add_process(Process(name="quiet", pid=0, owner="root", cpu_percent=1.0, mem_kb=1024))
+    ctx.process_table.add_process(Process(name="busy", pid=0, owner="root", cpu_percent=90.0, mem_kb=1024))
+    top(ctx, [])
+    text = full_text(buffer)
+    assert text.index("busy") < text.index("quiet")  # higher cpu listed first
+
+
+def test_top_sort_flag_changes_the_order():
+    ctx, buffer = make_context(cols=60, rows=10)
+    ctx.process_table = ProcessTable()
+    ctx.process_table.add_process(Process(name="zeta", pid=0, owner="root", cpu_percent=90.0, mem_kb=1024))
+    ctx.process_table.add_process(Process(name="alpha", pid=0, owner="root", cpu_percent=1.0, mem_kb=1024))
+    top(ctx, ["--sort", "name"])
+    text = full_text(buffer)
+    assert text.index("alpha") < text.index("zeta")  # alphabetical, not by cpu anymore
+
+
+def test_top_shows_an_uptime_column():
+    ctx, buffer = make_context(cols=60, rows=10)
+    ctx.process_table = ProcessTable()
+    ctx.process_table.add_process(Process(name="init", pid=0, owner="root", cpu_percent=0.1, mem_kb=1024))
+    top(ctx, [])
+    assert "UPTIME" in full_text(buffer)
+
+
+def test_top_pushes_a_top_screen_with_the_requested_sort():
+    ctx, buffer, screens, table = make_proc_context()
+    top(ctx, ["--sort", "mem"])
+    assert screens.active._sort_by == "mem"
+
+
+def test_top_invalid_sort_choice_reports_parse_error():
+    ctx, buffer, screens, table = make_proc_context()
+    top(ctx, ["--sort", "not-a-real-column"])
+    assert screens.active is None  # never got as far as pushing a screen
+    assert full_text(buffer).strip() != ""  # some usage/error message was written
+
+
 def test_top_without_a_screen_stack_falls_back_to_a_one_shot_snapshot():
     ctx, buffer = make_context()
     ctx.process_table = ProcessTable()

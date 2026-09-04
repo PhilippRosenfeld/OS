@@ -1,20 +1,27 @@
 from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
 from horus.kernel.registry import command
+from horus.processes.process_view import DEFAULT_SORT, SORT_KEYS, format_uptime, sort_processes
 from horus.ui.top_screen import TopScreen
 
 
-def _render_top(ctx) -> None:
+def _render_top(ctx, sort_by: str | None = None) -> None:
     """One-shot fallback for when there's no screen stack to take over (e.g.
     a minimal test Context) -- prints a single snapshot via ctx.write_line
-    instead of the live, refreshing view."""
+    instead of the live, refreshing view. `sort_by` is optional: leaving it
+    unset keeps the process table's own (insertion) order, e.g. for ps."""
     processes = ctx.process_table.list_processes()
-    ctx.write_line(f"{'PID':<8}{'USER':<12}{'CPU%':<8}{'MEM(KB)':<12}{'NAME'}")
-    ctx.write_line("-" * 60)
+    if sort_by is not None:
+        processes = sort_processes(processes, sort_by)
+    ctx.write_line(f"{'PID':<8}{'USER':<12}{'CPU%':<8}{'MEM(KB)':<12}{'UPTIME':<10}{'NAME'}")
+    ctx.write_line("-" * 70)
     for proc in processes:
-        ctx.write_line(f"{proc.pid:<8}{proc.owner:<12}{proc.cpu_percent:<8.2f}{proc.mem_kb:<12}{proc.name}")
+        uptime = format_uptime(proc.started_at)
+        ctx.write_line(f"{proc.pid:<8}{proc.owner:<12}{proc.cpu_percent:<8.2f}{proc.mem_kb:<12}{uptime:<10}{proc.name}")
 
 def _build_top_parser() -> CommandArgumentParser:
     parser = CommandArgumentParser(prog="top", add_help=True, description="Display system processes")
+    parser.add_argument("-s", "--sort", choices=sorted(SORT_KEYS), default=DEFAULT_SORT,
+                         help=f"Sort processes by this column (default: {DEFAULT_SORT})")
     return parser
 
 def _build_ps_parser() -> CommandArgumentParser:
@@ -33,16 +40,16 @@ _kill_parser = _build_kill_parser()
 @command("top", help_text="Display system processes, live, until Ctrl+C")
 def top(ctx, argv: list[str]) -> None:
     try:
-        _top_parser.parse_args(argv)
+        args = _top_parser.parse_args(argv)
     except CommandParseError as e:
         ctx.write_line(e.message or e.usage)
         return
 
     if ctx.screens is None:
-        _render_top(ctx)
+        _render_top(ctx, sort_by=args.sort)
         return
 
-    ctx.screens.push(TopScreen(ctx.screen, ctx.process_table, ctx.screens))
+    ctx.screens.push(TopScreen(ctx.screen, ctx.process_table, ctx.screens, sort_by=args.sort))
     
 @command("ps", help_text="Display system processes snapshot")
 def ps(ctx, argv: list[str]) -> None:
