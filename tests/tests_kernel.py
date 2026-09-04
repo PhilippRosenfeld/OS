@@ -6,12 +6,12 @@ import pytest
 from horus.display.colors import NAMED_COLORS
 from horus.display.screen_buffer import ScreenBuffer
 from horus.events.bus import EventBus
-from horus.events.types import CommandExecutedEvent
+from horus.events.types import CommandExecutedEvent, ProcessKilledEvent, ProcessStartedEvent
 from horus.filesystem.backend.memory import InMemoryVFS
 from horus.kernel.commands.cmd_fs import cat, chattr, decrypt, encrypt, ls
 from horus.kernel.commands.cmd_menu import horus_menu, open_settings_menu
 from horus.kernel.commands.cmd_misc import color, su
-from horus.kernel.commands.cmd_proc import top
+from horus.kernel.commands.cmd_proc import kill, top
 from horus.kernel.commands.cmd_text import echo
 from horus.kernel.kernel import Kernel
 from horus.kernel.registry import Registry
@@ -883,6 +883,72 @@ def test_encrypt_without_a_user_registry_falls_back_to_least_privilege():
     assert "Permission denied" in full_text(buffer)
 
 
+# --- encrypt/decrypt spawn a visible process for the duration of the operation ---
+
+def make_fs_context_with_process_table():
+    ctx, buffer = make_fs_context()
+    ctx.events = EventBus()
+    ctx.process_table = ProcessTable(events=ctx.events)
+    return ctx, buffer
+
+
+def test_encrypt_spawns_a_process_while_the_bar_runs():
+    ctx, buffer = make_fs_context_with_process_table()
+    with patch("pyglet.clock.schedule_interval"):  # don't fire it -- check the *immediate* state
+        encrypt(ctx, ["secret.txt", "-k", "mykey"])
+    procs = ctx.process_table.list_processes()
+    assert len(procs) == 1
+    assert procs[0].name == "encrypt"
+    assert procs[0].owner == "root"
+
+
+def test_encrypt_removes_the_process_once_the_bar_completes():
+    ctx, buffer = make_fs_context_with_process_table()
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])
+    assert ctx.process_table.list_processes() == []
+
+
+def test_decrypt_spawns_and_removes_its_own_process():
+    ctx, buffer = make_fs_context_with_process_table()
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])
+    with patch("pyglet.clock.schedule_interval"):
+        decrypt(ctx, ["secret.txt.crypt", "-k", "mykey"])
+    procs = ctx.process_table.list_processes()
+    assert len(procs) == 1
+    assert procs[0].name == "decrypt"
+
+
+def test_encrypt_publishes_process_started_and_killed_events():
+    ctx, buffer = make_fs_context_with_process_table()
+    received = []
+    ctx.events.subscribe(ProcessStartedEvent, received.append)
+    ctx.events.subscribe(ProcessKilledEvent, received.append)
+
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])
+
+    assert len(received) == 2
+    assert isinstance(received[0], ProcessStartedEvent)
+    assert received[0].name == "encrypt"
+    assert received[0].owner == "root"
+    assert isinstance(received[1], ProcessKilledEvent)
+    assert received[1].name == "encrypt"
+    assert received[1].pid == received[0].pid
+
+
+def test_encrypt_failure_never_spawns_a_process():
+    """The up-front check happens before any process/bar exists -- a failure
+    must not leave a phantom process behind."""
+    ctx, buffer = make_fs_context_with_process_table()
+    encrypt(ctx, ["nope.txt", "-k", "mykey"])
+    assert ctx.process_table.list_processes() == []
+
+
+def test_encrypt_without_a_process_table_does_not_raise():
+    ctx, buffer = make_fs_context()  # ctx.process_table stays None
+    _run_immediately(encrypt, ctx, ["secret.txt", "-k", "mykey"])  # should not raise
+    assert ctx.fs.exists("/home/secret.txt.crypt") is True
+
+
 # --- top command ---
 
 def make_proc_context(cols=60, rows=10):
@@ -913,3 +979,69 @@ def test_top_help_flag_reports_parse_error_without_pushing_a_screen():
     ctx, buffer, screens, table = make_proc_context()
     top(ctx, ["--help"])
     assert screens.active is None
+
+
+# --- kill command ---
+
+def make_kill_context(cols=60, rows=10):
+    ctx, buffer, screens, table = make_proc_context(cols=cols, rows=rows)
+    ctx.users = UserRegistry()
+    seed_users(ctx.users)
+    proc = table.get_process(1)  # "init", owner "root" from make_proc_context
+    other = table.add_process(Process(name="bash", pid=0, owner="user1", cpu_percent=0.5, mem_kb=2048))
+    return ctx, buffer, table, proc, other
+
+
+def test_kill_by_owner_succeeds():
+    ctx, buffer, table, proc, other = make_kill_context()
+    ctx.user = ctx.effective_user = "user1"
+    kill(ctx, [str(other.pid)])
+    assert table.get_process(other.pid) is None
+    assert "Killed process" in full_text(buffer)
+
+
+def test_kill_someone_elses_process_as_plain_user_is_denied():
+    ctx, buffer, table, proc, other = make_kill_context()
+    ctx.user = ctx.effective_user = "user2"
+    kill(ctx, [str(other.pid)])
+    assert table.get_process(other.pid) is not None
+    assert "Operation not permitted" in full_text(buffer)
+
+
+def test_kill_someone_elses_process_as_admin_succeeds():
+    ctx, buffer, table, proc, other = make_kill_context()
+    ctx.user = ctx.effective_user = "admin"
+    kill(ctx, [str(other.pid)])
+    assert table.get_process(other.pid) is None
+    assert "Killed process" in full_text(buffer)
+
+
+def test_kill_someone_elses_process_as_root_succeeds():
+    ctx, buffer, table, proc, other = make_kill_context()
+    ctx.user = ctx.effective_user = "root"
+    kill(ctx, [str(other.pid)])
+    assert table.get_process(other.pid) is None
+
+
+def test_kill_unknown_pid_reports_no_such_process():
+    ctx, buffer, table, proc, other = make_kill_context()
+    ctx.user = ctx.effective_user = "root"
+    kill(ctx, ["999"])
+    assert "No such process" in full_text(buffer)
+
+
+def test_kill_without_a_user_registry_fails_closed_for_someone_elses_process():
+    """No ctx.users at all must resolve to the least-privileged role, not
+    silently allow killing someone else's process."""
+    ctx, buffer, table, proc, other = make_kill_context()
+    ctx.users = None
+    ctx.user = ctx.effective_user = "user2"
+    kill(ctx, [str(other.pid)])
+    assert table.get_process(other.pid) is not None
+    assert "Operation not permitted" in full_text(buffer)
+
+
+def test_kill_help_flag_reports_parse_error_without_raising():
+    ctx, buffer, table, proc, other = make_kill_context()
+    kill(ctx, ["--help"])  # should not raise
+    assert table.get_process(other.pid) is not None  # untouched

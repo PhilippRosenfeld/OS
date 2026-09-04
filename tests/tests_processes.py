@@ -2,8 +2,11 @@ from unittest.mock import patch
 
 import pytest
 
+from horus.events.bus import EventBus
+from horus.events.types import ProcessKilledEvent, ProcessStartedEvent
 from horus.processes.process import process as Process
 from horus.processes.processTable import ProcessTable
+from horus.session.user import UserRole
 
 # --- ProcessTable: add/remove/list/get ---
 
@@ -40,13 +43,30 @@ def test_remove_process_by_owner_succeeds():
     assert table.get_process(proc.pid) is None
 
 
-def test_remove_process_by_root_always_succeeds():
+def test_remove_process_by_admin_role_succeeds_even_for_someone_elses():
     table = ProcessTable()
     proc = table.add_process(Process(name="a", pid=0, owner="user1"))
-    assert table.remove_process(proc.pid, user="root") is True
+    assert table.remove_process(proc.pid, user="admin", role=UserRole.ADMIN) is True
 
 
-def test_remove_process_by_a_different_non_root_user_fails():
+def test_remove_process_by_root_role_succeeds_even_for_someone_elses():
+    table = ProcessTable()
+    proc = table.add_process(Process(name="a", pid=0, owner="user1"))
+    assert table.remove_process(proc.pid, user="root", role=UserRole.ROOT) is True
+
+
+def test_remove_process_by_a_different_plain_user_fails():
+    """A plain USER role -- even literally named 'root' -- can't kill someone
+    else's process; only the role matters, not the username."""
+    table = ProcessTable()
+    proc = table.add_process(Process(name="a", pid=0, owner="user1"))
+    assert table.remove_process(proc.pid, user="root", role=UserRole.USER) is False
+    assert table.get_process(proc.pid) is not None
+
+
+def test_remove_process_role_defaults_to_least_privileged():
+    """Callers that don't pass a role (e.g. legacy code) fail closed --
+    can't kill someone else's process -- rather than silently allowing it."""
     table = ProcessTable()
     proc = table.add_process(Process(name="a", pid=0, owner="user1"))
     assert table.remove_process(proc.pid, user="user2") is False
@@ -55,7 +75,55 @@ def test_remove_process_by_a_different_non_root_user_fails():
 
 def test_remove_unknown_pid_returns_false():
     table = ProcessTable()
-    assert table.remove_process(999, user="root") is False
+    assert table.remove_process(999, user="root", role=UserRole.ROOT) is False
+
+
+# --- event publishing ---
+
+def test_add_process_publishes_process_started_event():
+    bus = EventBus()
+    received = []
+    bus.subscribe(ProcessStartedEvent, received.append)
+    table = ProcessTable(events=bus)
+
+    proc = table.add_process(Process(name="a", pid=0, owner="user1"))
+
+    assert len(received) == 1
+    assert received[0].pid == proc.pid
+    assert received[0].name == "a"
+    assert received[0].owner == "user1"
+
+
+def test_remove_process_publishes_process_killed_event():
+    bus = EventBus()
+    received = []
+    bus.subscribe(ProcessKilledEvent, received.append)
+    table = ProcessTable(events=bus)
+    proc = table.add_process(Process(name="a", pid=0, owner="user1"))
+
+    table.remove_process(proc.pid, user="root", role=UserRole.ROOT)
+
+    assert len(received) == 1
+    assert received[0].pid == proc.pid
+    assert received[0].name == "a"
+    assert received[0].killed_by == "root"
+
+
+def test_remove_process_denied_does_not_publish_an_event():
+    bus = EventBus()
+    received = []
+    bus.subscribe(ProcessKilledEvent, received.append)
+    table = ProcessTable(events=bus)
+    proc = table.add_process(Process(name="a", pid=0, owner="user1"))
+
+    assert table.remove_process(proc.pid, user="user2") is False  # not the owner, not admin/root
+    assert received == []
+
+
+def test_without_an_event_bus_add_and_remove_do_not_raise():
+    table = ProcessTable()  # events=None, the default
+    proc = table.add_process(Process(name="a", pid=0, owner="user1"))
+    assert table.remove_process(proc.pid, user="user1") is True
 
 
 # --- fluctuation ---

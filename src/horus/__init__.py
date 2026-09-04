@@ -60,7 +60,10 @@ def main() -> None:
     sounds.load("menu_music", SOUNDS_DIR / "menu_music.mp3")
     sounds.load("crypt", SHELL_SOUNDS_DIR / "crypt.mp3")
     sounds.load("background", SHELL_SOUNDS_DIR / "background.mp3")
-    
+    sounds.load("error_notification", SHELL_SOUNDS_DIR / "error_notification.mp3")
+    sounds.load("process_kill_buzz", SHELL_SOUNDS_DIR / "process_kill_buzz.mp3")
+    sounds.load("process_kill_bang", SHELL_SOUNDS_DIR / "process_kill_bang.mp3")
+
     bus = EventBus()
     kernel = Kernel(registry=registry, bus=bus)
     fs = SQLiteVFS(SAVES_DIR / "horus.db")
@@ -71,7 +74,7 @@ def main() -> None:
     users = UserRegistry()
     seed_users(users)
     
-    process_table = ProcessTable()
+    process_table = ProcessTable(events=bus)
     seed_processes(process_table)
     process_table.start_fluctuating()
 

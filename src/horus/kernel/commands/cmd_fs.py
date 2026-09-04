@@ -12,22 +12,33 @@ from horus.filesystem.node import NodeType, ProtectedFileError
 from horus.filesystem.permissions import AccessDeniedError
 from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
 from horus.kernel.registry import command
-from horus.session.user import UserRole
+from horus.processes.process import process as Process
 from horus.ui.loading_screen import LoadingScreen
 
 logger = logging.getLogger(__name__)
 
 
-def _role_of(ctx) -> UserRole:
-    """Resolves the effective user's role for permission checks that need it
-    (currently just encrypt/decrypt -- see permissions.can_write_encrypted).
-    Defaults to the least-privileged role if there's no UserRegistry on this
-    context or the user isn't registered in it, so an unusual setup fails
-    closed rather than open."""
-    if ctx.users is None:
-        return UserRole.USER
-    user = ctx.users.get(ctx.effective_user)
-    return user.role if user is not None else UserRole.USER
+def _spawn_crypto_process(ctx, name: str):
+    """Adds a visible process to the table for the duration of an encrypt/
+    decrypt operation, so it shows up in top/ps while the progress bar runs
+    -- ProcessTable.add_process() publishes ProcessStartedEvent itself, so
+    nothing else here needs to touch the event bus directly. Returns None
+    (and does nothing) if this context has no process table, e.g. a minimal
+    test Context."""
+    if ctx.process_table is None:
+        return None
+    return ctx.process_table.add_process(
+        Process(name=name, pid=0, owner=ctx.effective_user, cpu_percent=25.0, mem_kb=4096, volatility=2.5)
+    )
+
+
+def _finish_crypto_process(ctx, proc) -> None:
+    """Removes a process spawned by _spawn_crypto_process() once the
+    operation it represented has finished. No-op if that spawn was itself a
+    no-op (no process table available)."""
+    if proc is None or ctx.process_table is None:
+        return
+    ctx.process_table.remove_process(proc.pid, user=ctx.effective_user)
 
 _PROGRESS_BAR_WIDTH = 24
 _PROGRESS_STALL_CHANCE = 0.35  # chance a tick makes no progress at all -- a stutter
@@ -403,7 +414,7 @@ def encrypt(ctx, argv: list[str]) -> None:
     key = args.key or secrets.token_hex(4)
 
     try:
-        new_path = ctx.fs.encrypt_file(path, user=ctx.effective_user, role=_role_of(ctx), key=key, method=args.method)
+        new_path = ctx.fs.encrypt_file(path, user=ctx.effective_user, role=ctx.effective_role, key=key, method=args.method)
     except FileNotFoundError:
         if ctx.fs.exists(path):
             ctx.write_line(f"encrypt: {args.path}: Is a directory")
@@ -419,12 +430,13 @@ def encrypt(ctx, argv: list[str]) -> None:
 
     logger.info(f"encrypt: '{path}' -> '{new_path}' key='{key}' method='{args.method}'")
     ctx.write_line(f"Encrypting {args.path}...")
+    crypto_proc = _spawn_crypto_process(ctx, "encrypt")
 
     def _reveal_encrypt_result() -> None:
+        _finish_crypto_process(ctx, crypto_proc)
         ctx.write_line(f"Encrypted: {args.path} -> {new_path.rsplit('/', 1)[-1]} (method={args.method})")
         if not args.key:
             ctx.write_line(f"Generated key: {key} -- remember it, you'll need it to decrypt")
-            
 
     _run_with_progress_bar(ctx, "crypt", _reveal_encrypt_result, 0.15)
 
@@ -440,7 +452,7 @@ def decrypt(ctx, argv: list[str]) -> None:
     path = ctx.resolve_path(args.path)
 
     try:
-        new_path = ctx.fs.decrypt_file(path, user=ctx.effective_user, role=_role_of(ctx), key=args.key, method=args.method)
+        new_path = ctx.fs.decrypt_file(path, user=ctx.effective_user, role=ctx.effective_role, key=args.key, method=args.method)
     except FileNotFoundError:
         if ctx.fs.exists(path):
             ctx.write_line(f"decrypt: {args.path}: Is a directory")
@@ -459,8 +471,10 @@ def decrypt(ctx, argv: list[str]) -> None:
 
     logger.info(f"decrypt: '{path}' -> '{new_path}' key='{args.key}' method='{args.method}'")
     ctx.write_line(f"Decrypting {args.path}...")
+    crypto_proc = _spawn_crypto_process(ctx, "decrypt")
 
     def _reveal_decrypt_result() -> None:
+        _finish_crypto_process(ctx, crypto_proc)
         ctx.write_line(f"Decrypted: {args.path} -> {new_path.rsplit('/', 1)[-1]}")
 
     _run_with_progress_bar(ctx, "crypt", _reveal_decrypt_result, 0.5)

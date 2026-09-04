@@ -6,6 +6,7 @@ from horus.display.window import DisplayWindow
 from horus.events.bus import EventBus
 from horus.filesystem.vfs import VFS
 from horus.processes.processTable import ProcessTable
+from horus.session.user import UserRole
 from horus.ui.screen_manager import ScreenManager
 
 if TYPE_CHECKING:
@@ -48,6 +49,18 @@ class Context:
         if self.effective_user is None:
             self.effective_user = self.user
             
+    @property
+    def effective_role(self) -> UserRole:
+        """Resolves the effective user's role for permission checks that need
+        it (e.g. encrypt/decrypt, kill -- see filesystem.permissions and
+        ProcessTable.remove_process). Defaults to the least-privileged role
+        if there's no UserRegistry on this context or the user isn't
+        registered in it, so an unusual setup fails closed rather than open."""
+        if self.users is None:
+            return UserRole.USER
+        user = self.users.get(self.effective_user)
+        return user.role if user is not None else UserRole.USER
+
     def resolve_path(self, path: str) -> str:
         """Resolve a path relative to the current working directory."""
         if self.fs is None:
