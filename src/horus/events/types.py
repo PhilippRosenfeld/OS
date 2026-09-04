@@ -42,3 +42,7 @@ class ProcessKilledEvent(Event):
     pid: int
     name: str
     killed_by: str
+    critical: bool = False  # was this a system-critical process (e.g. init)?
+                             # subscribers use this to react to a system-wide
+                             # crash regardless of what killed it -- see
+                             # processes.system_reactions

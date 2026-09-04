@@ -17,11 +17,13 @@ from horus.kernel.kernel import Kernel
 from horus.kernel.registry import Registry
 from horus.processes.process import process as Process
 from horus.processes.processTable import ProcessTable
+from horus.processes.system_reactions import register_system_reactions
 from horus.session.context import Context
 from horus.session.history import CommandHistory
 from horus.session.seed import seed_users
 from horus.session.user import UserRegistry
 from horus.shell.input_handler import InputHandler
+from horus.ui.crash_screen import CrashScreen
 from horus.ui.menu_screen import MenuScreen
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.settings_screen import SettingScreen
@@ -984,11 +986,23 @@ def test_top_help_flag_reports_parse_error_without_pushing_a_screen():
 # --- kill command ---
 
 def make_kill_context(cols=60, rows=10):
-    ctx, buffer, screens, table = make_proc_context(cols=cols, rows=rows)
-    ctx.users = UserRegistry()
-    seed_users(ctx.users)
-    proc = table.get_process(1)  # "init", owner "root" from make_proc_context
+    """Builds its own EventBus (rather than reusing make_proc_context's
+    table) and registers the real system-reaction subscriber on it, so
+    killing the critical 'init' process here exercises the same event-driven
+    path production code does -- not a direct CrashScreen push from kill()
+    itself (see processes.system_reactions)."""
+    buffer = ScreenBuffer(cols, rows)
+    screens = ScreenManager()
+    bus = EventBus()
+    table = ProcessTable(events=bus)
+    proc = table.add_process(Process(name="init", pid=0, owner="root", cpu_percent=0.1, mem_kb=1024, critical=True))
     other = table.add_process(Process(name="bash", pid=0, owner="user1", cpu_percent=0.5, mem_kb=2048))
+    users = UserRegistry()
+    seed_users(users)
+    input_handler = InputHandler(buffer, CommandHistory())  # kill's confirmation prompt needs this
+    register_system_reactions(bus, screens, window=None, sounds=None, buffer=buffer)
+    ctx = Context(session_id="s", user="root", cwd="/", screen=buffer, screens=screens, process_table=table,
+                  users=users, input_handler=input_handler, events=bus)
     return ctx, buffer, table, proc, other
 
 
@@ -1045,3 +1059,66 @@ def test_kill_help_flag_reports_parse_error_without_raising():
     ctx, buffer, table, proc, other = make_kill_context()
     kill(ctx, ["--help"])  # should not raise
     assert table.get_process(other.pid) is not None  # untouched
+
+
+# --- kill on a critical process: warning + y/n confirmation, then a crash ---
+
+def test_kill_critical_process_shows_a_warning_and_asks_for_confirmation():
+    ctx, buffer, table, proc, other = make_kill_context()
+    ctx.user = ctx.effective_user = "root"
+    kill(ctx, [str(proc.pid)])
+    assert "critical system process" in full_text(buffer)
+    assert "(y/n)" in full_text(buffer)
+    assert ctx.input_handler._pending_submit is not None
+    assert table.get_process(proc.pid) is not None  # not killed yet -- still waiting on the answer
+
+
+def test_kill_critical_process_confirmed_kills_it_and_crashes():
+    ctx, buffer, table, proc, other = make_kill_context()
+    ctx.user = ctx.effective_user = "root"
+    kill(ctx, [str(proc.pid)])
+    with patch("pyglet.clock.schedule_once"):  # don't actually schedule the real window-close timer
+        ctx.input_handler._pending_submit("y")
+    assert table.get_process(proc.pid) is None
+    assert isinstance(ctx.screens.active, CrashScreen)
+
+
+def test_kill_critical_process_declined_leaves_it_running():
+    ctx, buffer, table, proc, other = make_kill_context()
+    ctx.user = ctx.effective_user = "root"
+    kill(ctx, [str(proc.pid)])
+    ctx.input_handler._pending_submit("n")
+    assert table.get_process(proc.pid) is not None
+    assert "aborted" in full_text(buffer)
+    assert not isinstance(ctx.screens.active, CrashScreen)
+
+
+def test_kill_critical_process_without_permission_never_shows_the_warning():
+    """A plain user isn't authorized at all -- they shouldn't even get the
+    dramatic warning/confirmation for a process they could never touch."""
+    ctx, buffer, table, proc, other = make_kill_context()
+    ctx.user = ctx.effective_user = "user2"
+    kill(ctx, [str(proc.pid)])
+    assert "critical system process" not in full_text(buffer)
+    assert "Operation not permitted" in full_text(buffer)
+    assert ctx.input_handler._pending_submit is None
+    assert table.get_process(proc.pid) is not None
+
+
+def test_kill_critical_process_confirmed_by_admin_also_crashes():
+    ctx, buffer, table, proc, other = make_kill_context()
+    ctx.user = ctx.effective_user = "admin"
+    kill(ctx, [str(proc.pid)])
+    with patch("pyglet.clock.schedule_once"):
+        ctx.input_handler._pending_submit("yes")
+    assert table.get_process(proc.pid) is None
+    assert isinstance(ctx.screens.active, CrashScreen)
+
+
+def test_kill_non_critical_process_never_asks_for_confirmation():
+    ctx, buffer, table, proc, other = make_kill_context()
+    ctx.user = ctx.effective_user = "user1"
+    kill(ctx, [str(other.pid)])  # "bash", not critical
+    assert table.get_process(other.pid) is None
+    assert ctx.input_handler._pending_submit is None
+    assert not isinstance(ctx.screens.active, CrashScreen)

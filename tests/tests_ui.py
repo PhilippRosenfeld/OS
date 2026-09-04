@@ -8,6 +8,7 @@ from horus.processes.processTable import ProcessTable
 from horus.session.history import CommandHistory
 from horus.shell.input_handler import InputHandler
 from horus.ui.boot_screen import BootFrame, BootScreen
+from horus.ui.crash_screen import CrashScreen
 from horus.ui.loading_screen import LoadingScreen
 from horus.ui.logo_screen import LogoScreen
 from horus.ui.main_menu_screen import MainMenuScreen
@@ -428,6 +429,72 @@ def test_top_screen_ignores_text_motion_and_enter():
     manager.handle_motion(key.MOTION_UP)
     manager.handle_enter()
     assert isinstance(manager.active, TopScreen)
+
+
+# --- CrashScreen ---
+
+class FakeCloseableWindow:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_crash_screen_renders_a_kernel_panic_message_and_disables_cursor():
+    buffer = ScreenBuffer(60, 10)
+    buffer.cursor_enabled = True
+    manager = ScreenManager()
+    with patch("pyglet.clock.schedule_once"):
+        manager.push(CrashScreen(buffer, FakeCloseableWindow(), "init"))
+    assert buffer.cursor_enabled is False
+    screen_text = "".join(row_text(buffer, r) for r in range(buffer.rows))
+    assert "KERNEL PANIC" in screen_text
+    assert "init" in screen_text
+
+
+def test_crash_screen_schedules_the_window_close_after_a_delay():
+    buffer = ScreenBuffer(60, 10)
+    manager = ScreenManager()
+    with patch("pyglet.clock.schedule_once") as mock_schedule:
+        screen = CrashScreen(buffer, FakeCloseableWindow(), "init", delay=7.0)
+        manager.push(screen)
+    callback, delay = mock_schedule.call_args[0]
+    assert delay == 7.0
+    assert callback == screen._close_window
+
+
+def test_crash_screen_closes_the_window_once_the_delay_elapses():
+    buffer = ScreenBuffer(60, 10)
+    manager = ScreenManager()
+    window = FakeCloseableWindow()
+    with patch("pyglet.clock.schedule_once") as mock_schedule:
+        manager.push(CrashScreen(buffer, window, "init"))
+    callback, _ = mock_schedule.call_args[0]
+    assert window.closed is False
+    callback(0.0)
+    assert window.closed is True
+
+
+def test_crash_screen_without_a_window_does_not_raise_on_close():
+    buffer = ScreenBuffer(60, 10)
+    manager = ScreenManager()
+    with patch("pyglet.clock.schedule_once") as mock_schedule:
+        manager.push(CrashScreen(buffer, None, "init"))
+    callback, _ = mock_schedule.call_args[0]
+    callback(0.0)  # should not raise
+
+
+def test_crash_screen_ignores_all_input():
+    buffer = ScreenBuffer(60, 10)
+    manager = ScreenManager()
+    with patch("pyglet.clock.schedule_once"):
+        manager.push(CrashScreen(buffer, FakeCloseableWindow(), "init"))
+    manager.handle_text("hi")  # should not raise, and not act on it
+    manager.handle_motion(key.MOTION_UP)
+    manager.handle_enter()
+    manager.handle_key(key.A, 0)
+    assert isinstance(manager.active, CrashScreen)  # still frozen on the crash screen
 
 
 # --- MenuScreen ---

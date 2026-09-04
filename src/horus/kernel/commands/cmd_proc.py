@@ -67,12 +67,51 @@ def kill(ctx, argv: list[str]) -> None:
         ctx.write_line(f"kill: ({args.pid}) - No such process")
         return
 
-    if ctx.process_table.remove_process(args.pid, user=ctx.effective_user, role=ctx.effective_role):
+    if not ctx.process_table.can_kill(args.pid, user=ctx.effective_user, role=ctx.effective_role):
+        if ctx.sounds is not None:
+            ctx.sounds.play("error_notification")
+        ctx.write_line(f"kill: ({args.pid}) - Operation not permitted")
+        return
+
+    if proc.critical:
+        ctx.write_line(f"WARNING: '{proc.name}' (PID {proc.pid}) is a critical system process.")
+        ctx.write_line("Killing it will crash the system. Continue? (y/n)")
+
+        def _on_confirm(answer: str) -> None:
+            if answer.strip().lower() in ("y", "yes"):
+                _finish_kill(ctx, proc)
+            else:
+                ctx.write_line("kill: aborted")
+
+        ctx.request_input(_on_confirm)
+        return
+
+    _finish_kill(ctx, proc)
+
+
+def _finish_kill(ctx, proc) -> None:
+    """Actually removes the process and reports the outcome. Permission was
+    already checked in kill() before any confirmation prompt, so this only
+    fails if the process disappeared in the meantime (e.g. it finished
+    naturally between the prompt and the answer).
+
+    Killing a critical process (e.g. init) crashes the system -- but that
+    reaction lives in processes.system_reactions, subscribed to
+    ProcessKilledEvent, not here: it fires the same way no matter what kills
+    a critical process, not just this command. remove_process() publishes
+    that event (synchronously, so the crash screen is already showing by the
+    time it returns) -- this just has to stay quiet afterwards instead of
+    printing over whatever the crash reaction just drew."""
+    was_critical = proc.critical
+    if not ctx.process_table.remove_process(proc.pid, user=ctx.effective_user, role=ctx.effective_role):
+        ctx.write_line(f"kill: ({proc.pid}) - No such process")
+        return
+
+    if was_critical:
+        return
+
+    if ctx.sounds is not None:
         ctx.sounds.play("process_kill_buzz")
         ctx.sounds.set_sound_volume("process_kill_bang", 0.5)
         ctx.sounds.play("process_kill_bang")
-        ctx.write_line(f"Killed process {args.pid} ({proc.name})")
-    else:
-        ctx.sounds.play("error_notification")
-        ctx.write_line(f"kill: ({args.pid}) - Operation not permitted")
-        
+    ctx.write_line(f"Killed process {proc.pid} ({proc.name})")

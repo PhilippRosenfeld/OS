@@ -36,20 +36,27 @@ class ProcessTable:
             self._events.publish(ProcessStartedEvent(pid=new_process.pid, name=new_process.name, owner=new_process.owner))
         return new_process
 
-    def remove_process(self, pid: int, user: str, role: UserRole = UserRole.USER) -> bool:
-        """Kills a process: its own owner may always kill it, ADMIN or ROOT
-        may kill anyone's (matching the encrypt/decrypt permission model --
-        see filesystem.permissions.can_write_encrypted), a plain USER may not
+    def can_kill(self, pid: int, user: str, role: UserRole = UserRole.USER) -> bool:
+        """Read-only permission check, split out from remove_process() so a
+        caller (e.g. kill's confirmation prompt for a critical process) can
+        check authorization before actually acting on it. Its own owner may
+        always kill a process, ADMIN or ROOT may kill anyone's (matching the
+        encrypt/decrypt permission model -- see
+        filesystem.permissions.can_write_encrypted), a plain USER may not
         kill someone else's. `role` defaults to USER (least-privileged) so
-        existing callers that don't pass one fail closed, not open."""
-        if pid not in self.processes:
+        callers that don't pass one fail closed, not open."""
+        proc = self.processes.get(pid)
+        if proc is None:
             return False
-        proc = self.processes[pid]
-        if proc.owner != user and role < UserRole.ADMIN:
+        return proc.owner == user or role >= UserRole.ADMIN
+
+    def remove_process(self, pid: int, user: str, role: UserRole = UserRole.USER) -> bool:
+        """Kills a process -- see can_kill() for who's authorized."""
+        if not self.can_kill(pid, user, role):
             return False
         removed = self.processes.pop(pid)
         if self._events is not None:
-            self._events.publish(ProcessKilledEvent(pid=removed.pid, name=removed.name, killed_by=user))
+            self._events.publish(ProcessKilledEvent(pid=removed.pid, name=removed.name, killed_by=user, critical=removed.critical))
         return True
 
     def get_process(self, pid: int) -> process | None:

@@ -15,6 +15,7 @@ from horus.kernel.registry import registry
 from horus.paths import BOOT_DIR, BOOT_PROGRESS_PATH, BOOT_SOUNDS_DIR, DATA_DIR, HARDWARE_SPEC_PATH, SAVES_DIR, SHELL_SOUNDS_DIR, SOUNDS_DIR
 from horus.processes.processTable import ProcessTable
 from horus.processes.seed_process import seed_processes
+from horus.processes.system_reactions import register_system_reactions
 from horus.session.context import Context
 from horus.session.history import CommandHistory
 from horus.session.seed import seed_users
@@ -63,6 +64,7 @@ def main() -> None:
     sounds.load("error_notification", SHELL_SOUNDS_DIR / "error_notification.mp3")
     sounds.load("process_kill_buzz", SHELL_SOUNDS_DIR / "process_kill_buzz.mp3")
     sounds.load("process_kill_bang", SHELL_SOUNDS_DIR / "process_kill_bang.mp3")
+    sounds.load("system_crashed", SHELL_SOUNDS_DIR / "system_crashed.mp3")    
 
     bus = EventBus()
     kernel = Kernel(registry=registry, bus=bus)
@@ -77,6 +79,7 @@ def main() -> None:
     process_table = ProcessTable(events=bus)
     seed_processes(process_table)
     process_table.start_fluctuating()
+    register_system_reactions(bus, screens, window, sounds, window.buffer)
 
     context = Context(
         session_id = "local",

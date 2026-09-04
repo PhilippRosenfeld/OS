@@ -14,3 +14,7 @@ class process:
     volatility: float = 1.0  # scales how strongly this process's cpu/mem drift per
                               # ProcessTable._fluctuate() tick -- 0 = never moves,
                               # 1 = normal, >1 = jumpier than normal
+    critical: bool = False   # e.g. init (PID 1): killing it is allowed (permissions
+                              # permitting) but crashes the whole system -- see
+                              # cmd_proc.kill(), which warns and asks for confirmation
+                              # first
