@@ -8,7 +8,8 @@ class process:
     pid: int
     owner: str = "root"
     started_at: datetime = field(default_factory=datetime.now)
-    cpu_percent: float = 0.0
+    cpu_mhz: float = 0.0  # absolute cpu usage, not a percentage -- see
+                          # ProcessTable.total_cpu_mhz for the system's capacity
     mem_kb: int = 0
     killable: bool = True
     volatility: float = 1.0  # scales how strongly this process's cpu/mem drift per

@@ -337,7 +337,7 @@ def test_shell_does_not_redraw_its_prompt_while_a_loading_screen_is_up():
 
 def make_table():
     table = ProcessTable()
-    table.add_process(Process(name="init", pid=0, owner="root", cpu_percent=0.1, mem_kb=1024))
+    table.add_process(Process(name="init", pid=0, owner="root", cpu_mhz=0.1, mem_kb=1024))
     return table
 
 
@@ -346,7 +346,19 @@ def test_top_screen_renders_the_process_table_on_push():
     manager = ScreenManager()
     with patch("pyglet.clock.schedule_interval"):
         manager.push(TopScreen(buffer, make_table(), manager))
-    assert "init" in row_text(buffer, 2)
+    assert "init" in row_text(buffer, 3)
+
+
+def test_top_screen_shows_a_combined_system_usage_summary():
+    buffer = ScreenBuffer(60, 10)
+    manager = ScreenManager()
+    table = ProcessTable(total_memory_kb=10000, total_cpu_mhz=100)
+    table.add_process(Process(name="a", pid=0, owner="root", cpu_mhz=30.0, mem_kb=2000))
+    with patch("pyglet.clock.schedule_interval"):
+        manager.push(TopScreen(buffer, table, manager))
+    assert "System:" in row_text(buffer, 0)
+    assert "30/100 MHz" in row_text(buffer, 0)
+    assert "2000/10000 KB" in row_text(buffer, 0)
 
 
 def test_top_screen_disables_cursor_and_restores_it_on_pop():
@@ -378,7 +390,7 @@ def test_top_screen_refresh_reflects_new_processes():
     with patch("pyglet.clock.schedule_interval") as mock_schedule:
         screen = TopScreen(buffer, table, manager)
         manager.push(screen)
-    table.add_process(Process(name="new_proc", pid=0, owner="user1", cpu_percent=2.5, mem_kb=4096))
+    table.add_process(Process(name="new_proc", pid=0, owner="user1", cpu_mhz=2.5, mem_kb=4096))
     callback, _ = mock_schedule.call_args[0]
     callback(0.0)
     screen_text = "".join(row_text(buffer, r) for r in range(buffer.rows))

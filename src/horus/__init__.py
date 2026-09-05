@@ -75,8 +75,11 @@ def main() -> None:
     screens = ScreenManager()
     users = UserRegistry()
     seed_users(users)
-    
-    process_table = ProcessTable(events=bus)
+
+    hardware = HardwareSpec.load(HARDWARE_SPEC_PATH)
+
+    process_table = ProcessTable(events=bus, total_memory_kb=hardware.total_memory_kb(),
+                                  total_cpu_mhz=hardware.total_cpu_mhz())
     seed_processes(process_table)
     process_table.start_fluctuating()
     register_system_reactions(bus, screens, window, sounds, window.buffer)
@@ -195,7 +198,6 @@ def main() -> None:
         for d in (1, 2, 3)
         for c in (1, 2, 3)
     }
-    hardware = HardwareSpec.load(HARDWARE_SPEC_PATH)
 
     frames = _load_boot_frames(DATA_DIR / "boot" / "boot_sequence.txt",
         context={

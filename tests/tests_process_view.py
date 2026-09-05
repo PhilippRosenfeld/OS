@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
 
 from horus.processes.process import process as Process
-from horus.processes.process_view import format_uptime, sort_processes
+from horus.processes.process_view import format_system_summary, format_uptime, sort_processes
+from horus.processes.processTable import ProcessTable
 
 
 def make(name, **kwargs):
@@ -11,7 +12,7 @@ def make(name, **kwargs):
 # --- sort_processes ---
 
 def test_sort_by_cpu_is_descending():
-    procs = [make("a", cpu_percent=10.0), make("b", cpu_percent=90.0), make("c", cpu_percent=50.0)]
+    procs = [make("a", cpu_mhz=10.0), make("b", cpu_mhz=90.0), make("c", cpu_mhz=50.0)]
     result = sort_processes(procs, "cpu")
     assert [p.name for p in result] == ["b", "c", "a"]
 
@@ -46,19 +47,19 @@ def test_sort_by_time_puts_the_longest_running_first():
 
 
 def test_sort_processes_default_is_cpu():
-    procs = [make("a", cpu_percent=10.0), make("b", cpu_percent=90.0)]
+    procs = [make("a", cpu_mhz=10.0), make("b", cpu_mhz=90.0)]
     assert sort_processes(procs) == sort_processes(procs, "cpu")
 
 
 def test_sort_processes_does_not_mutate_the_input_list():
-    procs = [make("a", cpu_percent=10.0), make("b", cpu_percent=90.0)]
+    procs = [make("a", cpu_mhz=10.0), make("b", cpu_mhz=90.0)]
     original_order = list(procs)
     sort_processes(procs, "cpu")
     assert procs == original_order
 
 
 def test_sort_processes_with_an_unknown_key_falls_back_to_cpu():
-    procs = [make("a", cpu_percent=10.0), make("b", cpu_percent=90.0)]
+    procs = [make("a", cpu_mhz=10.0), make("b", cpu_mhz=90.0)]
     assert sort_processes(procs, "not-a-real-column") == sort_processes(procs, "cpu")
 
 
@@ -91,3 +92,26 @@ def test_format_uptime_defaults_now_to_the_current_time():
     started = datetime.now() - timedelta(seconds=3)
     result = format_uptime(started)  # now= omitted
     assert result in ("00:03", "00:04")  # tolerate a little test-execution drift
+
+
+# --- format_system_summary ---
+
+def test_format_system_summary_reports_totals():
+    table = ProcessTable(total_memory_kb=10000, total_cpu_mhz=100)
+    table.add_process(Process(name="a", pid=0, cpu_mhz=40.0, mem_kb=2000))
+    table.add_process(Process(name="b", pid=0, cpu_mhz=10.0, mem_kb=3000))
+
+    summary = format_system_summary(table)
+
+    assert "50/100 MHz" in summary  # combined cpu / capacity
+    assert "5000/10000 KB" in summary  # combined mem / capacity
+    assert "50.0%" in summary.split("MHz")[1].split("MEM")[0]  # cpu percentage of capacity
+    assert "50.0%" in summary.split("MEM")[1]  # mem percentage of capacity
+
+
+def test_format_system_summary_with_no_processes():
+    table = ProcessTable(total_memory_kb=10000, total_cpu_mhz=100)
+    summary = format_system_summary(table)
+    assert "0/100 MHz" in summary
+    assert "0/10000 KB" in summary
+    assert "0.0%" in summary

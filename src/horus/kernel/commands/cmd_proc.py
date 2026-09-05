@@ -1,6 +1,6 @@
 from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
 from horus.kernel.registry import command
-from horus.processes.process_view import DEFAULT_SORT, SORT_KEYS, format_uptime, sort_processes
+from horus.processes.process_view import DEFAULT_SORT, SORT_KEYS, format_system_summary, format_uptime, sort_processes
 from horus.ui.top_screen import TopScreen
 
 
@@ -12,11 +12,12 @@ def _render_top(ctx, sort_by: str | None = None) -> None:
     processes = ctx.process_table.list_processes()
     if sort_by is not None:
         processes = sort_processes(processes, sort_by)
-    ctx.write_line(f"{'PID':<8}{'USER':<12}{'CPU%':<8}{'MEM(KB)':<12}{'UPTIME':<10}{'NAME'}")
+    ctx.write_line(format_system_summary(ctx.process_table))
+    ctx.write_line(f"{'PID':<8}{'USER':<12}{'CPU(MHz)':<10}{'MEM(KB)':<12}{'UPTIME':<10}{'NAME'}")
     ctx.write_line("-" * 70)
     for proc in processes:
         uptime = format_uptime(proc.started_at)
-        ctx.write_line(f"{proc.pid:<8}{proc.owner:<12}{proc.cpu_percent:<8.2f}{proc.mem_kb:<12}{uptime:<10}{proc.name}")
+        ctx.write_line(f"{proc.pid:<8}{proc.owner:<12}{proc.cpu_mhz:<10.1f}{proc.mem_kb:<12}{uptime:<10}{proc.name}")
 
 def _build_top_parser() -> CommandArgumentParser:
     parser = CommandArgumentParser(prog="top", add_help=True, description="Display system processes")

@@ -1,7 +1,7 @@
 import pyglet
 
 from horus.display.screen_buffer import ScreenBuffer
-from horus.processes.process_view import DEFAULT_SORT, format_uptime, sort_processes
+from horus.processes.process_view import DEFAULT_SORT, format_system_summary, format_uptime, sort_processes
 from horus.processes.processTable import ProcessTable
 from horus.ui.screen import Screen
 from horus.ui.screen_manager import ScreenManager
@@ -40,17 +40,18 @@ class TopScreen(Screen):
 
     def _render(self) -> None:
         self._buffer.clear()
-        self._buffer.write_string(0, 0, f"{'PID':<8}{'USER':<12}{'CPU%':<8}{'MEM(KB)':<12}{'UPTIME':<10}{'NAME'}")
-        self._buffer.write_string(0, 1, "-" * 70)
+        self._buffer.write_string(0, 0, format_system_summary(self._process_table))
+        self._buffer.write_string(0, 1, f"{'PID':<8}{'USER':<12}{'CPU(MHz)':<10}{'MEM(KB)':<12}{'UPTIME':<10}{'NAME'}")
+        self._buffer.write_string(0, 2, "-" * 70)
 
         processes = sort_processes(self._process_table.list_processes(), self._sort_by)
         last_row = self._buffer.rows - 1
         for i, proc in enumerate(processes):
-            row = i + 2
+            row = i + 3
             if row >= last_row:
                 break
             uptime = format_uptime(proc.started_at)
-            self._buffer.write_string(0, row, f"{proc.pid:<8}{proc.owner:<12}{proc.cpu_percent:<8.2f}{proc.mem_kb:<12}{uptime:<10}{proc.name}")
+            self._buffer.write_string(0, row, f"{proc.pid:<8}{proc.owner:<12}{proc.cpu_mhz:<10.1f}{proc.mem_kb:<12}{uptime:<10}{proc.name}")
 
         self._buffer.write_string(0, last_row, "Ctrl+C to exit")
 

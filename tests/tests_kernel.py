@@ -11,7 +11,7 @@ from horus.filesystem.backend.memory import InMemoryVFS
 from horus.kernel.commands.cmd_fs import cat, chattr, decrypt, encrypt, ls
 from horus.kernel.commands.cmd_menu import horus_menu, open_settings_menu
 from horus.kernel.commands.cmd_misc import color, su
-from horus.kernel.commands.cmd_proc import kill, top
+from horus.kernel.commands.cmd_proc import kill, ps, top
 from horus.kernel.commands.cmd_text import echo
 from horus.kernel.kernel import Kernel
 from horus.kernel.registry import Registry
@@ -957,7 +957,7 @@ def make_proc_context(cols=60, rows=10):
     buffer = ScreenBuffer(cols, rows)
     screens = ScreenManager()
     table = ProcessTable()
-    table.add_process(Process(name="init", pid=0, owner="root", cpu_percent=0.1, mem_kb=1024))
+    table.add_process(Process(name="init", pid=0, owner="root", cpu_mhz=0.1, mem_kb=1024))
     ctx = Context(session_id="s", user="root", cwd="/", screen=buffer, screens=screens, process_table=table)
     return ctx, buffer, screens, table
 
@@ -971,8 +971,8 @@ def test_top_pushes_a_live_top_screen():
 def test_top_defaults_to_sorting_by_cpu():
     ctx, buffer = make_context(cols=60, rows=10)
     ctx.process_table = ProcessTable()
-    ctx.process_table.add_process(Process(name="quiet", pid=0, owner="root", cpu_percent=1.0, mem_kb=1024))
-    ctx.process_table.add_process(Process(name="busy", pid=0, owner="root", cpu_percent=90.0, mem_kb=1024))
+    ctx.process_table.add_process(Process(name="quiet", pid=0, owner="root", cpu_mhz=1.0, mem_kb=1024))
+    ctx.process_table.add_process(Process(name="busy", pid=0, owner="root", cpu_mhz=90.0, mem_kb=1024))
     top(ctx, [])
     text = full_text(buffer)
     assert text.index("busy") < text.index("quiet")  # higher cpu listed first
@@ -981,8 +981,8 @@ def test_top_defaults_to_sorting_by_cpu():
 def test_top_sort_flag_changes_the_order():
     ctx, buffer = make_context(cols=60, rows=10)
     ctx.process_table = ProcessTable()
-    ctx.process_table.add_process(Process(name="zeta", pid=0, owner="root", cpu_percent=90.0, mem_kb=1024))
-    ctx.process_table.add_process(Process(name="alpha", pid=0, owner="root", cpu_percent=1.0, mem_kb=1024))
+    ctx.process_table.add_process(Process(name="zeta", pid=0, owner="root", cpu_mhz=90.0, mem_kb=1024))
+    ctx.process_table.add_process(Process(name="alpha", pid=0, owner="root", cpu_mhz=1.0, mem_kb=1024))
     top(ctx, ["--sort", "name"])
     text = full_text(buffer)
     assert text.index("alpha") < text.index("zeta")  # alphabetical, not by cpu anymore
@@ -991,9 +991,29 @@ def test_top_sort_flag_changes_the_order():
 def test_top_shows_an_uptime_column():
     ctx, buffer = make_context(cols=60, rows=10)
     ctx.process_table = ProcessTable()
-    ctx.process_table.add_process(Process(name="init", pid=0, owner="root", cpu_percent=0.1, mem_kb=1024))
+    ctx.process_table.add_process(Process(name="init", pid=0, owner="root", cpu_mhz=0.1, mem_kb=1024))
     top(ctx, [])
     assert "UPTIME" in full_text(buffer)
+
+
+def test_top_shows_a_combined_system_usage_summary():
+    ctx, buffer = make_context(cols=80, rows=10)
+    ctx.process_table = ProcessTable(total_memory_kb=10000, total_cpu_mhz=100)
+    ctx.process_table.add_process(Process(name="a", pid=0, owner="root", cpu_mhz=40.0, mem_kb=2000))
+    ctx.process_table.add_process(Process(name="b", pid=0, owner="root", cpu_mhz=10.0, mem_kb=3000))
+    top(ctx, [])
+    text = full_text(buffer)
+    assert "System:" in text
+    assert "50/100 MHz" in text  # combined cpu / capacity
+    assert "5000/10000 KB" in text  # combined mem / capacity
+
+
+def test_ps_also_shows_the_combined_system_usage_summary():
+    ctx, buffer = make_context(cols=80, rows=10)
+    ctx.process_table = ProcessTable(total_memory_kb=10000)
+    ctx.process_table.add_process(Process(name="a", pid=0, owner="root", cpu_mhz=25.0, mem_kb=1000))
+    ps(ctx, [])
+    assert "System:" in full_text(buffer)
 
 
 def test_top_pushes_a_top_screen_with_the_requested_sort():
@@ -1012,7 +1032,7 @@ def test_top_invalid_sort_choice_reports_parse_error():
 def test_top_without_a_screen_stack_falls_back_to_a_one_shot_snapshot():
     ctx, buffer = make_context()
     ctx.process_table = ProcessTable()
-    ctx.process_table.add_process(Process(name="init", pid=0, owner="root", cpu_percent=0.1, mem_kb=1024))
+    ctx.process_table.add_process(Process(name="init", pid=0, owner="root", cpu_mhz=0.1, mem_kb=1024))
     top(ctx, [])
     assert "init" in full_text(buffer)
     assert ctx.screens is None  # nothing to push onto -- confirms the fallback path ran
@@ -1036,8 +1056,8 @@ def make_kill_context(cols=60, rows=10):
     screens = ScreenManager()
     bus = EventBus()
     table = ProcessTable(events=bus)
-    proc = table.add_process(Process(name="init", pid=0, owner="root", cpu_percent=0.1, mem_kb=1024, critical=True))
-    other = table.add_process(Process(name="bash", pid=0, owner="user1", cpu_percent=0.5, mem_kb=2048))
+    proc = table.add_process(Process(name="init", pid=0, owner="root", cpu_mhz=0.1, mem_kb=1024, critical=True))
+    other = table.add_process(Process(name="bash", pid=0, owner="user1", cpu_mhz=0.5, mem_kb=2048))
     users = UserRegistry()
     seed_users(users)
     input_handler = InputHandler(buffer, CommandHistory())  # kill's confirmation prompt needs this

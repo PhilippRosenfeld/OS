@@ -28,7 +28,7 @@ def _spawn_crypto_process(ctx, name: str):
     if ctx.process_table is None:
         return None
     return ctx.process_table.add_process(
-        Process(name=name, pid=0, owner=ctx.effective_user, cpu_percent=25.0, mem_kb=4096, volatility=2.5)
+        Process(name=name, pid=0, owner=ctx.effective_user, cpu_mhz=800.0, mem_kb=4096, volatility=2.5)
     )
 
 
