@@ -40,6 +40,14 @@ def format_uptime(started_at: datetime, now: datetime | None = None) -> str:
     return f"{minutes:02d}:{seconds:02d}"
 
 
+def format_cpu_percent(proc, process_table) -> float:
+    """A process's cpu_mhz expressed as a percentage of the table's total
+    cpu_mhz capacity -- process.cpu_mhz itself stays an absolute value (see
+    ProcessTable.total_cpu_mhz), this is purely for display in top/ps."""
+    capacity = process_table.total_cpu_mhz
+    return (proc.cpu_mhz / capacity * 100) if capacity else 0.0
+
+
 def format_system_summary(process_table) -> str:
     """One-line summary of combined resource usage across every process
     currently tracked by `process_table`, for the header of top/ps. Always

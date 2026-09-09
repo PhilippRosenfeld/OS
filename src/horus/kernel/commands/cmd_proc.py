@@ -1,6 +1,13 @@
 from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
 from horus.kernel.registry import command
-from horus.processes.process_view import DEFAULT_SORT, SORT_KEYS, format_system_summary, format_uptime, sort_processes
+from horus.processes.process_view import (
+    DEFAULT_SORT,
+    SORT_KEYS,
+    format_cpu_percent,
+    format_system_summary,
+    format_uptime,
+    sort_processes,
+)
 from horus.ui.top_screen import TopScreen
 
 
@@ -13,11 +20,12 @@ def _render_top(ctx, sort_by: str | None = None) -> None:
     if sort_by is not None:
         processes = sort_processes(processes, sort_by)
     ctx.write_line(format_system_summary(ctx.process_table))
-    ctx.write_line(f"{'PID':<8}{'USER':<12}{'CPU(MHz)':<10}{'MEM(KB)':<12}{'UPTIME':<10}{'NAME'}")
+    ctx.write_line(f"{'PID':<8}{'USER':<12}{'CPU%':<10}{'MEM(KB)':<12}{'UPTIME':<10}{'NAME'}")
     ctx.write_line("-" * 70)
     for proc in processes:
         uptime = format_uptime(proc.started_at)
-        ctx.write_line(f"{proc.pid:<8}{proc.owner:<12}{proc.cpu_mhz:<10.1f}{proc.mem_kb:<12}{uptime:<10}{proc.name}")
+        cpu_percent = format_cpu_percent(proc, ctx.process_table)
+        ctx.write_line(f"{proc.pid:<8}{proc.owner:<12}{cpu_percent:<10.1f}{proc.mem_kb:<12}{uptime:<10}{proc.name}")
 
 def _build_top_parser() -> CommandArgumentParser:
     parser = CommandArgumentParser(prog="top", add_help=True, description="Display system processes")
@@ -31,14 +39,14 @@ def _build_ps_parser() -> CommandArgumentParser:
 
 def _build_kill_parser() -> CommandArgumentParser:
     parser = CommandArgumentParser(prog="kill", add_help=True, description="Kill a process")
-    parser.add_argument("pid", type=int, help="PID of the process to kill")
+    parser.add_argument("pid", type=int, help="PID of the process")
     return parser
 
 _top_parser = _build_top_parser()
 _ps_parser = _build_ps_parser()
 _kill_parser = _build_kill_parser()
 
-@command("top", help_text="Display system processes, live, until Ctrl+C")
+@command("top", help_text="Display system processes")
 def top(ctx, argv: list[str]) -> None:
     try:
         args = _top_parser.parse_args(argv)

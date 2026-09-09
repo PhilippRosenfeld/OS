@@ -59,14 +59,24 @@ class SettingScreen(Screen):
         # size change) re-wraps each of them at the *current* cols, which can
         # leave stale rows overlapping freshly rendered ones.
         self._buffer.clear()
-        self._buffer.write_string(0, 0, self._title)
-        for i, option in enumerate(self._options):
-            row = i + 2
-            text = self._label_for(option)
+
+        # Centered as one block (same left edge for every line, block itself
+        # centered) rather than each line centered independently -- otherwise
+        # the "> " selection marker would shift every row's text sideways as
+        # the selection moves.
+        option_texts = [self._label_for(option) for option in self._options]
+        block_width = max([len(self._title)] + [len(text) + 2 for text in option_texts])
+        block_height = 2 + len(self._options)
+        start_row = max(0, (self._buffer.rows - block_height) // 2)
+        start_col = max(0, (self._buffer.cols - block_width) // 2)
+
+        self._buffer.write_string(start_col, start_row, self._title)
+        for i, text in enumerate(option_texts):
+            row = start_row + i + 2
             if i == self._selected:
-                self._buffer.write_string(0, row, f"> {text}", fg=self._buffer.default_bg, bg=self._buffer.default_fg)
+                self._buffer.write_string(start_col, row, f"> {text}", fg=self._buffer.default_bg, bg=self._buffer.default_fg)
             else:
-                self._buffer.write_string(0, row, f"  {text}")
+                self._buffer.write_string(start_col, row, f"  {text}")
 
     def handle_text(self, text: str) -> None:
         pass

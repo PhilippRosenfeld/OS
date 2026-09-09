@@ -1,16 +1,24 @@
+from typing import Callable
+
+import pyglet
+
 from horus.shell.input_handler import InputHandler
 from horus.ui.screen import Screen
 from horus.ui.screen_manager import ScreenManager
+
+key = pyglet.window.key
 
 
 class ShellScreen(Screen):
     """Adapts InputHandler to the Screen interface, so the normal shell is just
     the bottom-most screen on the ScreenManager's stack."""
 
-    def __init__(self, input_handler: InputHandler, screens: ScreenManager, window=None) -> None:
+    def __init__(self, input_handler: InputHandler, screens: ScreenManager, window=None,
+                 on_escape: Callable[[], None] | None = None) -> None:
         self._input_handler = input_handler
         self._screens = screens
         self._window = window  # anything with .start_cursor_blink(); None skips the guard below
+        self._on_escape = on_escape  # opens the settings menu; None (e.g. minimal test setups) skips it
         self._cursor_blink_started = False
 
     def on_push(self) -> None:
@@ -42,4 +50,7 @@ class ShellScreen(Screen):
             self._input_handler.start_line()  # different screen -- don't draw over it
 
     def handle_key(self, symbol: int, modifiers: int) -> None:
+        if symbol == key.ESCAPE and self._on_escape is not None:
+            self._on_escape()
+            return
         self._input_handler._handle_key(symbol, modifiers)

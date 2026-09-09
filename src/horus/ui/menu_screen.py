@@ -48,13 +48,23 @@ class MenuScreen(Screen):
         # that matters once a resize (e.g. font size change) can happen while
         # this screen is showing.
         self._buffer.clear()
-        self._buffer.write_string(0, 0, self._title)
-        for i, option in enumerate(self._options):
-            row = i + 2
+
+        # Centered as one block (same left edge for every line, block itself
+        # centered) rather than each line centered independently -- see
+        # SettingScreen._render() for why.
+        option_labels = [option.label for option in self._options]
+        block_width = max([len(self._title)] + [len(label) + 2 for label in option_labels])
+        block_height = 2 + len(self._options)
+        start_row = max(0, (self._buffer.rows - block_height) // 2)
+        start_col = max(0, (self._buffer.cols - block_width) // 2)
+
+        self._buffer.write_string(start_col, start_row, self._title)
+        for i, label in enumerate(option_labels):
+            row = start_row + i + 2
             if i == self._selected:
-                self._buffer.write_string(0, row, f"> {option.label}", fg=self._buffer.default_bg, bg=self._buffer.default_fg)
+                self._buffer.write_string(start_col, row, f"> {label}", fg=self._buffer.default_bg, bg=self._buffer.default_fg)
             else:
-                self._buffer.write_string(0, row, f"  {option.label}")
+                self._buffer.write_string(start_col, row, f"  {label}")
 
     def handle_text(self, text: str) -> None:
         pass

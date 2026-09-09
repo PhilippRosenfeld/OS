@@ -9,7 +9,7 @@ from horus.events.bus import EventBus
 from horus.filesystem.backend.sqlite import SQLiteVFS
 from horus.filesystem.seed import seed_minimal
 from horus.hardware.spec import HardwareSpec
-from horus.kernel.commands.cmd_menu import open_settings_menu
+from horus.kernel.commands.cmd_menu import horus_menu, open_settings_menu
 from horus.kernel.kernel import Kernel
 from horus.kernel.registry import registry
 from horus.paths import BOOT_DIR, BOOT_PROGRESS_PATH, BOOT_SOUNDS_DIR, DATA_DIR, HARDWARE_SPEC_PATH, SAVES_DIR, SHELL_SOUNDS_DIR, SOUNDS_DIR
@@ -160,6 +160,9 @@ def main() -> None:
     def _open_settings() -> None:
         open_settings_menu(context)
 
+    def _open_horus_menu() -> None:
+        horus_menu(context, [])
+
     def _exit_game() -> None:
         window.close() 
 
@@ -212,7 +215,7 @@ def main() -> None:
             "boot_disk": boot_disk_name,
             **disk_context})
     
-    shell_screen = ShellScreen(input_handler, screens, window)
+    shell_screen = ShellScreen(input_handler, screens, window, on_escape=_open_horus_menu)
     screens.push(shell_screen)
     boot_screen = BootScreen(window.buffer, frames, on_complete=_on_boot_complete, sounds=sounds)
     screens.push(boot_screen)

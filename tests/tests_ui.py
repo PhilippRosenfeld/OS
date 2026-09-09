@@ -170,7 +170,9 @@ def test_shell_screen_does_not_clobber_a_screen_opened_from_enter():
     manager.handle_text("horus")
     manager.handle_enter()
     assert manager.active is not shell
-    assert row_text(buffer, 0) == "Menu"  # not clobbered by the shell's prompt
+    full = "".join(row_text(buffer, r) for r in range(buffer.rows))
+    assert "Menu" in full  # not clobbered by the shell's prompt
+    assert row_text(buffer, 0) == ""  # nothing (menu is centered, not pinned to the top)
 
 
 def test_shell_screen_redraws_prompt_when_menu_above_it_closes():
@@ -182,7 +184,7 @@ def test_shell_screen_redraws_prompt_when_menu_above_it_closes():
     manager.push(shell)
     menu = MenuScreen(buffer, "Menu", [MenuOption("Back", lambda: manager.pop())], manager)
     manager.push(menu)
-    assert row_text(buffer, 0) == "Menu"
+    assert "Menu" in "".join(row_text(buffer, r) for r in range(buffer.rows))
 
     manager.handle_enter()  # activates "Back", pops the menu
     assert manager.active is shell
@@ -260,6 +262,28 @@ def test_shell_screen_without_window_does_not_raise():
     menu = MenuScreen(buffer, "Menu", [MenuOption("Back", lambda: manager.pop())], manager)
     manager.push(menu)
     manager.handle_enter()  # should not raise
+
+
+def test_shell_screen_escape_calls_on_escape_instead_of_the_input_handler():
+    buffer = ScreenBuffer(20, 5)
+    manager = ScreenManager()
+    history = CommandHistory()
+    handler = InputHandler(buffer, history)
+    calls = []
+    shell = ShellScreen(handler, manager, on_escape=lambda: calls.append(True))
+    manager.push(shell)
+    shell.handle_key(key.ESCAPE, 0)
+    assert calls == [True]
+
+
+def test_shell_screen_escape_without_on_escape_falls_through_to_the_input_handler():
+    buffer = ScreenBuffer(20, 5)
+    manager = ScreenManager()
+    history = CommandHistory()
+    handler = InputHandler(buffer, history)
+    shell = ShellScreen(handler, manager)  # on_escape=None
+    manager.push(shell)
+    shell.handle_key(key.ESCAPE, 0)  # should not raise
 
 
 def test_screen_manager_only_forwards_to_top_screen():
@@ -522,19 +546,32 @@ def make_menu(cols=30, rows=10, labels=("Resume", "Settings", "Quit")):
     return menu, buffer, manager, selections
 
 
+# make_menu() uses a 30x10 buffer with labels ("Resume", "Settings", "Quit")
+# (widest line "  Settings" is 10 chars, block is 5 rows tall) -- centered
+# that's row 2, col 10. See MenuScreen._render().
+_MENU_ROW = 2
+_MENU_COL = 10
+
+
 def test_menu_renders_title_and_options_with_first_selected():
     menu, buffer, manager, selections = make_menu()
-    assert row_text(buffer, 0) == "Horus Menu"
-    assert row_text(buffer, 2) == "> Resume"
-    assert row_text(buffer, 3) == "  Settings"
-    assert row_text(buffer, 4) == "  Quit"
+    assert row_text(buffer, _MENU_ROW) == " " * _MENU_COL + "Horus Menu"
+    assert row_text(buffer, _MENU_ROW + 2) == " " * _MENU_COL + "> Resume"
+    assert row_text(buffer, _MENU_ROW + 3) == " " * _MENU_COL + "  Settings"
+    assert row_text(buffer, _MENU_ROW + 4) == " " * _MENU_COL + "  Quit"
+
+
+def test_menu_is_centered_not_pinned_to_the_top_left():
+    menu, buffer, manager, selections = make_menu()
+    assert row_text(buffer, 0) == ""  # nothing flush against the top
+    assert row_text(buffer, _MENU_ROW).startswith(" ")  # nothing flush against the left
 
 
 def test_menu_down_moves_selection_and_wraps():
     menu, buffer, manager, selections = make_menu()
     menu.handle_motion(key.MOTION_DOWN)
     assert menu._selected == 1
-    assert row_text(buffer, 3) == "> Settings"
+    assert row_text(buffer, _MENU_ROW + 3) == " " * _MENU_COL + "> Settings"
     menu.handle_motion(key.MOTION_DOWN)
     menu.handle_motion(key.MOTION_DOWN)  # 2 -> 0, wraps
     assert menu._selected == 0
@@ -544,7 +581,7 @@ def test_menu_up_moves_selection_and_wraps():
     menu, buffer, manager, selections = make_menu()
     menu.handle_motion(key.MOTION_UP)  # 0 -> last, wraps backward
     assert menu._selected == 2
-    assert row_text(buffer, 4) == "> Quit"
+    assert row_text(buffer, _MENU_ROW + 4) == " " * _MENU_COL + "> Quit"
 
 
 def test_menu_enter_activates_selected_option():
@@ -750,18 +787,31 @@ def make_settings(cols=30, rows=10):
     return screen, buffer, manager, state, returned
 
 
+# make_settings() uses a 30x10 buffer with options ["Volume: < 1 >", "Return"]
+# (widest line "> Volume: < 1 >" is 15 chars, block is 4 rows tall) -- centered
+# that's row 3, col 7. See SettingScreen._render().
+_SETTINGS_ROW = 3
+_SETTINGS_COL = 7
+
+
 def test_settings_renders_title_and_value_with_first_selected():
     screen, buffer, manager, state, returned = make_settings()
-    assert row_text(buffer, 0) == "Settings"
-    assert row_text(buffer, 2) == "> Volume: < 1 >"
-    assert row_text(buffer, 3) == "  Return"
+    assert row_text(buffer, _SETTINGS_ROW) == " " * _SETTINGS_COL + "Settings"
+    assert row_text(buffer, _SETTINGS_ROW + 2) == " " * _SETTINGS_COL + "> Volume: < 1 >"
+    assert row_text(buffer, _SETTINGS_ROW + 3) == " " * _SETTINGS_COL + "  Return"
+
+
+def test_settings_is_centered_not_pinned_to_the_top_left():
+    screen, buffer, manager, state, returned = make_settings()
+    assert row_text(buffer, 0) == ""  # nothing flush against the top
+    assert row_text(buffer, _SETTINGS_ROW).startswith(" ")  # nothing flush against the left
 
 
 def test_settings_right_increments_value_of_selected_option():
     screen, buffer, manager, state, returned = make_settings()
     screen.handle_motion(key.MOTION_RIGHT)
     assert state["value"] == 2
-    assert row_text(buffer, 2) == "> Volume: < 2 >"
+    assert row_text(buffer, _SETTINGS_ROW + 2) == " " * _SETTINGS_COL + "> Volume: < 2 >"
 
 
 def test_settings_left_decrements_value_of_selected_option():
@@ -838,8 +888,9 @@ def test_settings_resize_mid_session_does_not_leave_artifacts():
     manager.push(screen)
     screen.handle_motion(key.MOTION_RIGHT)  # shrinks cols, then re-renders at the new width
 
-    assert row_text(buffer, 0) == "Settings"
-    assert row_text(buffer, 2) == "> Window Size: <"[:15].rstrip()  # cut off cleanly, not garbled
+    full = "".join(row_text(buffer, r) for r in range(buffer.rows))
+    assert "Settings" in full
+    assert "Window Size" in full
     for row in range(buffer.rows):
         assert "900" not in row_text(buffer, row)  # no wrapped/stale tail from the wider render
 

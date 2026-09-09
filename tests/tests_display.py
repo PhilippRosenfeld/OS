@@ -93,6 +93,33 @@ def test_set_window_size_resizes_window_and_refits_grid():
         window._window.close()
 
 
+def test_on_text_key_press_claims_escape_so_pyglet_does_not_close_the_window():
+    """Regression test: pyglet.window.Window's own default on_key_press handler
+    closes the window on Escape. Our handler is pushed on top via push_handlers(),
+    but returning nothing (falsy) lets the event keep propagating down to that
+    default -- so any key we forward to a callback must be reported as handled."""
+    import pyglet
+
+    window = DisplayWindow(font_path=FONT, char_width=8, char_height=16, width=320, height=160, margin=0)
+    try:
+        window.set_text_handler(on_key=lambda symbol, modifiers: None)
+        result = window._on_text_key_press(pyglet.window.key.ESCAPE, 0)
+        assert result == pyglet.event.EVENT_HANDLED
+    finally:
+        window._window.close()
+
+
+def test_on_text_key_press_without_a_callback_leaves_the_event_unhandled():
+    import pyglet
+
+    window = DisplayWindow(font_path=FONT, char_width=8, char_height=16, width=320, height=160, margin=0)
+    try:
+        result = window._on_text_key_press(pyglet.window.key.ESCAPE, 0)  # no set_text_handler call
+        assert result == pyglet.event.EVENT_UNHANDLED
+    finally:
+        window._window.close()
+
+
 def test_close_closes_the_underlying_window():
     """Regression test: DisplayWindow.close() didn't exist at all, so any
     caller (e.g. an 'Exit' menu option) crashed with AttributeError."""

@@ -139,14 +139,23 @@ class DisplayWindow:
         if self._on_motion_callback is not None:
             self._on_motion_callback(motion)
 
-    def _on_text_key_press(self, symbol: int, modifiers: int) -> None:
+    def _on_text_key_press(self, symbol: int, modifiers: int) -> pyglet.event.EVENT_HANDLE_STATE:
         """pyglet event handler: fires self._on_enter_callback for Enter/Return,
-        forwards everything else to self._on_special_key_callback."""
+        forwards everything else to self._on_special_key_callback.
+
+        Always claims the event (returns EVENT_HANDLED) once it's been forwarded
+        -- otherwise pyglet keeps walking its handler stack down to the Window's
+        own built-in on_key_press, whose default behavior is to close the window
+        on Escape. Screens (e.g. SettingScreen, ShellScreen) rely on Escape
+        reaching them instead, so that default must never fire."""
         if symbol == pyglet.window.key.ENTER:
             if self._on_enter_callback is not None:
                 self._on_enter_callback()
+                return pyglet.event.EVENT_HANDLED
         elif self._on_special_key_callback is not None:
             self._on_special_key_callback(symbol, modifiers)
+            return pyglet.event.EVENT_HANDLED
+        return pyglet.event.EVENT_UNHANDLED
 
     def run(self) -> None:
         """Starts pyglet's event loop. Blocks until window is closed."""
