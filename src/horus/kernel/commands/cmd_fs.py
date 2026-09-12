@@ -270,7 +270,7 @@ def cd(ctx, argv: list[str]) -> None:
         ctx.write_line(e.message or e.usage)
         return
 
-    if ctx.fs.exists(ctx.resolve_path("/".join(args.path))):  # Check if the path exists
+    if ctx.fs.exists(ctx.resolve_path("/".join(args.path))) and ctx.fs.get_file_type(ctx.resolve_path("/".join(args.path))) == ".dir":  # Check if the path exists and is a directory
         ctx.cwd = ctx.resolve_path("/".join(args.path)) if args.path else ctx.cwd
     else:
         ctx.write_line(f"cd: No such file or directory: {'/'.join(args.path)}")

@@ -8,9 +8,11 @@ from horus.paths import VFS_SEED_DIR
 # must already exist by the time _seed_text_files() runs.
 _TEXT_FILE_SEEDS: list[tuple[str, str]] = [
     ("readme.txt", "/home/root/readme.txt"),
-    ("poem.txt", "/home/root/poem.txt"),
-    ("audio.wav", "/home/root/audio.wav"),
-    ("video.mp4", "/home/root/video.mp4")
+    ("poem.txt", "/home/root/poems/poem.txt"),
+    ("solstice.txt", "/home/root/poems/solstice.txt"),
+    ("ozymandias.txt", "/home/root/poems/ozymandias.txt"),
+    ("audio.wav", "/home/root/media/audio.wav"),
+    ("video.mp4", "/home/root/media/video.mp4"),
 ]
 
 
@@ -30,4 +32,6 @@ def seed_minimal(fs: VFS) -> None:
     fs.mkdir("/home/root", user="root")
     fs.mkdir("/home/tmp", user="root")
     fs.mkdir("/home/logs", user="root")
+    fs.mkdir("/home/root/poems", user="root")
+    fs.mkdir("/home/root/media", user="root")
     _seed_text_files(fs)
