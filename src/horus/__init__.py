@@ -82,6 +82,7 @@ def main() -> None:
                                   total_cpu_mhz=hardware.total_cpu_mhz())
     seed_processes(process_table)
     process_table.start_fluctuating()
+    hardware.start_power_monitoring(process_table, bus)
     register_system_reactions(bus, screens, window, sounds, window.buffer)
 
     context = Context(

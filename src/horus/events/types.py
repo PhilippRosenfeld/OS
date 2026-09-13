@@ -46,3 +46,12 @@ class ProcessKilledEvent(Event):
                              # subscribers use this to react to a system-wide
                              # crash regardless of what killed it -- see
                              # processes.system_reactions
+
+@dataclass(frozen=True)
+class PowerUsageCheckedEvent(Event):
+    """Published every tick of HardwareSpec.start_power_monitoring(), not
+    just when crossing the PSU's budget -- subscribers always see current
+    state instead of only breach edges."""
+    total_power_usage: float
+    psu_output_watts: float
+    over_budget: bool
