@@ -95,7 +95,7 @@ def _run_with_progress_bar(ctx, sound_name: str, on_complete, interval: float) -
 
 _FLAG_ALIASES = {
     "p": "protected", "protected": "protected",
-    "h": "hidden", "hidden": "hidden",
+    "H": "hidden", "hidden": "hidden",  # capital H -- lowercase "-h" is taken by --help
     "i": "immutable", "immutable": "immutable",
 }
 
@@ -103,15 +103,15 @@ _CHATTR_HELP = """usage: chattr <flags> <path>
 
 Toggles protected/hidden/immutable flags on a file or directory.
 Flags are a sign ('+' or '-') followed by either a shorthand letter
-(p, h, i) or the full name, and can be combined:
+(p, H, i) or the full name, and can be combined:
 
   chattr +p secret.txt          protect secret.txt
-  chattr -h notes.txt           unhide notes.txt
+  chattr -H notes.txt           unhide notes.txt
   chattr +pi archive/           protect and make archive/ immutable
   chattr +protected-hidden f    protect and unhide f in one call"""
 
 # One sign followed by either one long name, or a run of one-letter shorthands.
-_FLAG_GROUP = re.compile(r"([+-])(protected|hidden|immutable|[phi]+)")
+_FLAG_GROUP = re.compile(r"([+-])(protected|hidden|immutable|[pHi]+)")
 
 def _parse_flags(flags_str: str) -> dict[str, bool]:
     """Parses strings like '+p+h-i', '+pi-h', or '+protected-hidden' into
@@ -355,7 +355,7 @@ def chattr(ctx, argv: list[str]) -> None:
         return
 
     if not updates:
-        ctx.write_line("chattr: no flags given, e.g. +p, -hidden, +p+h-i")
+        ctx.write_line("chattr: no flags given, e.g. +p, -hidden, +p+H-i")
         return
 
     path = ctx.resolve_path(raw_path)

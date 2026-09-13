@@ -489,6 +489,32 @@ def test_chattr_wrong_argument_count_shows_usage():
     assert "usage: chattr <flags> <path>" in full_text(buffer)
 
 
+def test_chattr_capital_h_toggles_hidden():
+    """Regression test: lowercase '-h' is reserved for --help (see
+    test_chattr_lowercase_h_still_shows_help_instead_of_toggling), so hidden
+    is toggled with capital H instead."""
+    ctx, buffer = make_context(cols=60, rows=10)
+    ctx.fs = InMemoryVFS()
+    ctx.fs.mkdir("/home", user="root")
+    ctx.fs.write_file("/home/notes.txt", "hi", user="root")
+    ctx.cwd = "/home"
+    chattr(ctx, ["+H", "notes.txt"])
+    assert ctx.fs.get_meta("/home/notes.txt").hidden is True
+    chattr(ctx, ["-H", "notes.txt"])
+    assert ctx.fs.get_meta("/home/notes.txt").hidden is False
+
+
+def test_chattr_lowercase_h_still_shows_help_instead_of_toggling():
+    ctx, buffer = make_context(cols=60, rows=15)
+    ctx.fs = InMemoryVFS()
+    ctx.fs.mkdir("/home", user="root")
+    ctx.fs.write_file("/home/notes.txt", "hi", user="root")
+    ctx.cwd = "/home"
+    chattr(ctx, ["-h", "notes.txt"])
+    assert "usage: chattr" in full_text(buffer)
+    assert ctx.fs.get_meta("/home/notes.txt").hidden is False  # untouched, not toggled
+
+
 # --- cat command ---
 
 def test_cat_prints_file_contents():
