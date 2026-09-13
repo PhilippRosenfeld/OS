@@ -15,9 +15,14 @@ def _build_help_parser() -> CommandArgumentParser:
     parser = CommandArgumentParser(prog="help", add_help=True, description="Displays all usable commands")
     return parser
 
+def _build_cls_parser() -> CommandArgumentParser:
+    parser = CommandArgumentParser(prog="cls", add_help=True, description="Clears the screen")
+    return parser
+
 _echo_parser = _build_echo_parser()
 _whoami_parser = _build_whoami_parser()
 _help_parser = _build_help_parser()
+_cls_parser = _build_cls_parser()
 
 
 @command("echo", help_text="Echoes the input text")
@@ -51,3 +56,12 @@ def help(ctx, argv: list[str]) -> None:
     for name in sorted(registry.names()):
         ctx.write_line(f"{name}: {registry.help_text(name)}")
     
+@command("cls", help_text="Clears the screen")
+def cls(ctx, argv: list[str]) -> None:
+    try:
+        _cls_parser.parse_args(argv)  # only used for its --help/error side effect
+    except CommandParseError as e:
+        ctx.write_line(e.message or e.usage)
+        return
+    ctx.screen.clear()
+    ctx.screen.cursor_row = 0

@@ -14,7 +14,7 @@ from horus.kernel.commands.cmd_menu import horus_menu, open_settings_menu
 from horus.kernel.commands.cmd_misc import color, su
 from horus.kernel.commands.cmd_proc import kill, ps, top
 from horus.kernel.commands.cmd_sys import sys as sys_command
-from horus.kernel.commands.cmd_text import echo
+from horus.kernel.commands.cmd_text import cls, echo
 from horus.kernel.kernel import Kernel
 from horus.kernel.registry import Registry
 from horus.processes.process import process as Process
@@ -183,6 +183,47 @@ def test_echo_help_flag_reports_parse_error_without_raising():
     ctx, buffer = make_context()
     echo(ctx, ["--help"])  # should not raise, writes usage/help instead
     assert row_text(buffer, 0).strip() != ""
+
+
+# --- cls command ---
+
+def test_cls_clears_the_screen():
+    ctx, buffer = make_context()
+    echo(ctx, ["hello", "world"])
+    assert row_text(buffer, 0).strip() != ""
+    cls(ctx, [])
+    assert full_text(buffer).strip() == ""
+
+
+def test_cls_resets_the_cursor_to_the_top():
+    ctx, buffer = make_context(rows=5)
+    echo(ctx, ["one"])
+    echo(ctx, ["two"])
+    echo(ctx, ["three"])
+    assert buffer.cursor_row != 0
+    cls(ctx, [])
+    assert buffer.cursor_row == 0
+
+
+def test_cls_writes_after_clearing_start_at_the_top():
+    ctx, buffer = make_context(rows=5)
+    echo(ctx, ["one"])
+    echo(ctx, ["two"])
+    cls(ctx, [])
+    echo(ctx, ["fresh"])
+    assert row_text(buffer, 0).startswith("fresh")
+
+
+def test_cls_help_flag_reports_parse_error_without_raising():
+    ctx, buffer = make_context(cols=60, rows=15)  # tall enough that the multi-line help doesn't scroll row 0 out of view
+    echo(ctx, ["hello"])
+    cls(ctx, ["--help"])  # should not raise, and must not clear the screen
+    assert "hello" in row_text(buffer, 0)
+
+
+def test_cls_with_no_arguments_does_not_raise():
+    ctx, buffer = make_context()
+    cls(ctx, [])  # should not raise even on an already-blank screen
 
 
 # --- color command ---
