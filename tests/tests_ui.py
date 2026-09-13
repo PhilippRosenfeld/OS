@@ -910,16 +910,21 @@ def make_hardware(cols=40, rows=20):
     cpu = make_tile("CPU", "Core i9", "3.2 GHz")
     ram = make_tile("RAM", "16 GB")
     storage = make_tile("Storage", "500 GB SSD")
-    external = make_tile("External", "USB Drive")
-    screen = HardwareScreen(buffer, "Hardware", overview, cpu, ram, storage, external, manager)
+    external = make_tile("External")
+    power = make_tile("Power", "Horus PSU", "500 W")
+    cooling = make_tile("Cooling", "Water", "99%")
+    network = make_tile("Network", "eth0: 10.0.0.2")
+    screen = HardwareScreen(buffer, "Hardware", overview, cpu, ram, storage, external, power, cooling, network, manager)
     manager.push(screen)
     return screen, buffer, manager, selections
 
 
-def test_hardware_screen_lays_out_the_left_column_and_the_external_tile():
+def test_hardware_screen_lays_out_the_external_tile_with_nested_subtiles():
     """40x20 buffer: header is 4 rows, leaving a 16-row body. The left column
-    (cols 0-19) stacks CPU(6)/RAM(5)/Storage(5) -- the //3 remainder goes to
-    CPU -- while External (cols 20-39) spans the full 16-row body. See
+    (cols 0-19) stacks CPU(6)/RAM(5)/Storage(5) directly. The right column
+    (cols 20-39) is one outer 'External' tile spanning the full height, with
+    Power/Cooling/Network nested inside its interior (inset by 1 cell on
+    every side), themselves split 5/5/4 across the 14-row interior. See
     HardwareScreen._render()."""
     screen, buffer, manager, selections = make_hardware()
 
@@ -940,9 +945,22 @@ def test_hardware_screen_lays_out_the_left_column_and_the_external_tile():
     assert "500 GB SSD" in row_text(buffer, 17)[:20]
     assert row_text(buffer, 19)[:20] == "+" + "-" * 18 + "+"  # Storage's bottom border
 
+    # External: one outer box spanning the whole right column...
     assert row_text(buffer, 4)[20:].startswith("+ External ")
-    assert "USB Drive" in row_text(buffer, 6)[20:]
-    assert row_text(buffer, 19)[20:] == "+" + "-" * 18 + "+"  # External spans the whole body height
+    assert row_text(buffer, 19)[20:] == "+" + "-" * 18 + "+"
+
+    # ...with Power/Cooling/Network nested inside it, inset by 1 cell.
+    assert row_text(buffer, 5)[21:].startswith("+ Power ")
+    assert "Horus PSU" in row_text(buffer, 7)[21:]
+    assert row_text(buffer, 9)[21:39] == "+" + "-" * 16 + "+"  # Power's own bottom border
+
+    assert row_text(buffer, 10)[21:].startswith("+ Cooling ")
+    assert "Water" in row_text(buffer, 12)[21:]
+    assert row_text(buffer, 14)[21:39] == "+" + "-" * 16 + "+"  # Cooling's own bottom border
+
+    assert row_text(buffer, 15)[21:].startswith("+ Network ")
+    assert "eth0: 10.0.0.2" in row_text(buffer, 17)[21:]
+    assert row_text(buffer, 18)[21:39] == "+" + "-" * 16 + "+"  # Network's own bottom border
 
 
 def test_hardware_screen_cpu_tile_is_selected_first():
@@ -951,16 +969,26 @@ def test_hardware_screen_cpu_tile_is_selected_first():
     assert cpu_corner.fg_color == buffer.default_bg
     assert cpu_corner.bg_color == buffer.default_fg
 
-    external_corner = buffer.get_cell(20, 4)  # not selected
+    power_corner = buffer.get_cell(21, 5)  # nested Power tile, not selected
+    assert power_corner.fg_color == buffer.default_fg
+    assert power_corner.bg_color == buffer.default_bg
+
+
+def test_hardware_screen_external_tile_itself_is_never_selected():
+    """Only its nested sub-tiles (Power/Cooling/Network) are selectable --
+    the outer External box is just a grouping container."""
+    screen, buffer, manager, selections = make_hardware()
+    screen.handle_motion(key.MOTION_RIGHT)
+    external_corner = buffer.get_cell(20, 4)
     assert external_corner.fg_color == buffer.default_fg
     assert external_corner.bg_color == buffer.default_bg
 
 
-def test_hardware_screen_right_moves_selection_to_external():
+def test_hardware_screen_right_moves_selection_to_the_right_column():
     screen, buffer, manager, selections = make_hardware()
     screen.handle_motion(key.MOTION_RIGHT)
     assert screen._selected_col == 1
-    assert buffer.get_cell(20, 4).fg_color == buffer.default_bg  # External's corner now highlighted
+    assert buffer.get_cell(21, 5).fg_color == buffer.default_bg  # Power's corner now highlighted
 
 
 def test_hardware_screen_down_moves_through_the_left_column():
@@ -971,22 +999,21 @@ def test_hardware_screen_down_moves_through_the_left_column():
     assert (screen._selected_col, screen._selected_row) == (0, 2)  # Storage
 
 
+def test_hardware_screen_down_moves_through_the_right_column():
+    screen, buffer, manager, selections = make_hardware()
+    screen.handle_motion(key.MOTION_RIGHT)  # PSU
+    screen.handle_motion(key.MOTION_DOWN)
+    assert (screen._selected_col, screen._selected_row) == (1, 1)  # Cooling
+    screen.handle_motion(key.MOTION_DOWN)
+    assert (screen._selected_col, screen._selected_row) == (1, 2)  # Network
+
+
 def test_hardware_screen_leaving_and_returning_to_the_left_column_keeps_its_row():
     screen, buffer, manager, selections = make_hardware()
     screen.handle_motion(key.MOTION_DOWN)  # RAM (row 1)
-    screen.handle_motion(key.MOTION_RIGHT)  # External
+    screen.handle_motion(key.MOTION_RIGHT)  # right column, same row -> Cooling
     screen.handle_motion(key.MOTION_LEFT)  # back to the left column
     assert (screen._selected_col, screen._selected_row) == (0, 1)  # still RAM, not reset to CPU
-
-
-def test_hardware_screen_up_down_have_no_effect_while_external_is_selected():
-    """There's only one tile on the right today -- Up/Down there are a no-op
-    until it grows sub-tiles (Energy, Cooling, ...)."""
-    screen, buffer, manager, selections = make_hardware()
-    screen.handle_motion(key.MOTION_RIGHT)
-    screen.handle_motion(key.MOTION_DOWN)
-    screen.handle_motion(key.MOTION_UP)
-    assert screen._selected_col == 1
 
 
 def test_hardware_screen_up_down_wrap_around_the_left_column():
@@ -997,12 +1024,21 @@ def test_hardware_screen_up_down_wrap_around_the_left_column():
     assert screen._selected_row == 0
 
 
+def test_hardware_screen_up_down_wrap_around_the_right_column():
+    screen, buffer, manager, selections = make_hardware()
+    screen.handle_motion(key.MOTION_RIGHT)
+    screen.handle_motion(key.MOTION_UP)  # 0 -> wraps to 2 (Network)
+    assert screen._selected_row == 2
+    screen.handle_motion(key.MOTION_DOWN)  # 2 -> wraps to 0 (PSU)
+    assert screen._selected_row == 0
+
+
 def test_hardware_screen_enter_activates_the_selected_tile():
     screen, buffer, manager, selections = make_hardware()
-    screen.handle_motion(key.MOTION_DOWN)
-    screen.handle_motion(key.MOTION_RIGHT)  # selects "External"
+    screen.handle_motion(key.MOTION_DOWN)  # RAM row (row 1)
+    screen.handle_motion(key.MOTION_RIGHT)  # same row, right column -> Cooling
     screen.handle_enter()
-    assert selections == ["External"]
+    assert selections == ["Cooling"]
 
 
 def test_hardware_screen_escape_pops_itself_from_the_manager():
@@ -1017,7 +1053,7 @@ def test_hardware_screen_disables_cursor_and_restores_it_on_pop():
     buffer.cursor_enabled = True
     manager = ScreenManager()
     tile = HardwareTile("X")
-    screen = HardwareScreen(buffer, "Hardware", tile, tile, tile, tile, tile, manager)
+    screen = HardwareScreen(buffer, "Hardware", tile, tile, tile, tile, tile, tile, tile, tile, manager)
     manager.push(screen)
     assert buffer.cursor_enabled is False
     manager.pop()

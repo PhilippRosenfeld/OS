@@ -8,7 +8,8 @@ from horus.ui.screen_manager import ScreenManager
 
 key = pyglet.window.key
 
-_LEFT_TILE_COUNT = 3  # CPU, RAM, Storage
+_LEFT_TILE_COUNT = 3   # CPU, RAM, Storage
+_RIGHT_TILE_COUNT = 3  # Power, Cooling, Network -- nested inside the External tile
 
 
 class HardwareTile:
@@ -26,23 +27,25 @@ class HardwareTile:
 class HardwareScreen(Screen):
     """Overview of the simulated system's hardware: a full-width summary bar
     across the top, then two columns below it -- CPU/RAM/Storage stacked on
-    the left, and one tall External tile on the right spanning the whole
-    column (later home to sub-tiles like Energy/Cooling, once those exist).
-    Up/Down move the selection within the left column, Left/Right jump
+    the left, and one External tile on the right spanning the whole column,
+    with Power/Cooling/Network nested inside it as smaller sub-tiles. Up/Down
+    move the selection within the current column (the outer External tile
+    itself isn't selectable, only its nested sub-tiles are), Left/Right jump
     between the two columns, Enter drills into the selected tile (see
     HardwareTile.on_select), Escape goes back to whatever screen was active
     before."""
 
     def __init__(self, buffer: ScreenBuffer, title: str, overview: HardwareTile, cpu: HardwareTile,
-                 ram: HardwareTile, storage: HardwareTile, external: HardwareTile, screens: ScreenManager) -> None:
+                 ram: HardwareTile, storage: HardwareTile, external: HardwareTile, power: HardwareTile,
+                 cooling: HardwareTile, network: HardwareTile, screens: ScreenManager) -> None:
         self._buffer = buffer
         self._title = title
         self._overview = overview
-        self._left_tiles = [cpu, ram, storage]
         self._external = external
+        self._columns = [[cpu, ram, storage], [power, cooling, network]]
         self._screens = screens
-        self._selected_col = 0  # 0 = left column, 1 = external
-        self._selected_row = 0  # index into _left_tiles; irrelevant while col == 1
+        self._selected_col = 0  # 0 = left column, 1 = External's nested sub-tiles
+        self._selected_row = 0  # index into the selected column's tiles
         self._saved_screen: dict | None = None
 
     def on_push(self) -> None:
@@ -58,7 +61,10 @@ class HardwareScreen(Screen):
         self._buffer.restore(self._saved_screen)
 
     def _selected_tile(self) -> HardwareTile:
-        return self._external if self._selected_col == 1 else self._left_tiles[self._selected_row]
+        return self._columns[self._selected_col][self._selected_row]
+
+    def _tile_count(self, col_index: int) -> int:
+        return _LEFT_TILE_COUNT if col_index == 0 else _RIGHT_TILE_COUNT
 
     def _render(self) -> None:
         # clear() also resets _writes -- see SettingScreen._render() for why
@@ -70,22 +76,33 @@ class HardwareScreen(Screen):
         header_height = min(rows, len(self._overview.lines) + 3)
         body_height = max(0, rows - header_height)
         col_width = cols // 2
+        external_width = cols - col_width
 
         self._draw_tile(0, 0, cols, header_height, self._overview, selected=False)
 
-        # Left column: CPU/RAM/Storage stacked, splitting the remaining
-        # height as evenly as three rows allow -- any remainder goes to the
-        # earlier tiles so the three heights never differ by more than 1.
-        base_height = body_height // _LEFT_TILE_COUNT
-        extra = body_height % _LEFT_TILE_COUNT
-        y = header_height
-        for i, tile in enumerate(self._left_tiles):
-            height = base_height + (1 if i < extra else 0)
-            self._draw_tile(0, y, col_width, height, tile, self._selected_col == 0 and self._selected_row == i)
-            y += height
+        # Left column: CPU/RAM/Storage stacked directly across the full column.
+        self._draw_column(0, header_height, col_width, body_height, col_index=0)
 
-        # Right column: one tile spanning the whole body height.
-        self._draw_tile(col_width, header_height, cols - col_width, body_height, self._external, self._selected_col == 1)
+        # Right column: the External tile spans the whole column; Power/
+        # Cooling/Network are drawn nested inside its interior (inset by 1
+        # cell on every side for External's own border).
+        self._draw_tile(col_width, header_height, external_width, body_height, self._external, selected=False)
+        self._draw_column(col_width + 1, header_height + 1, max(0, external_width - 2), max(0, body_height - 2), col_index=1)
+
+    def _draw_column(self, x: int, y: int, width: int, height: int, col_index: int) -> None:
+        """Stacks a column's tiles top to bottom, splitting the available
+        height as evenly as they allow -- any remainder goes to the earlier
+        tiles so heights never differ by more than 1 row."""
+        tiles = self._columns[col_index]
+        tile_count = self._tile_count(col_index)
+        base_height = height // tile_count
+        extra = height % tile_count
+        row_y = y
+        for row_index, tile in enumerate(tiles):
+            tile_height = base_height + (1 if row_index < extra else 0)
+            selected = self._selected_col == col_index and self._selected_row == row_index
+            self._draw_tile(x, row_y, width, tile_height, tile, selected)
+            row_y += tile_height
 
     def _draw_tile(self, x: int, y: int, width: int, height: int, tile: HardwareTile, selected: bool) -> None:
         """Draws a bordered box from (x, y) spanning width x height, with the
@@ -121,12 +138,11 @@ class HardwareScreen(Screen):
         pass
 
     def handle_motion(self, motion: int) -> None:
+        tile_count = self._tile_count(self._selected_col)
         if motion == key.MOTION_UP:
-            if self._selected_col == 0:
-                self._selected_row = (self._selected_row - 1) % _LEFT_TILE_COUNT
+            self._selected_row = (self._selected_row - 1) % tile_count
         elif motion == key.MOTION_DOWN:
-            if self._selected_col == 0:
-                self._selected_row = (self._selected_row + 1) % _LEFT_TILE_COUNT
+            self._selected_row = (self._selected_row + 1) % tile_count
         elif motion == key.MOTION_LEFT:
             self._selected_col = 0
         elif motion == key.MOTION_RIGHT:
