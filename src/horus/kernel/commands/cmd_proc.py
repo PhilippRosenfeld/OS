@@ -70,7 +70,7 @@ def ps(ctx, argv: list[str]) -> None:
 
     _render_top(ctx)
     
-@command("kill", help_text="Kill a process by PID")
+@command("kill", help_text="Kill a process")
 def kill(ctx, argv: list[str]) -> None:
     try:
         args = _kill_parser.parse_args(argv)

@@ -136,7 +136,7 @@ def _build_ls_parser() -> CommandArgumentParser:
     parser.add_argument("-a", "--all", action="store_true", help="Show all files, including directory entries and hidden files")
     parser.add_argument("-m", "--meta", action="store_true", help="Shows the metadata")
     parser.add_argument("-r", "--recursive", action="store_true", help="Recursively displays sub-directories.")
-    parser.add_argument("-R", "--tree", action="store_true", help="Show subdirectories treelike, indented")
+    parser.add_argument("-R", "--tree", action="store_true", help="Show subdirectories treelike, indented. Ignores -m argument.")
     return parser
 
 def _build_cd_parser() -> CommandArgumentParser:

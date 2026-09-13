@@ -20,8 +20,11 @@ void main() {
 
     vec4 color = texture(screen_texture, warped_uv);
 
-    // scanlines: darken alternating rows at native screen resolution
-    float scanline = sin(warped_uv.y * resolution.y * 3.14159265) * 1.5 + 0.5;
+    // scanlines: darken alternating bands, SCANLINE_WIDTH pixels each --
+    // divides the per-pixel frequency down so every band spans that many
+    // pixels instead of just one.
+    const float SCANLINE_WIDTH = 2.0;
+    float scanline = sin(warped_uv.y * resolution.y * 3.14159265 / SCANLINE_WIDTH) * 1.5 + 0.5;
     color.rgb *= mix(0.75, 1.0, scanline);
 
     // vignette: darken toward the corners for a rounded-glass look
