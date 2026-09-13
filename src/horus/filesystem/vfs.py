@@ -9,7 +9,7 @@ class VFS(ABC):
     Kernel only ever depend on this — never on a concrete backend."""
 
     @abstractmethod
-    def resolve_path(self, cwd: str, path: str) -> str:
+    def resolve_path(self, path: str, cwd: str) -> str:
         """Resolve a possibly-relative path against cwd into an absolute,
         normalized path (handles '.', '..', '~', leading '/')."""
         pass
