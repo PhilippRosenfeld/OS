@@ -3,7 +3,7 @@ happen no matter *what* killed a process."""
 
 from horus.events.bus import EventBus
 from horus.events.types import ProcessKilledEvent
-from horus.ui.crash_screen import CrashScreen
+from horus.ui.screens.crash_screen import CrashScreen
 
 
 def register_system_reactions(bus: EventBus, screens, window, sounds, buffer) -> None:

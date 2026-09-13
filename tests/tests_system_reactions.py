@@ -4,8 +4,8 @@ from horus.display.screen_buffer import ScreenBuffer
 from horus.events.bus import EventBus
 from horus.events.types import ProcessKilledEvent, ProcessStartedEvent
 from horus.processes.system_reactions import register_system_reactions
-from horus.ui.crash_screen import CrashScreen
 from horus.ui.screen_manager import ScreenManager
+from horus.ui.screens.crash_screen import CrashScreen
 
 
 class FakeSounds:

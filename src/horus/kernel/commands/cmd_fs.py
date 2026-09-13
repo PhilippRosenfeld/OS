@@ -13,7 +13,7 @@ from horus.filesystem.permissions import AccessDeniedError
 from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
 from horus.kernel.registry import command
 from horus.processes.process import process as Process
-from horus.ui.loading_screen import LoadingScreen
+from horus.ui.screens.loading_screen import LoadingScreen
 
 logger = logging.getLogger(__name__)
 

@@ -23,12 +23,12 @@ from horus.session.user import UserRegistry
 from horus.shell.completion import complete_path
 from horus.shell.input_handler import InputHandler
 from horus.story.progress import BootProgress
-from horus.ui.boot_screen import BootFrame, BootScreen
-from horus.ui.logo_screen import LogoScreen
-from horus.ui.main_menu_screen import MainMenuScreen
-from horus.ui.menu_screen import MenuOption
 from horus.ui.screen_manager import ScreenManager
-from horus.ui.shell_screen import ShellScreen
+from horus.ui.screens.boot_screen import BootFrame, BootScreen
+from horus.ui.screens.logo_screen import LogoScreen
+from horus.ui.screens.main_menu_screen import MainMenuScreen
+from horus.ui.screens.menu_screen import MenuOption
+from horus.ui.screens.shell_screen import ShellScreen
 from horus.utils.config_manager import load_config
 from horus.utils.logging_setup import setup_logging
 
@@ -96,7 +96,8 @@ def main() -> None:
         window=window,
         users=users,
         kernel=kernel,
-        process_table=process_table
+        process_table=process_table,
+        hardware=hardware
     )
 
     def on_submit(line: str) -> None:

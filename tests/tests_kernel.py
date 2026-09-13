@@ -8,10 +8,12 @@ from horus.display.screen_buffer import ScreenBuffer
 from horus.events.bus import EventBus
 from horus.events.types import CommandExecutedEvent, ProcessKilledEvent, ProcessStartedEvent
 from horus.filesystem.backend.memory import InMemoryVFS
+from horus.hardware.spec import HardwareSpec
 from horus.kernel.commands.cmd_fs import cat, chattr, decrypt, encrypt, ls
 from horus.kernel.commands.cmd_menu import horus_menu, open_settings_menu
 from horus.kernel.commands.cmd_misc import color, su
 from horus.kernel.commands.cmd_proc import kill, ps, top
+from horus.kernel.commands.cmd_sys import sys as sys_command
 from horus.kernel.commands.cmd_text import echo
 from horus.kernel.kernel import Kernel
 from horus.kernel.registry import Registry
@@ -23,11 +25,12 @@ from horus.session.history import CommandHistory
 from horus.session.seed import seed_users
 from horus.session.user import UserRegistry
 from horus.shell.input_handler import InputHandler
-from horus.ui.crash_screen import CrashScreen
-from horus.ui.menu_screen import MenuScreen
 from horus.ui.screen_manager import ScreenManager
-from horus.ui.settings_screen import SettingScreen
-from horus.ui.top_screen import TopScreen
+from horus.ui.screens.crash_screen import CrashScreen
+from horus.ui.screens.hardware_screen import HardwareScreen
+from horus.ui.screens.menu_screen import MenuScreen
+from horus.ui.screens.settings_screen import SettingScreen
+from horus.ui.screens.top_screen import TopScreen
 
 
 def make_context(cols=20, rows=5):
@@ -1183,3 +1186,44 @@ def test_kill_non_critical_process_never_asks_for_confirmation():
     assert table.get_process(other.pid) is None
     assert ctx.input_handler._pending_submit is None
     assert not isinstance(ctx.screens.active, CrashScreen)
+
+
+# --- sys command ---
+
+def make_sys_context(cols=80, rows=24):
+    buffer = ScreenBuffer(cols, rows)
+    screens = ScreenManager()
+    hardware = HardwareSpec()
+    table = ProcessTable(total_memory_kb=hardware.total_memory_kb(), total_cpu_mhz=hardware.total_cpu_mhz())
+    ctx = Context(session_id="s", user="root", cwd="/", screen=buffer, screens=screens,
+                  process_table=table, hardware=hardware)
+    return ctx, buffer, screens, table, hardware
+
+
+def test_sys_pushes_a_hardware_screen():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, [])
+    assert isinstance(screens.active, HardwareScreen)
+
+
+def test_sys_overview_tile_reports_the_combined_system_summary():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    table.add_process(Process(name="a", pid=0, owner="root", cpu_mhz=100.0, mem_kb=2048))
+    sys_command(ctx, [])
+    full = "".join(
+        "".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows)
+    )
+    assert "System:" in full
+    assert hardware.cpu_name in full
+
+
+def test_sys_without_a_hardware_spec_falls_back_to_defaults():
+    """ctx.hardware is None outside the real app (e.g. a minimal test
+    context) -- the screen must still render using HardwareSpec's own
+    defaults instead of raising."""
+    buffer = ScreenBuffer(80, 24)
+    screens = ScreenManager()
+    ctx = Context(session_id="s", user="root", cwd="/", screen=buffer, screens=screens,
+                  process_table=ProcessTable())
+    sys_command(ctx, [])  # should not raise
+    assert isinstance(screens.active, HardwareScreen)

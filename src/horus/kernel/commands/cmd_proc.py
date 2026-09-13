@@ -8,7 +8,7 @@ from horus.processes.process_view import (
     format_uptime,
     sort_processes,
 )
-from horus.ui.top_screen import TopScreen
+from horus.ui.screens.top_screen import TopScreen
 
 
 def _render_top(ctx, sort_by: str | None = None) -> None:

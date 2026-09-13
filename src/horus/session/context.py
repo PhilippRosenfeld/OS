@@ -5,6 +5,7 @@ from horus.display.screen_buffer import ScreenBuffer
 from horus.display.window import DisplayWindow
 from horus.events.bus import EventBus
 from horus.filesystem.vfs import VFS
+from horus.hardware.spec import HardwareSpec
 from horus.processes.processTable import ProcessTable
 from horus.session.user import UserRole
 from horus.ui.screen_manager import ScreenManager
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
     from horus.kernel.kernel import Kernel
     from horus.session.user import UserRegistry
     from horus.shell.input_handler import InputHandler
-    from horus.ui.main_menu_screen import MainMenuScreen
+    from horus.ui.screens.main_menu_screen import MainMenuScreen
 
 
 @dataclass
@@ -43,6 +44,7 @@ class Context:
     input_handler: "InputHandler" = None
     main_menu: "MainMenuScreen" = None
     process_table: "ProcessTable" = None
+    hardware: "HardwareSpec" = None
 
 
     def __post_init__(self):

@@ -7,18 +7,19 @@ from horus.processes.process import process as Process
 from horus.processes.processTable import ProcessTable
 from horus.session.history import CommandHistory
 from horus.shell.input_handler import InputHandler
-from horus.ui.boot_screen import BootFrame, BootScreen
-from horus.ui.crash_screen import CrashScreen
-from horus.ui.loading_screen import LoadingScreen
-from horus.ui.logo_screen import LogoScreen
-from horus.ui.main_menu_screen import MainMenuScreen
-from horus.ui.main_menu_screen import MenuOption as MainMenuOption
-from horus.ui.menu_screen import MenuOption, MenuScreen
 from horus.ui.screen import Screen
 from horus.ui.screen_manager import ScreenManager
-from horus.ui.settings_screen import SettingOption, SettingScreen
-from horus.ui.shell_screen import ShellScreen
-from horus.ui.top_screen import TopScreen
+from horus.ui.screens.boot_screen import BootFrame, BootScreen
+from horus.ui.screens.crash_screen import CrashScreen
+from horus.ui.screens.hardware_screen import HardwareScreen, HardwareTile
+from horus.ui.screens.loading_screen import LoadingScreen
+from horus.ui.screens.logo_screen import LogoScreen
+from horus.ui.screens.main_menu_screen import MainMenuScreen
+from horus.ui.screens.main_menu_screen import MenuOption as MainMenuOption
+from horus.ui.screens.menu_screen import MenuOption, MenuScreen
+from horus.ui.screens.settings_screen import SettingOption, SettingScreen
+from horus.ui.screens.shell_screen import ShellScreen
+from horus.ui.screens.top_screen import TopScreen
 
 key = pyglet.window.key
 
@@ -893,6 +894,134 @@ def test_settings_resize_mid_session_does_not_leave_artifacts():
     assert "Window Size" in full
     for row in range(buffer.rows):
         assert "900" not in row_text(buffer, row)  # no wrapped/stale tail from the wider render
+
+
+# --- HardwareScreen ---
+
+def make_hardware(cols=40, rows=20):
+    buffer = ScreenBuffer(cols, rows)
+    manager = ScreenManager()
+    selections = []
+
+    def make_tile(label, *lines):
+        return HardwareTile(label, list(lines), on_select=lambda: selections.append(label))
+
+    overview = make_tile("Overview", "CPU 5%  RAM 10%")
+    cpu = make_tile("CPU", "Core i9", "3.2 GHz")
+    ram = make_tile("RAM", "16 GB")
+    storage = make_tile("Storage", "500 GB SSD")
+    external = make_tile("External", "USB Drive")
+    screen = HardwareScreen(buffer, "Hardware", overview, cpu, ram, storage, external, manager)
+    manager.push(screen)
+    return screen, buffer, manager, selections
+
+
+def test_hardware_screen_lays_out_the_left_column_and_the_external_tile():
+    """40x20 buffer: header is 4 rows, leaving a 16-row body. The left column
+    (cols 0-19) stacks CPU(6)/RAM(5)/Storage(5) -- the //3 remainder goes to
+    CPU -- while External (cols 20-39) spans the full 16-row body. See
+    HardwareScreen._render()."""
+    screen, buffer, manager, selections = make_hardware()
+
+    assert row_text(buffer, 0).startswith("+ Overview ")  # label embedded in the top border
+    assert "CPU 5%  RAM 10%" in row_text(buffer, 2)
+    assert row_text(buffer, 3) == "+" + "-" * 38 + "+"  # bottom border has no label, stays plain
+
+    assert row_text(buffer, 4)[:20].startswith("+ CPU ")
+    assert "Core i9" in row_text(buffer, 6)[:20]
+    assert "3.2 GHz" in row_text(buffer, 7)[:20]
+    assert row_text(buffer, 9)[:20] == "+" + "-" * 18 + "+"  # CPU's own bottom border, 6 rows tall
+
+    assert row_text(buffer, 10)[:20].startswith("+ RAM ")
+    assert "16 GB" in row_text(buffer, 12)[:20]
+    assert row_text(buffer, 14)[:20] == "+" + "-" * 18 + "+"  # RAM's bottom border, 5 rows tall
+
+    assert row_text(buffer, 15)[:20].startswith("+ Storage ")
+    assert "500 GB SSD" in row_text(buffer, 17)[:20]
+    assert row_text(buffer, 19)[:20] == "+" + "-" * 18 + "+"  # Storage's bottom border
+
+    assert row_text(buffer, 4)[20:].startswith("+ External ")
+    assert "USB Drive" in row_text(buffer, 6)[20:]
+    assert row_text(buffer, 19)[20:] == "+" + "-" * 18 + "+"  # External spans the whole body height
+
+
+def test_hardware_screen_cpu_tile_is_selected_first():
+    screen, buffer, manager, selections = make_hardware()
+    cpu_corner = buffer.get_cell(0, 4)
+    assert cpu_corner.fg_color == buffer.default_bg
+    assert cpu_corner.bg_color == buffer.default_fg
+
+    external_corner = buffer.get_cell(20, 4)  # not selected
+    assert external_corner.fg_color == buffer.default_fg
+    assert external_corner.bg_color == buffer.default_bg
+
+
+def test_hardware_screen_right_moves_selection_to_external():
+    screen, buffer, manager, selections = make_hardware()
+    screen.handle_motion(key.MOTION_RIGHT)
+    assert screen._selected_col == 1
+    assert buffer.get_cell(20, 4).fg_color == buffer.default_bg  # External's corner now highlighted
+
+
+def test_hardware_screen_down_moves_through_the_left_column():
+    screen, buffer, manager, selections = make_hardware()
+    screen.handle_motion(key.MOTION_DOWN)
+    assert (screen._selected_col, screen._selected_row) == (0, 1)  # RAM
+    screen.handle_motion(key.MOTION_DOWN)
+    assert (screen._selected_col, screen._selected_row) == (0, 2)  # Storage
+
+
+def test_hardware_screen_leaving_and_returning_to_the_left_column_keeps_its_row():
+    screen, buffer, manager, selections = make_hardware()
+    screen.handle_motion(key.MOTION_DOWN)  # RAM (row 1)
+    screen.handle_motion(key.MOTION_RIGHT)  # External
+    screen.handle_motion(key.MOTION_LEFT)  # back to the left column
+    assert (screen._selected_col, screen._selected_row) == (0, 1)  # still RAM, not reset to CPU
+
+
+def test_hardware_screen_up_down_have_no_effect_while_external_is_selected():
+    """There's only one tile on the right today -- Up/Down there are a no-op
+    until it grows sub-tiles (Energy, Cooling, ...)."""
+    screen, buffer, manager, selections = make_hardware()
+    screen.handle_motion(key.MOTION_RIGHT)
+    screen.handle_motion(key.MOTION_DOWN)
+    screen.handle_motion(key.MOTION_UP)
+    assert screen._selected_col == 1
+
+
+def test_hardware_screen_up_down_wrap_around_the_left_column():
+    screen, buffer, manager, selections = make_hardware()
+    screen.handle_motion(key.MOTION_UP)  # 0 -> wraps to 2 (Storage)
+    assert screen._selected_row == 2
+    screen.handle_motion(key.MOTION_DOWN)  # 2 -> wraps to 0 (CPU)
+    assert screen._selected_row == 0
+
+
+def test_hardware_screen_enter_activates_the_selected_tile():
+    screen, buffer, manager, selections = make_hardware()
+    screen.handle_motion(key.MOTION_DOWN)
+    screen.handle_motion(key.MOTION_RIGHT)  # selects "External"
+    screen.handle_enter()
+    assert selections == ["External"]
+
+
+def test_hardware_screen_escape_pops_itself_from_the_manager():
+    screen, buffer, manager, selections = make_hardware()
+    assert manager.active is screen
+    screen.handle_key(key.ESCAPE, 0)
+    assert manager.active is None
+
+
+def test_hardware_screen_disables_cursor_and_restores_it_on_pop():
+    buffer = ScreenBuffer(40, 20)
+    buffer.cursor_enabled = True
+    manager = ScreenManager()
+    tile = HardwareTile("X")
+    screen = HardwareScreen(buffer, "Hardware", tile, tile, tile, tile, tile, manager)
+    manager.push(screen)
+    assert buffer.cursor_enabled is False
+    manager.pop()
+    assert buffer.cursor_enabled is True
 
 
 # --- BootScreen / LogoScreen sound hooks ---
