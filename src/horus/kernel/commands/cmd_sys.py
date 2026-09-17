@@ -58,8 +58,8 @@ def _build_hardware_screen(ctx) -> HardwareScreen:
         cooling_system = hardware.motherboard.cooling_system
         cooling.lines = [
             cooling_system.name,
-            f"{cooling_system.coolant_type}: {cooling_system.coolant_amount}%",
-            f"Draw: {cooling_system.power_usage_watts} W",
+            f"{cooling_system.coolant_type.value}: {cooling_system.coolant_amount}%",
+            f"Draw: {cooling_system.calc_current_power_usage():.0f} W",
         ]
 
         interfaces = hardware.motherboard.network_interfaces

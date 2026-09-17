@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 from horus.events.bus import EventBus
 from horus.events.types import PowerUsageCheckedEvent
-from horus.hardware.cooling_system import CoolingSystem
+from horus.hardware.cooling_system import CoolantType, CoolingSystem
 from horus.hardware.cpu import Cpu
 from horus.hardware.motherboard import CpuSocket, Motherboard, RamSlots, StorageSlots
 from horus.hardware.network_interface import NetworkInterface
@@ -101,6 +101,65 @@ def test_ram_power_usage_clamps_load_outside_zero_to_one():
     assert ram.calc_current_power_usage() == 2
 
 
+# --- CoolingSystem ---
+
+def test_cooling_system_with_no_coolant_left_cools_nothing():
+    cooling = CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50,
+                             coolant_type=CoolantType.LIQUID_NITROGEN, coolant_amount=0,
+                             base_cooling_modifier=2.0)
+    assert cooling._calculate_cooling_power() == 0.0
+    assert cooling.calc_current_power_usage() == 0.0
+
+
+def test_cooling_system_draw_increases_with_coolant_amount():
+    """More coolant -> more cooling power -> more watts drawn, monotonically."""
+    draws = [
+        CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50,
+                       coolant_type=CoolantType.WATER, coolant_amount=amount).calc_current_power_usage()
+        for amount in (0, 25, 50, 75, 100)
+    ]
+    assert draws == sorted(draws)
+    assert draws[0] == 0.0
+    assert draws[-1] == 50
+
+
+def test_cooling_system_stronger_coolant_type_draws_more_power():
+    """A more effective coolant produces more cooling power for the same
+    amount/modifier -- and, per calc_current_power_usage, that costs more
+    energy to run, not less (until it hits the unit's rated max)."""
+    def draw_for(coolant_type):
+        return CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50,
+                              coolant_type=coolant_type, coolant_amount=50).calc_current_power_usage()
+
+    assert draw_for(CoolantType.AIR) < draw_for(CoolantType.WATER) < draw_for(CoolantType.OIL)
+
+
+def test_cooling_system_draw_is_capped_at_power_usage_watts_max():
+    """A coolant type/modifier combo strong enough to exceed the unit's
+    rated wattage still can't draw more than power_usage_watts_max."""
+    cooling = CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50,
+                             coolant_type=CoolantType.LIQUID_NITROGEN, coolant_amount=100,
+                             base_cooling_modifier=2.0)
+    assert cooling._calculate_cooling_power() > 50  # would exceed the rating uncapped
+    assert cooling.calc_current_power_usage() == 50
+
+
+def test_cooling_system_update_temperature_recomputes_cached_cooling_power():
+    cooling = CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50, coolant_amount=100)
+    cooling.update_temperature(80.0)
+    assert cooling.temperature_celsius == 80.0
+    assert cooling._cooling_power == cooling._calculate_cooling_power()
+
+
+def test_cooling_system_save_then_load_round_trips():
+    cooling = CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50,
+                             coolant_type=CoolantType.LIQUID_NITROGEN, coolant_amount=42,
+                             temperature_celsius=30.0, base_cooling_modifier=1.3)
+    loaded = CoolingSystem.from_dict(cooling.to_dict())
+    assert loaded == cooling
+    assert loaded.coolant_type is CoolantType.LIQUID_NITROGEN
+
+
 # --- HardwareSpec: defaults / flat backward-compatible properties ---
 
 def test_defaults_when_nothing_loaded():
@@ -113,7 +172,7 @@ def test_default_flat_properties_delegate_to_the_installed_components():
     spec = HardwareSpec()
     assert spec.cpu_name == "Coeles X3201"
     assert spec.cpu_mhz == 3200
-    assert spec.memory_kb == "65536K"
+    assert spec.memory_kb == "16384K"
     assert spec.coolant_type == "Water"
     assert spec.coolant_amount == 99
 
@@ -157,8 +216,8 @@ def test_total_memory_kb_sums_every_installed_stick():
 
 
 def test_total_memory_kb_with_default_spec():
-    spec = HardwareSpec()  # two 65536K sticks
-    assert spec.total_memory_kb() == 131072
+    spec = HardwareSpec()  # two 16384K sticks
+    assert spec.total_memory_kb() == 32768
 
 
 def test_total_cpu_mhz_multiplies_mhz_by_cores():

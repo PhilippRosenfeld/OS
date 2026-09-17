@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import pyglet
 
 from horus.events.types import PowerUsageCheckedEvent
-from horus.hardware.cooling_system import CoolingSystem
+from horus.hardware.cooling_system import CoolantType, CoolingSystem
 from horus.hardware.cpu import Cpu
 from horus.hardware.motherboard import CpuSocket, Motherboard, RamSlots, StorageSlots
 from horus.hardware.network_interface import NetworkInterface
@@ -40,17 +40,17 @@ def _default_motherboard() -> Motherboard:
         ],
         ram_slots=[
             RamSlots(name="DIMM A", supported_ram_types=[
-                Ram(name="Horus DDR", size=65536, manufacturer="Horus Inc.",
-                    power_usage_watts_min=1, power_usage_watts_max=3),
+                Ram(name="Horus DDR", size=16384, manufacturer="Horus Inc.",
+                    power_usage_watts_min=1, power_usage_watts_max=10),
             ]),
             RamSlots(name="DIMM B", supported_ram_types=[
-                Ram(name="Horus DDR", size=65536, manufacturer="Horus Inc.",
-                    power_usage_watts_min=1, power_usage_watts_max=3),
+                Ram(name="Horus DDR", size=16384, manufacturer="Horus Inc.",
+                    power_usage_watts_min=1, power_usage_watts_max=10),
             ]),
         ],
         storage_slots=[
             StorageSlots(name="SATA A", supported_storage_types=[
-                Storage(name="Horus SSD", size=524288, manufacturer="Horus Inc.",
+                Storage(name="Horus HDD", size=524288, manufacturer="Horus Inc.",
                          power_usage_watts=3),
             ]),
         ],
@@ -60,11 +60,12 @@ def _default_motherboard() -> Motherboard:
                               power_usage_watts=2),
         ],
         cooling_system=CoolingSystem(
-            name="Horus Coolant System",
+            name="Coolant System",
             manufacturer="Horus Inc.",
-            power_usage_watts=50,
-            coolant_type="Water",
+            power_usage_watts_max=50,
+            coolant_type=CoolantType.WATER,
             coolant_amount=99,
+            temperature_celsius=25.0,
         ),
     )
 
@@ -124,7 +125,7 @@ class HardwareSpec:
 
     @property
     def coolant_type(self) -> str:
-        return self.motherboard.cooling_system.coolant_type
+        return self.motherboard.cooling_system.coolant_type.value
 
     @property
     def coolant_amount(self) -> int:
@@ -142,14 +143,15 @@ class HardwareSpec:
 
     def calculate_total_power_usage(self) -> float:
         """Current combined draw across every component. CPU/RAM scale with
-        their live `load` (see start_power_monitoring); everything else
-        draws a fixed amount since nothing drives their load yet."""
+        their live `load` (see start_power_monitoring), Cooling scales with
+        how much coolant is left (see CoolingSystem.calc_current_power_usage);
+        everything else draws a fixed amount since nothing drives it yet."""
         total = 0.0
         total += sum(cpu.calc_current_power_usage() for cpu in self._installed_cpus())
         total += sum(ram.calc_current_power_usage() for ram in self._installed_ram())
         total += sum(storage.power_usage_watts for storage in self._installed_storage())
         total += sum(iface.power_usage_watts for iface in self.motherboard.network_interfaces)
-        total += self.motherboard.cooling_system.power_usage_watts
+        total += self.motherboard.cooling_system.calc_current_power_usage()
         total += self.motherboard.power_usage_watts
         return total
 
