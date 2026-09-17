@@ -28,14 +28,14 @@ class CoolingSystem:
         self.coolant_amount = coolant_amount
         self.temperature_celsius = temperature_celsius
         self.base_cooling_modifier = base_cooling_modifier
-        self._cooling_power = self._calculate_cooling_power()
+        self._cooling_power = self.calculate_cooling_power()
 
     def update_temperature(self, new_temperature: float) -> None:
         """Update the temperature of the cooling system."""
         self.temperature_celsius = new_temperature
-        self._cooling_power = self._calculate_cooling_power()
+        self._cooling_power = self.calculate_cooling_power()
 
-    def _calculate_cooling_power(self) -> float:
+    def calculate_cooling_power(self) -> float:
         """How much cooling this unit currently delivers: scales with the
         coolant's effectiveness (type) and unit quality (base_cooling_modifier),
         but always in proportion to how much coolant is actually left --
@@ -46,13 +46,13 @@ class CoolingSystem:
 
     def calc_current_power_usage(self) -> float:
         """Actual electrical draw: scales directly with how much cooling is
-        currently being produced (see _calculate_cooling_power) -- a
+        currently being produced (see calculate_cooling_power) -- a
         stronger coolant type or a higher base_cooling_modifier draws more
         power, not less, capped at power_usage_watts_max since that's this
         unit's rated limit. No coolant left means no cooling, hence no draw.
         Computed fresh each call (not from the cached _cooling_power) so it
         can never go stale after coolant_amount changes directly."""
-        return min(self.power_usage_watts_max, self._calculate_cooling_power())
+        return min(self.power_usage_watts_max, self.calculate_cooling_power())
 
     def to_dict(self) -> dict:
         """Persists the spec only -- _cooling_power is derived (recomputed

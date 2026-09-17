@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from unittest.mock import patch
 
@@ -109,7 +110,7 @@ def test_cooling_system_with_no_coolant_left_cools_nothing():
     cooling = CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50,
                              coolant_type=CoolantType.LIQUID_NITROGEN, coolant_amount=0,
                              base_cooling_modifier=2.0)
-    assert cooling._calculate_cooling_power() == 0.0
+    assert cooling.calculate_cooling_power() == 0.0
     assert cooling.calc_current_power_usage() == 0.0
 
 
@@ -142,7 +143,7 @@ def test_cooling_system_draw_is_capped_at_power_usage_watts_max():
     cooling = CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50,
                              coolant_type=CoolantType.LIQUID_NITROGEN, coolant_amount=100,
                              base_cooling_modifier=2.0)
-    assert cooling._calculate_cooling_power() > 50  # would exceed the rating uncapped
+    assert cooling.calculate_cooling_power() > 50  # would exceed the rating uncapped
     assert cooling.calc_current_power_usage() == 50
 
 
@@ -150,7 +151,7 @@ def test_cooling_system_update_temperature_recomputes_cached_cooling_power():
     cooling = CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50, coolant_amount=100)
     cooling.update_temperature(80.0)
     assert cooling.temperature_celsius == 80.0
-    assert cooling._cooling_power == cooling._calculate_cooling_power()
+    assert cooling._cooling_power == cooling.calculate_cooling_power()
 
 
 def test_cooling_system_save_then_load_round_trips():
@@ -344,6 +345,90 @@ def test_check_power_usage_records_power_and_cooling_history():
     assert spec.power_history.latest() == spec.calculate_total_power_usage()
     assert len(spec.cooling_history) == 2
     assert spec.cooling_history.latest() == spec.motherboard.cooling_system.calc_current_power_usage()
+
+
+# --- system temperature ---
+
+def test_hardware_spec_starts_at_ambient_temperature():
+    assert HardwareSpec().temperature_celsius == 25.0
+
+
+def test_update_temperature_rises_when_heat_exceeds_cooling():
+    spec = make_spec(cpus=[make_cpu(power_min=5, power_max=50)], cooling_power_usage_watts=5)
+    spec.motherboard.cpu_sockets[0].supported_cpus[0].load = 1.0  # draws 50W, cooling only carries 5W
+    before = spec.temperature_celsius
+    spec._update_temperature()
+    assert spec.temperature_celsius > before
+
+
+def test_update_temperature_cools_back_toward_ambient_when_idle():
+    spec = make_spec(cooling_power_usage_watts=50)  # idle CPU/RAM draw far less than 50W of cooling
+    spec.temperature_celsius = 40.0
+    spec._update_temperature()
+    assert spec.temperature_celsius < 40.0
+
+
+def test_update_temperature_never_drops_below_ambient():
+    spec = make_spec(cooling_power_usage_watts=1000)  # vastly more cooling than any heat generated
+    spec.temperature_celsius = 25.0
+    spec._update_temperature()
+    assert spec.temperature_celsius == 25.0
+
+
+def test_update_temperature_rises_when_no_coolant_left():
+    """An empty cooling system can't cool anything (see
+    CoolingSystem.calculate_cooling_power), so any heat at all raises the
+    system's temperature regardless of how strong the unit is rated."""
+    spec = make_spec(cpus=[make_cpu(power_min=5, power_max=50)], cooling_power_usage_watts=1000)
+    spec.motherboard.cooling_system.coolant_amount = 0
+    spec.motherboard.cpu_sockets[0].supported_cpus[0].load = 1.0
+    before = spec.temperature_celsius
+    spec._update_temperature()
+    assert spec.temperature_celsius > before
+
+
+def test_update_temperature_keeps_the_cooling_system_reading_in_sync():
+    spec = make_spec()
+    spec._update_temperature()
+    assert spec.motherboard.cooling_system.temperature_celsius == spec.temperature_celsius
+
+
+def test_check_power_usage_updates_the_temperature():
+    spec = make_spec(cpus=[make_cpu(power_min=5, power_max=50)])
+    table = ProcessTable(total_cpu_mhz=1000, total_memory_kb=1024)
+    table.add_process(Process(name="hog", pid=0, owner="root", cpu_mhz=1000, mem_kb=1))
+    events = EventBus()
+
+    spec.start_power_monitoring(table, events)
+    before = spec.temperature_celsius
+    spec._check_power_usage(dt=0.0)
+
+    assert spec.temperature_celsius > before
+
+
+def test_hardware_spec_temperature_persists_through_save_and_load(tmp_path):
+    spec = HardwareSpec()
+    spec.temperature_celsius = 47.3
+    path = tmp_path / "hardware.json"
+    spec.save(path)
+
+    loaded = HardwareSpec.load(path)
+    assert loaded.temperature_celsius == 47.3
+    assert loaded == spec
+
+
+def test_hardware_spec_load_falls_back_to_ambient_for_old_save_files(tmp_path):
+    """Regression guard: a save file written before temperature_celsius
+    existed must still load instead of raising a KeyError."""
+    spec = HardwareSpec()
+    path = tmp_path / "hardware.json"
+    spec.save(path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    del data["temperature_celsius"]
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = HardwareSpec.load(path)
+    assert loaded.temperature_celsius == 25.0
 
 
 # --- MetricHistory ---
