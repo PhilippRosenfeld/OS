@@ -70,7 +70,7 @@ def _default_motherboard() -> Motherboard:
 
 
 def _default_power_supply_unit() -> PowerSupplyUnit:
-    return PowerSupplyUnit(name="Horus PSU", manufacturer="Horus Inc.", power_output_watts=5)
+    return PowerSupplyUnit(name="Horus PSU", manufacturer="Horus Inc.", power_output_watts=500)
 
 
 @dataclass

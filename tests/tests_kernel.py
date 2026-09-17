@@ -1284,6 +1284,24 @@ def test_sys_overview_tile_reports_the_combined_system_summary():
     assert hardware.cpu_name in full
 
 
+def test_sys_overview_tile_updates_live_like_top():
+    """The Overview line -- and the CPU/RAM/Power tiles derived from the
+    same live data -- must reflect the ProcessTable's current state on every
+    refresh tick, not just a snapshot frozen at the moment 'sys' ran."""
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, [])
+    screen = screens.active
+    assert screen._refresh is not None  # HardwareScreen keeps ticking, not a one-shot render
+
+    table.add_process(Process(name="hog", pid=0, owner="root",
+                               cpu_mhz=hardware.total_cpu_mhz() * 0.9, mem_kb=1024))
+    screen._tick(dt=0.0)
+
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    used_cpu = table.used_cpu_mhz()
+    assert f"{used_cpu:.0f}/{table.total_cpu_mhz} MHz" in full
+
+
 def test_sys_without_a_hardware_spec_falls_back_to_defaults():
     """ctx.hardware is None outside the real app (e.g. a minimal test
     context) -- the screen must still render using HardwareSpec's own

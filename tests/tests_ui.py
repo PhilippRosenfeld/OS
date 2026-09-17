@@ -1060,6 +1060,64 @@ def test_hardware_screen_disables_cursor_and_restores_it_on_pop():
     assert buffer.cursor_enabled is True
 
 
+def test_hardware_screen_without_refresh_does_not_schedule_anything():
+    """Default behavior (no `refresh` given) stays exactly as before this
+    existed: static tiles, no pyglet.clock involvement."""
+    screen, buffer, manager, selections = make_hardware()
+    with patch("pyglet.clock.schedule_interval") as mock_schedule:
+        screen.on_push()
+    mock_schedule.assert_not_called()
+
+
+def test_hardware_screen_with_refresh_schedules_a_recurring_tick():
+    buffer = ScreenBuffer(40, 20)
+    manager = ScreenManager()
+    tile = HardwareTile("X")
+    with patch("pyglet.clock.schedule_interval") as mock_schedule:
+        screen = HardwareScreen(buffer, "Hardware", tile, tile, tile, tile, tile, tile, tile, tile,
+                                 manager, refresh=lambda: None, refresh_interval=2.0)
+        manager.push(screen)
+    mock_schedule.assert_called_once()
+    callback, interval = mock_schedule.call_args[0]
+    assert interval == 2.0
+    assert callback == screen._tick
+
+
+def test_hardware_screen_tick_calls_refresh_then_rerenders():
+    buffer = ScreenBuffer(40, 20)
+    manager = ScreenManager()
+    overview = HardwareTile("Overview")
+    tile = HardwareTile("X")
+    calls = []
+
+    def refresh():
+        calls.append(True)
+        overview.lines = ["updated"]
+
+    with patch("pyglet.clock.schedule_interval"):
+        screen = HardwareScreen(buffer, "Hardware", overview, tile, tile, tile, tile, tile, tile, tile,
+                                 manager, refresh=refresh)
+        manager.push(screen)
+    assert calls == []  # not called yet -- only on_push()'s own initial _render()
+
+    screen._tick(dt=0.0)
+    assert calls == [True]
+    assert "updated" in row_text(buffer, 2)
+
+
+def test_hardware_screen_unschedules_the_tick_on_pop():
+    buffer = ScreenBuffer(40, 20)
+    manager = ScreenManager()
+    tile = HardwareTile("X")
+    with patch("pyglet.clock.schedule_interval"):
+        screen = HardwareScreen(buffer, "Hardware", tile, tile, tile, tile, tile, tile, tile, tile,
+                                 manager, refresh=lambda: None)
+        manager.push(screen)
+    with patch("pyglet.clock.unschedule") as mock_unschedule:
+        manager.pop()
+    mock_unschedule.assert_called_once_with(screen._tick)
+
+
 # --- BootScreen / LogoScreen sound hooks ---
 
 class FakePlayer:

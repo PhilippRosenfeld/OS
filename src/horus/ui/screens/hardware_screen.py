@@ -33,17 +33,28 @@ class HardwareScreen(Screen):
     itself isn't selectable, only its nested sub-tiles are), Left/Right jump
     between the two columns, Enter drills into the selected tile (see
     HardwareTile.on_select), Escape goes back to whatever screen was active
-    before."""
+    before.
+
+    `refresh`, if given, is called (with no arguments) every `refresh_interval`
+    seconds -- like TopScreen, but generalized: HardwareScreen doesn't know
+    about ProcessTable/HardwareSpec, so the caller's `refresh` callback is
+    expected to mutate the tiles' own `.lines` in place (they're the same
+    objects passed into the constructor) with fresh data; this screen just
+    re-renders afterwards. Leaving `refresh` unset keeps the tiles static,
+    same as before this existed."""
 
     def __init__(self, buffer: ScreenBuffer, title: str, overview: HardwareTile, cpu: HardwareTile,
                  ram: HardwareTile, storage: HardwareTile, external: HardwareTile, power: HardwareTile,
-                 cooling: HardwareTile, network: HardwareTile, screens: ScreenManager) -> None:
+                 cooling: HardwareTile, network: HardwareTile, screens: ScreenManager,
+                 refresh: Callable[[], None] | None = None, refresh_interval: float = 1.0) -> None:
         self._buffer = buffer
         self._title = title
         self._overview = overview
         self._external = external
         self._columns = [[cpu, ram, storage], [power, cooling, network]]
         self._screens = screens
+        self._refresh = refresh
+        self._refresh_interval = refresh_interval
         self._selected_col = 0  # 0 = left column, 1 = External's nested sub-tiles
         self._selected_row = 0  # index into the selected column's tiles
         self._saved_screen: dict | None = None
@@ -53,12 +64,20 @@ class HardwareScreen(Screen):
         self._buffer.cursor_enabled = False
         self._buffer.clear()
         self._render()
+        if self._refresh is not None:
+            pyglet.clock.schedule_interval(self._tick, self._refresh_interval)
 
     def on_pop(self) -> None:
         """restore() also brings back cursor_enabled from the snapshot, so this
         correctly leaves the cursor disabled when popping back into another menu
         instead of always re-enabling it as if the shell was always underneath."""
+        if self._refresh is not None:
+            pyglet.clock.unschedule(self._tick)
         self._buffer.restore(self._saved_screen)
+
+    def _tick(self, dt: float) -> None:
+        self._refresh()
+        self._render()
 
     def _selected_tile(self) -> HardwareTile:
         return self._columns[self._selected_col][self._selected_row]
