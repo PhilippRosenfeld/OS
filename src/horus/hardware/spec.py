@@ -8,6 +8,7 @@ import pyglet
 from horus.events.types import PowerUsageCheckedEvent
 from horus.hardware.cooling_system import CoolantType, CoolingSystem
 from horus.hardware.cpu import Cpu
+from horus.hardware.metric_history import MetricHistory
 from horus.hardware.motherboard import CpuSocket, Motherboard, RamSlots, StorageSlots
 from horus.hardware.network_interface import NetworkInterface
 from horus.hardware.power_supply_unit import PowerSupplyUnit
@@ -84,6 +85,16 @@ class HardwareSpec:
 
     motherboard: Motherboard = field(default_factory=_default_motherboard)
     power_supply_unit: PowerSupplyUnit = field(default_factory=_default_power_supply_unit)
+
+    def __post_init__(self) -> None:
+        # Deliberately not dataclass fields: this is runtime telemetry for a
+        # future line graph in the Power/Cooling detail panels, not
+        # configuration -- it must stay out of to_dict()/save()/load() and
+        # out of the dataclass-generated __eq__ (two HardwareSpecs with
+        # identical hardware but different sample history are still "equal"
+        # hardware, e.g. after a save/load round trip).
+        self.power_history = MetricHistory()
+        self.cooling_history = MetricHistory()
 
     def _installed_cpus(self) -> list[Cpu]:
         return [cpu for socket in self.motherboard.cpu_sockets for cpu in socket.supported_cpus]
@@ -184,6 +195,8 @@ class HardwareSpec:
         self._sync_component_load_from_process_table()
         total_power_usage = self.calculate_total_power_usage()
         psu_output_watts = self.power_supply_unit.power_output_watts
+        self.power_history.record(total_power_usage)
+        self.cooling_history.record(self.motherboard.cooling_system.calc_current_power_usage())
         self._events.publish(PowerUsageCheckedEvent(
             total_power_usage=total_power_usage,
             psu_output_watts=psu_output_watts,

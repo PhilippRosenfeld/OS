@@ -1,9 +1,11 @@
+from datetime import datetime
 from unittest.mock import patch
 
 from horus.events.bus import EventBus
 from horus.events.types import PowerUsageCheckedEvent
 from horus.hardware.cooling_system import CoolantType, CoolingSystem
 from horus.hardware.cpu import Cpu
+from horus.hardware.metric_history import MetricHistory
 from horus.hardware.motherboard import CpuSocket, Motherboard, RamSlots, StorageSlots
 from horus.hardware.network_interface import NetworkInterface
 from horus.hardware.power_supply_unit import PowerSupplyUnit
@@ -327,3 +329,94 @@ def test_check_power_usage_syncs_cpu_and_ram_load_from_the_process_table():
 
     assert spec.motherboard.cpu_sockets[0].supported_cpus[0].load == 0.9
     assert spec.motherboard.ram_slots[0].supported_ram_types[0].load == 0.5
+
+
+def test_check_power_usage_records_power_and_cooling_history():
+    spec = make_spec()
+    table = ProcessTable(total_cpu_mhz=1000, total_memory_kb=1024)
+    events = EventBus()
+
+    spec.start_power_monitoring(table, events)
+    spec._check_power_usage(dt=0.0)
+    spec._check_power_usage(dt=0.0)
+
+    assert len(spec.power_history) == 2
+    assert spec.power_history.latest() == spec.calculate_total_power_usage()
+    assert len(spec.cooling_history) == 2
+    assert spec.cooling_history.latest() == spec.motherboard.cooling_system.calc_current_power_usage()
+
+
+# --- MetricHistory ---
+
+def test_metric_history_starts_empty():
+    history = MetricHistory()
+    assert len(history) == 0
+    assert history.values() == []
+    assert history.latest() is None
+
+
+def test_metric_history_records_values_in_order():
+    history = MetricHistory()
+    history.record(1.0)
+    history.record(2.0)
+    history.record(3.0)
+    assert history.values() == [1.0, 2.0, 3.0]
+    assert history.latest() == 3.0
+    assert len(history) == 3
+
+
+def test_metric_history_drops_the_oldest_sample_once_full():
+    history = MetricHistory(maxlen=3)
+    for value in (1.0, 2.0, 3.0, 4.0):
+        history.record(value)
+    assert history.values() == [2.0, 3.0, 4.0]
+    assert len(history) == 3
+
+
+def test_metric_history_samples_carry_a_timestamp():
+    history = MetricHistory()
+    history.record(5.0, timestamp=datetime(2026, 1, 1, 12, 0, 0))
+    sample = history.samples()[0]
+    assert sample.value == 5.0
+    assert sample.timestamp == datetime(2026, 1, 1, 12, 0, 0)
+
+
+def test_metric_history_defaults_the_timestamp_to_now():
+    before = datetime.now()
+    history = MetricHistory()
+    history.record(1.0)
+    after = datetime.now()
+    assert before <= history.samples()[0].timestamp <= after
+
+
+# --- HardwareSpec power/cooling history ---
+
+def test_hardware_spec_starts_with_empty_history():
+    spec = HardwareSpec()
+    assert len(spec.power_history) == 0
+    assert len(spec.cooling_history) == 0
+
+
+def test_hardware_spec_history_is_independent_per_instance():
+    """Regression guard, same spirit as
+    test_two_hardware_specs_default_to_independent_motherboards -- each
+    HardwareSpec must get its own MetricHistory, not a shared one."""
+    a, b = HardwareSpec(), HardwareSpec()
+    a.power_history.record(42.0)
+    assert len(b.power_history) == 0
+
+
+def test_hardware_spec_history_is_excluded_from_equality_and_persistence(tmp_path):
+    """History is runtime telemetry, not config -- two otherwise-identical
+    specs stay equal regardless of sample history, and it never touches the
+    save file (see HardwareSpec.__post_init__)."""
+    spec = HardwareSpec()
+    spec.power_history.record(99.0)
+
+    path = tmp_path / "hardware.json"
+    spec.save(path)
+    assert "power_history" not in path.read_text(encoding="utf-8")
+
+    loaded = HardwareSpec.load(path)
+    assert loaded == spec
+    assert len(loaded.power_history) == 0  # a fresh instance, no borrowed history
