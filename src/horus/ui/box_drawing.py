@@ -5,7 +5,7 @@ def draw_box(buffer: ScreenBuffer, x: int, y: int, width: int, height: int, labe
              lines: list[str] = (), selected: bool = False) -> None:
     """Draws a bordered box from (x, y) spanning width x height, with `label`
     embedded in the top border and `lines` inside. Shared by HardwareScreen
-    (small tiles) and HardwareDetailScreen (one box filling the screen) so
+    (small tiles) and DetailScreen (one box filling the screen) so
     the two don't drift apart.
 
     Every written string is clipped to the box's own width first --

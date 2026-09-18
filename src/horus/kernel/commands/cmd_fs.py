@@ -238,7 +238,6 @@ def _list_directory(ctx, path: str, args) -> None:
     if args.recursive:
         for node in nodes:
             if node.type == NodeType.DIRECTORY:
-                ctx.write_line("")
                 _list_directory(ctx, path.rstrip("/") + "/" + node.name, args)
 
 

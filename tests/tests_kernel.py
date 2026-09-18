@@ -6,9 +6,11 @@ import pytest
 from horus.display.colors import NAMED_COLORS
 from horus.display.screen_buffer import ScreenBuffer
 from horus.events.bus import EventBus
-from horus.events.types import CommandExecutedEvent, ProcessKilledEvent, ProcessStartedEvent
+from horus.events.system_log import SystemLog
+from horus.events.types import CommandExecutedEvent, PowerUsageCheckedEvent, ProcessKilledEvent, ProcessStartedEvent
 from horus.filesystem.backend.memory import InMemoryVFS
 from horus.hardware.spec import HardwareSpec
+from horus.kernel.commands.cmd_err import err as err_command
 from horus.kernel.commands.cmd_fs import cat, chattr, decrypt, encrypt, ls
 from horus.kernel.commands.cmd_menu import horus_menu, open_settings_menu
 from horus.kernel.commands.cmd_misc import color, su
@@ -19,7 +21,7 @@ from horus.kernel.kernel import Kernel
 from horus.kernel.registry import Registry
 from horus.processes.process import process as Process
 from horus.processes.processTable import ProcessTable
-from horus.processes.system_reactions import register_system_reactions
+from horus.processes.system_reactions import register_system_log, register_system_reactions
 from horus.session.context import Context
 from horus.session.history import CommandHistory
 from horus.session.seed import seed_users
@@ -27,7 +29,7 @@ from horus.session.user import UserRegistry
 from horus.shell.input_handler import InputHandler
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.screens.crash_screen import CrashScreen
-from horus.ui.screens.hardware_detail_screen import HardwareDetailScreen
+from horus.ui.screens.detail_screen import DetailScreen
 from horus.ui.screens.hardware_screen import HardwareScreen
 from horus.ui.screens.menu_screen import MenuScreen
 from horus.ui.screens.settings_screen import SettingScreen
@@ -494,6 +496,48 @@ def test_ls_with_meta_shows_timestamps_without_fractional_seconds():
     ls(ctx, ["-m"])
 
     assert "." not in full_text(buffer)  # no fractional-second remainder anywhere in the output
+
+
+def test_ls_recursive_lists_each_directory_with_a_path_header():
+    buffer = ScreenBuffer(80, 20)
+    fs = InMemoryVFS()
+    fs.mkdir("/home", user="root")
+    fs.mkdir("/home/a", user="root")
+    fs.write_file("/home/a/file.txt", "hi", user="root")
+    ctx = Context(session_id="s", user="root", cwd="/home", fs=fs, screen=buffer)
+
+    ls(ctx, ["-r"])
+
+    assert "/home:" in row_text(buffer, 0)
+    assert "/home/a:" in row_text(buffer, 2)
+    assert "file.txt" in row_text(buffer, 3)
+
+
+def test_ls_recursive_has_no_blank_line_between_directories():
+    """Regression test: a blank line used to be written before descending
+    into each subdirectory -- ls -r now prints directory sections back to
+    back with no gap."""
+    buffer = ScreenBuffer(80, 20)
+    fs = InMemoryVFS()
+    fs.mkdir("/home", user="root")
+    fs.mkdir("/home/a", user="root")
+    fs.mkdir("/home/a/b", user="root")
+    fs.write_file("/home/a/file1.txt", "hi", user="root")
+    fs.write_file("/home/a/b/file2.txt", "hi", user="root")
+    ctx = Context(session_id="s", user="root", cwd="/home", fs=fs, screen=buffer)
+
+    ls(ctx, ["-r"])
+
+    printed_rows = [row_text(buffer, r).rstrip() for r in range(6)]
+    assert printed_rows == [
+        "/home:",
+        "rwxr-xr-x   root   DIRECTORY   a",
+        "/home/a:",
+        "rwxr-xr-x   root   DIRECTORY   b",
+        "rwxr-xr-x   root   FILE   file1.txt",
+        "/home/a/b:",
+    ]
+    assert "" not in printed_rows
 
 
 # --- chattr command ---
@@ -1328,7 +1372,7 @@ def test_sys_enter_on_cpu_opens_its_detail_screen():
     ctx, buffer, screens, table, hardware = make_sys_context()
     sys_command(ctx, [])
     screens.active.handle_enter()  # CPU is selected by default
-    assert isinstance(screens.active, HardwareDetailScreen)
+    assert isinstance(screens.active, DetailScreen)
     full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
     assert hardware.cpu_name in full
     assert "Cores:" in full
@@ -1389,7 +1433,7 @@ def test_sys_detail_screen_escape_returns_to_the_hardware_screen():
     sys_command(ctx, [])
     hardware_screen = screens.active
     hardware_screen.handle_enter()
-    assert isinstance(screens.active, HardwareDetailScreen)
+    assert isinstance(screens.active, DetailScreen)
     screens.active.handle_key(pyglet.window.key.ESCAPE, 0)
     assert screens.active is hardware_screen
 
@@ -1406,3 +1450,77 @@ def test_sys_cooling_detail_screen_updates_live_with_temperature():
     detail_screen._tick(dt=0.0)
     full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
     assert "88.5" in full
+
+
+# --- err command ---
+
+def make_err_context(cols=80, rows=24):
+    buffer = ScreenBuffer(cols, rows)
+    screens = ScreenManager()
+    bus = EventBus()
+    log = SystemLog()
+    register_system_log(bus, log)
+    ctx = Context(session_id="s", user="root", cwd="/", screen=buffer, screens=screens,
+                  events=bus, system_log=log)
+    return ctx, buffer, screens, bus, log
+
+
+def test_err_pushes_a_detail_screen():
+    ctx, buffer, screens, bus, log = make_err_context()
+    err_command(ctx, [])
+    assert isinstance(screens.active, DetailScreen)
+
+
+def test_err_with_no_entries_shows_a_placeholder():
+    ctx, buffer, screens, bus, log = make_err_context()
+    err_command(ctx, [])
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    assert "No warnings or errors." in full
+
+
+def test_err_shows_logged_warnings_and_errors():
+    ctx, buffer, screens, bus, log = make_err_context()
+    bus.publish(PowerUsageCheckedEvent(total_power_usage=150.0, psu_output_watts=100.0, over_budget=True))
+    bus.publish(ProcessKilledEvent(pid=1, name="init", killed_by="root", critical=True))
+
+    err_command(ctx, [])
+
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    assert "WARNING" in full
+    assert "150" in full
+    assert "ERROR" in full
+    assert "init" in full
+
+
+def test_err_shows_newest_entries_first():
+    ctx, buffer, screens, bus, log = make_err_context()
+    log.warning("first warning")
+    log.error("second, more recent error")
+
+    err_command(ctx, [])
+
+    full = "".join(row_text(buffer, r) for r in range(buffer.rows))
+    assert full.index("second, more recent error") < full.index("first warning")
+
+
+def test_err_updates_live_when_a_new_entry_is_logged():
+    ctx, buffer, screens, bus, log = make_err_context()
+    err_command(ctx, [])
+    screen = screens.active
+    assert screen._refresh is not None
+
+    bus.publish(PowerUsageCheckedEvent(total_power_usage=150.0, psu_output_watts=100.0, over_budget=True))
+    screen._tick(dt=0.0)
+
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    assert "WARNING" in full
+
+
+def test_err_without_a_system_log_falls_back_to_an_empty_one():
+    """ctx.system_log is None outside the real app (e.g. a minimal test
+    context) -- the screen must still render instead of raising."""
+    buffer = ScreenBuffer(80, 24)
+    screens = ScreenManager()
+    ctx = Context(session_id="s", user="root", cwd="/", screen=buffer, screens=screens)
+    err_command(ctx, [])  # should not raise
+    assert isinstance(screens.active, DetailScreen)

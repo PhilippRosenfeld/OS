@@ -2,8 +2,9 @@ from unittest.mock import patch
 
 from horus.display.screen_buffer import ScreenBuffer
 from horus.events.bus import EventBus
-from horus.events.types import ProcessKilledEvent, ProcessStartedEvent
-from horus.processes.system_reactions import register_system_reactions
+from horus.events.system_log import LogSeverity, SystemLog
+from horus.events.types import PowerUsageCheckedEvent, ProcessKilledEvent, ProcessStartedEvent
+from horus.processes.system_reactions import register_system_log, register_system_reactions
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.screens.crash_screen import CrashScreen
 
@@ -115,3 +116,91 @@ def test_crash_screen_receives_the_killed_process_name():
         "".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows)
     )
     assert "init" in screen_text
+
+
+# --- register_system_log ---
+
+def test_power_overload_logs_a_warning():
+    bus = EventBus()
+    log = SystemLog()
+    register_system_log(bus, log)
+
+    bus.publish(PowerUsageCheckedEvent(total_power_usage=150.0, psu_output_watts=100.0, over_budget=True))
+
+    assert len(log) == 1
+    entry = log.entries()[0]
+    assert entry.severity is LogSeverity.WARNING
+    assert "150" in entry.message
+    assert "100" in entry.message
+
+
+def test_power_under_budget_does_not_log_anything():
+    bus = EventBus()
+    log = SystemLog()
+    register_system_log(bus, log)
+
+    bus.publish(PowerUsageCheckedEvent(total_power_usage=80.0, psu_output_watts=100.0, over_budget=False))
+
+    assert len(log) == 0
+
+
+def test_power_overload_only_logs_once_while_continuously_over_budget():
+    """Regression guard: PowerUsageCheckedEvent fires every tick, not just on
+    crossing the threshold -- must log the edge (False -> True), not every
+    tick spent over budget."""
+    bus = EventBus()
+    log = SystemLog()
+    register_system_log(bus, log)
+
+    for _ in range(5):
+        bus.publish(PowerUsageCheckedEvent(total_power_usage=150.0, psu_output_watts=100.0, over_budget=True))
+
+    assert len(log) == 1
+
+
+def test_power_overload_logs_again_after_recovering_and_re_exceeding():
+    bus = EventBus()
+    log = SystemLog()
+    register_system_log(bus, log)
+
+    bus.publish(PowerUsageCheckedEvent(total_power_usage=150.0, psu_output_watts=100.0, over_budget=True))
+    bus.publish(PowerUsageCheckedEvent(total_power_usage=90.0, psu_output_watts=100.0, over_budget=False))
+    bus.publish(PowerUsageCheckedEvent(total_power_usage=150.0, psu_output_watts=100.0, over_budget=True))
+
+    assert len(log) == 2
+
+
+def test_critical_process_kill_logs_an_error():
+    bus = EventBus()
+    log = SystemLog()
+    register_system_log(bus, log)
+
+    bus.publish(ProcessKilledEvent(pid=1, name="init", killed_by="root", critical=True))
+
+    assert len(log) == 1
+    entry = log.entries()[0]
+    assert entry.severity is LogSeverity.ERROR
+    assert "init" in entry.message
+
+
+def test_non_critical_process_kill_does_not_log_anything():
+    bus = EventBus()
+    log = SystemLog()
+    register_system_log(bus, log)
+
+    bus.publish(ProcessKilledEvent(pid=2, name="bash", killed_by="user1", critical=False))
+
+    assert len(log) == 0
+
+
+def test_system_log_is_independent_of_the_sound_screen_reactions():
+    """register_system_log() works even if register_system_reactions()/
+    register_power_reactions() were never wired up -- it's its own
+    independent subscriber, not a side effect of those."""
+    bus = EventBus()
+    log = SystemLog()
+    register_system_log(bus, log)
+
+    bus.publish(ProcessKilledEvent(pid=1, name="init", killed_by="root", critical=True))  # no crash-screen reaction registered
+
+    assert len(log) == 1

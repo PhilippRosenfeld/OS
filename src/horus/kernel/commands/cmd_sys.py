@@ -1,7 +1,7 @@
 from horus.hardware.spec import HardwareSpec
 from horus.kernel.registry import command
 from horus.processes.process_view import format_system_summary
-from horus.ui.screens.hardware_detail_screen import HardwareDetailScreen
+from horus.ui.screens.detail_screen import DetailScreen
 from horus.ui.screens.hardware_screen import HardwareScreen, HardwareTile
 
 
@@ -94,10 +94,10 @@ def _network_detail_lines(hardware) -> list[str]:
 
 
 def _push_detail_screen(ctx, title: str, lines_fn) -> None:
-    """Opens a live-refreshing HardwareDetailScreen for one component --
+    """Opens a live-refreshing DetailScreen for one component --
     `lines_fn` is called both now (initial render) and again on every
     refresh tick, so it must stay cheap and side-effect free."""
-    ctx.screens.push(HardwareDetailScreen(ctx.screen, title, lines_fn(), ctx.screens, refresh=lines_fn))
+    ctx.screens.push(DetailScreen(ctx.screen, title, lines_fn(), ctx.screens, refresh=lines_fn))
 
 
 def _build_hardware_screen(ctx) -> HardwareScreen:
@@ -112,7 +112,7 @@ def _build_hardware_screen(ctx) -> HardwareScreen:
     their `.lines` from `table`/`hardware` on every HardwareScreen tick,
     not just once at push time.
 
-    Each tile's on_select opens the matching HardwareDetailScreen (see
+    Each tile's on_select opens the matching DetailScreen (see
     _push_detail_screen) -- more room than a small tile has for details, and
     kept just as live via its own refresh callback."""
     hardware = ctx.hardware if ctx.hardware is not None else HardwareSpec()

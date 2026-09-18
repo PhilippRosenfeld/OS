@@ -10,18 +10,19 @@ from horus.ui.screen_manager import ScreenManager
 key = pyglet.window.key
 
 
-class HardwareDetailScreen(Screen):
-    """Full-panel detail view for a single hardware component -- opened by
-    pressing Enter on one of HardwareScreen's tiles (see HardwareTile.on_select).
-    Just one bordered box spanning the whole buffer, with the component's
-    title and a list of detail lines. Escape pops back to the overview.
+class DetailScreen(Screen):
+    """Generic full-panel detail view: one bordered box spanning the whole
+    buffer, with a title and a list of lines. Escape pops back. Used both
+    for a single hardware component (opened by pressing Enter on one of
+    HardwareScreen's tiles, see HardwareTile.on_select) and for the 'err'
+    command's warning/error log.
 
     `refresh`, if given, is called (with no arguments) every `refresh_interval`
     seconds and must return a fresh list of lines to display -- the same
-    live-refresh idiom HardwareScreen itself uses (see TopScreen), so a
-    component's live values (load, draw, temperature, ...) don't go stale
-    while its detail screen stays open. Leaving `refresh` unset keeps the
-    lines static."""
+    live-refresh idiom HardwareScreen itself uses (see TopScreen), so live
+    values (load, draw, temperature, new log entries, ...) don't go stale
+    while this screen stays open. Leaving `refresh` unset keeps the lines
+    static."""
 
     def __init__(self, buffer: ScreenBuffer, title: str, lines: list[str], screens: ScreenManager,
                  refresh: Callable[[], list[str]] | None = None, refresh_interval: float = 1.0) -> None:

@@ -6,6 +6,7 @@ from horus.__about__ import VERSION
 from horus.audio.sound_manager import SoundManager
 from horus.display.window import DisplayWindow
 from horus.events.bus import EventBus
+from horus.events.system_log import SystemLog
 from horus.filesystem.backend.sqlite import SQLiteVFS
 from horus.filesystem.seed import seed_minimal
 from horus.hardware.spec import HardwareSpec
@@ -15,7 +16,7 @@ from horus.kernel.registry import registry
 from horus.paths import BOOT_DIR, BOOT_PROGRESS_PATH, BOOT_SOUNDS_DIR, DATA_DIR, HARDWARE_SPEC_PATH, SAVES_DIR, SHELL_SOUNDS_DIR, SOUNDS_DIR
 from horus.processes.processTable import ProcessTable
 from horus.processes.seed_process import seed_processes
-from horus.processes.system_reactions import register_system_reactions
+from horus.processes.system_reactions import register_power_reactions, register_system_log, register_system_reactions
 from horus.session.context import Context
 from horus.session.history import CommandHistory
 from horus.session.seed import seed_users
@@ -64,7 +65,8 @@ def main() -> None:
     sounds.load("error_notification", SHELL_SOUNDS_DIR / "error_notification.mp3")
     sounds.load("process_kill_buzz", SHELL_SOUNDS_DIR / "process_kill_buzz.mp3")
     sounds.load("process_kill_bang", SHELL_SOUNDS_DIR / "process_kill_bang.mp3")
-    sounds.load("system_crashed", SHELL_SOUNDS_DIR / "system_crashed.mp3")    
+    sounds.load("system_crashed", SHELL_SOUNDS_DIR / "system_crashed.mp3")   
+    sounds.load("system_error_notification", SHELL_SOUNDS_DIR / "system_error_notification.mp3")   
 
     bus = EventBus()
     kernel = Kernel(registry=registry, bus=bus)
@@ -84,6 +86,9 @@ def main() -> None:
     process_table.start_fluctuating()
     hardware.start_power_monitoring(process_table, bus)
     register_system_reactions(bus, screens, window, sounds, window.buffer)
+    register_power_reactions(bus, screens, window, sounds, window.buffer)
+    system_log = SystemLog()
+    register_system_log(bus, system_log)
 
     context = Context(
         session_id = "local",
@@ -98,7 +103,8 @@ def main() -> None:
         users=users,
         kernel=kernel,
         process_table=process_table,
-        hardware=hardware
+        hardware=hardware,
+        system_log=system_log
     )
 
     def on_submit(line: str) -> None:

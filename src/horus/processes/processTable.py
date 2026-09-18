@@ -32,6 +32,7 @@ class ProcessTable:
                                                  # HardwareSpec.total_memory_kb()/total_cpu_mhz() --
                                                  # passed in rather than looked up here so ProcessTable
                                                  # doesn't need to know HardwareSpec exists
+        self.throttle_factor = 1.0  # 1.0 = no throttling, 0.5 = half speed, 2.0 = double speed, etc.
 
     def add_process(self, process: process = None) -> process:
         if process is None:

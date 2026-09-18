@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Callable
 from horus.display.screen_buffer import ScreenBuffer
 from horus.display.window import DisplayWindow
 from horus.events.bus import EventBus
+from horus.events.system_log import SystemLog
 from horus.filesystem.vfs import VFS
 from horus.hardware.spec import HardwareSpec
 from horus.processes.processTable import ProcessTable
@@ -45,6 +46,7 @@ class Context:
     main_menu: "MainMenuScreen" = None
     process_table: "ProcessTable" = None
     hardware: "HardwareSpec" = None
+    system_log: "SystemLog" = None
 
 
     def __post_init__(self):
