@@ -3,6 +3,7 @@ from typing import Callable
 import pyglet
 
 from horus.display.screen_buffer import ScreenBuffer
+from horus.ui.box_drawing import draw_box
 from horus.ui.screen import Screen
 from horus.ui.screen_manager import ScreenManager
 
@@ -75,6 +76,16 @@ class HardwareScreen(Screen):
             pyglet.clock.unschedule(self._tick)
         self._buffer.restore(self._saved_screen)
 
+    def on_resume(self) -> None:
+        """Called when a tile's detail screen (pushed on top of us by
+        handle_enter(), see below) pops back off -- restart the ticking that
+        was paused for it, and redraw immediately so nothing here looks
+        stale after however long the detail screen was open."""
+        if self._refresh is not None:
+            self._refresh()
+            pyglet.clock.schedule_interval(self._tick, self._refresh_interval)
+        self._render()
+
     def _tick(self, dt: float) -> None:
         self._refresh()
         self._render()
@@ -124,34 +135,7 @@ class HardwareScreen(Screen):
             row_y += tile_height
 
     def _draw_tile(self, x: int, y: int, width: int, height: int, tile: HardwareTile, selected: bool) -> None:
-        """Draws a bordered box from (x, y) spanning width x height, with the
-        tile's label embedded in the top border and its content lines inside.
-        Every written string is clipped to the tile's own width first --
-        ScreenBuffer.write_string wraps at the *buffer's* width when a string
-        runs past it, not at any tile boundary, so an unclipped line would
-        bleed into the next row instead of just being cut off."""
-        if width < 2 or height < 2:
-            return  # too small to even draw a border in
-        fg = self._buffer.default_bg if selected else None
-        bg = self._buffer.default_fg if selected else None
-
-        border = f"+{'-' * (width - 2)}+"
-        self._buffer.write_string(x, y, border, fg=fg, bg=bg)
-        for row in range(y + 1, y + height - 1):
-            self._buffer.write_string(x, row, "|", fg=fg, bg=bg)
-            self._buffer.write_string(x + width - 1, row, "|", fg=fg, bg=bg)
-        self._buffer.write_string(x, y + height - 1, border, fg=fg, bg=bg)
-
-        label = f" {tile.label} "[:max(0, width - 2)]
-        if label:
-            self._buffer.write_string(x + 1, y, label, fg=fg, bg=bg)
-
-        interior_width = max(0, width - 4)
-        for i, line in enumerate(tile.lines):
-            row = y + 2 + i
-            if row >= y + height - 1:
-                break
-            self._buffer.write_string(x + 2, row, line[:interior_width])
+        draw_box(self._buffer, x, y, width, height, tile.label, tile.lines, selected)
 
     def handle_text(self, text: str) -> None:
         pass
@@ -173,6 +157,13 @@ class HardwareScreen(Screen):
     def handle_enter(self) -> None:
         tile = self._selected_tile()
         if tile.on_select is not None:
+            # About to hand off to the tile's detail screen (that's what
+            # on_select does) -- pause our own ticking while it's covering
+            # us, or our periodic _render() would keep clobbering its
+            # content on the same shared buffer (see on_resume(), which
+            # restarts it once we're active again).
+            if self._refresh is not None:
+                pyglet.clock.unschedule(self._tick)
             tile.on_select()
 
     def handle_key(self, symbol: int, modifiers: int) -> None:

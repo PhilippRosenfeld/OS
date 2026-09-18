@@ -100,30 +100,30 @@ class HardwareSpec:
         self.power_history = MetricHistory()
         self.cooling_history = MetricHistory()
 
-    def _installed_cpus(self) -> list[Cpu]:
+    def installed_cpus(self) -> list[Cpu]:
         return [cpu for socket in self.motherboard.cpu_sockets for cpu in socket.supported_cpus]
 
-    def _installed_ram(self) -> list[Ram]:
+    def installed_ram(self) -> list[Ram]:
         return [ram for slot in self.motherboard.ram_slots for ram in slot.supported_ram_types]
 
-    def _installed_storage(self) -> list[Storage]:
+    def installed_storage(self) -> list[Storage]:
         return [s for slot in self.motherboard.storage_slots for s in slot.supported_storage_types]
 
     # --- flat, backward-compatible view of the first installed component ---
 
     @property
     def cpu_name(self) -> str:
-        cpus = self._installed_cpus()
+        cpus = self.installed_cpus()
         return cpus[0].name if cpus else ""
 
     @property
     def cpu_mhz(self) -> int:
-        cpus = self._installed_cpus()
+        cpus = self.installed_cpus()
         return cpus[0].mhz if cpus else 0
 
     @property
     def cpu_cores(self) -> int:
-        cpus = self._installed_cpus()
+        cpus = self.installed_cpus()
         return cpus[0].cores if cpus else 0
 
     @property
@@ -131,12 +131,12 @@ class HardwareSpec:
         """Per-module size, formatted like the old flat field (e.g. '65536K')
         -- matches how the boot sequence displays it ('{memory_count} x
         {memory_size}')."""
-        ram = self._installed_ram()
+        ram = self.installed_ram()
         return f"{ram[0].size}K" if ram else "0K"
 
     @property
     def memory_count(self) -> int:
-        return len(self._installed_ram())
+        return len(self.installed_ram())
 
     @property
     def coolant_type(self) -> str:
@@ -150,11 +150,11 @@ class HardwareSpec:
 
     def total_memory_kb(self) -> int:
         """Total simulated RAM in KB across every installed stick."""
-        return sum(ram.size for ram in self._installed_ram())
+        return sum(ram.size for ram in self.installed_ram())
 
     def total_cpu_mhz(self) -> int:
         """Total simulated CPU capacity in MHz across every installed CPU."""
-        return sum(cpu.mhz * cpu.cores for cpu in self._installed_cpus())
+        return sum(cpu.mhz * cpu.cores for cpu in self.installed_cpus())
 
     def calculate_total_power_usage(self) -> float:
         """Current combined draw across every component. CPU/RAM scale with
@@ -162,9 +162,9 @@ class HardwareSpec:
         how much coolant is left (see CoolingSystem.calc_current_power_usage);
         everything else draws a fixed amount since nothing drives it yet."""
         total = 0.0
-        total += sum(cpu.calc_current_power_usage() for cpu in self._installed_cpus())
-        total += sum(ram.calc_current_power_usage() for ram in self._installed_ram())
-        total += sum(storage.power_usage_watts for storage in self._installed_storage())
+        total += sum(cpu.calc_current_power_usage() for cpu in self.installed_cpus())
+        total += sum(ram.calc_current_power_usage() for ram in self.installed_ram())
+        total += sum(storage.power_usage_watts for storage in self.installed_storage())
         total += sum(iface.power_usage_watts for iface in self.motherboard.network_interfaces)
         total += self.motherboard.cooling_system.calc_current_power_usage()
         total += self.motherboard.power_usage_watts
@@ -190,9 +190,9 @@ class HardwareSpec:
         table = self._process_table
         cpu_load = table.used_cpu_mhz() / table.total_cpu_mhz if table.total_cpu_mhz else 0.0
         mem_load = table.used_mem_kb() / table.total_memory_kb if table.total_memory_kb else 0.0
-        for cpu in self._installed_cpus():
+        for cpu in self.installed_cpus():
             cpu.load = cpu_load
-        for ram in self._installed_ram():
+        for ram in self.installed_ram():
             ram.load = mem_load
 
     def _check_power_usage(self, dt: float) -> None:
@@ -220,8 +220,8 @@ class HardwareSpec:
         temperature. Also keeps the cooling system's own reading
         (CoolingSystem.temperature_celsius) in sync, so it reflects the same
         system-wide value rather than a second, disconnected number."""
-        heat_generated = sum(cpu.calc_current_power_usage() for cpu in self._installed_cpus())
-        heat_generated += sum(ram.calc_current_power_usage() for ram in self._installed_ram())
+        heat_generated = sum(cpu.calc_current_power_usage() for cpu in self.installed_cpus())
+        heat_generated += sum(ram.calc_current_power_usage() for ram in self.installed_ram())
         cooling_power = self.motherboard.cooling_system.calculate_cooling_power()
         self.temperature_celsius = max(
             _AMBIENT_TEMPERATURE_CELSIUS,

@@ -11,6 +11,7 @@ from horus.ui.screen import Screen
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.screens.boot_screen import BootFrame, BootScreen
 from horus.ui.screens.crash_screen import CrashScreen
+from horus.ui.screens.hardware_detail_screen import HardwareDetailScreen
 from horus.ui.screens.hardware_screen import HardwareScreen, HardwareTile
 from horus.ui.screens.loading_screen import LoadingScreen
 from horus.ui.screens.logo_screen import LogoScreen
@@ -1041,6 +1042,41 @@ def test_hardware_screen_enter_activates_the_selected_tile():
     assert selections == ["Cooling"]
 
 
+def test_hardware_screen_enter_pauses_its_own_tick_while_a_detail_screen_is_open():
+    """Regression test: HardwareScreen used to keep ticking (and
+    re-rendering onto the shared buffer) even while a tile's detail screen
+    was pushed on top of it -- the two would clobber each other's content
+    every tick, flickering back and forth between overview and detail."""
+    buffer = ScreenBuffer(40, 20)
+    manager = ScreenManager()
+    tile = HardwareTile("X")
+    selected = HardwareTile("CPU", on_select=lambda: None)
+    with patch("pyglet.clock.schedule_interval"):
+        screen = HardwareScreen(buffer, "Hardware", tile, selected, tile, tile, tile, tile, tile, tile,
+                                 manager, refresh=lambda: None)
+        manager.push(screen)
+    with patch("pyglet.clock.unschedule") as mock_unschedule:
+        screen.handle_enter()
+    mock_unschedule.assert_called_once_with(screen._tick)
+
+
+def test_hardware_screen_on_resume_reschedules_the_tick_and_rerenders():
+    buffer = ScreenBuffer(40, 20)
+    manager = ScreenManager()
+    tile = HardwareTile("X")
+    calls = []
+    with patch("pyglet.clock.schedule_interval"):
+        screen = HardwareScreen(buffer, "Hardware", tile, tile, tile, tile, tile, tile, tile, tile,
+                                 manager, refresh=lambda: calls.append(True))
+        manager.push(screen)
+    calls.clear()  # drop the call from on_push()'s own initial render
+
+    with patch("pyglet.clock.schedule_interval") as mock_schedule:
+        screen.on_resume()
+    assert calls == [True]  # refreshed before redrawing, not left stale
+    mock_schedule.assert_called_once_with(screen._tick, screen._refresh_interval)
+
+
 def test_hardware_screen_escape_pops_itself_from_the_manager():
     screen, buffer, manager, selections = make_hardware()
     assert manager.active is screen
@@ -1112,6 +1148,91 @@ def test_hardware_screen_unschedules_the_tick_on_pop():
     with patch("pyglet.clock.schedule_interval"):
         screen = HardwareScreen(buffer, "Hardware", tile, tile, tile, tile, tile, tile, tile, tile,
                                  manager, refresh=lambda: None)
+        manager.push(screen)
+    with patch("pyglet.clock.unschedule") as mock_unschedule:
+        manager.pop()
+    mock_unschedule.assert_called_once_with(screen._tick)
+
+
+# --- HardwareDetailScreen ---
+
+def test_hardware_detail_screen_renders_title_and_lines():
+    buffer = ScreenBuffer(40, 10)
+    manager = ScreenManager()
+    screen = HardwareDetailScreen(buffer, "CPU", ["Coeles X3201", "Cores: 1"], manager)
+    manager.push(screen)
+    assert row_text(buffer, 0).startswith("+ CPU ")
+    assert "Coeles X3201" in row_text(buffer, 2)
+    assert "Cores: 1" in row_text(buffer, 3)
+
+
+def test_hardware_detail_screen_disables_cursor_and_restores_it_on_pop():
+    buffer = ScreenBuffer(40, 10)
+    buffer.cursor_enabled = True
+    manager = ScreenManager()
+    screen = HardwareDetailScreen(buffer, "CPU", ["line"], manager)
+    manager.push(screen)
+    assert buffer.cursor_enabled is False
+    manager.pop()
+    assert buffer.cursor_enabled is True
+
+
+def test_hardware_detail_screen_escape_pops_itself_from_the_manager():
+    buffer = ScreenBuffer(40, 10)
+    manager = ScreenManager()
+    screen = HardwareDetailScreen(buffer, "CPU", ["line"], manager)
+    manager.push(screen)
+    assert manager.active is screen
+    screen.handle_key(key.ESCAPE, 0)
+    assert manager.active is None
+
+
+def test_hardware_detail_screen_without_refresh_does_not_schedule_anything():
+    buffer = ScreenBuffer(40, 10)
+    manager = ScreenManager()
+    screen = HardwareDetailScreen(buffer, "CPU", ["line"], manager)
+    with patch("pyglet.clock.schedule_interval") as mock_schedule:
+        screen.on_push()
+    mock_schedule.assert_not_called()
+
+
+def test_hardware_detail_screen_with_refresh_schedules_a_recurring_tick():
+    buffer = ScreenBuffer(40, 10)
+    manager = ScreenManager()
+    with patch("pyglet.clock.schedule_interval") as mock_schedule:
+        screen = HardwareDetailScreen(buffer, "CPU", ["line"], manager,
+                                       refresh=lambda: ["line"], refresh_interval=2.0)
+        manager.push(screen)
+    mock_schedule.assert_called_once()
+    callback, interval = mock_schedule.call_args[0]
+    assert interval == 2.0
+    assert callback == screen._tick
+
+
+def test_hardware_detail_screen_tick_calls_refresh_then_rerenders():
+    buffer = ScreenBuffer(40, 10)
+    manager = ScreenManager()
+    calls = []
+
+    def refresh():
+        calls.append(True)
+        return ["updated line"]
+
+    with patch("pyglet.clock.schedule_interval"):
+        screen = HardwareDetailScreen(buffer, "CPU", ["stale line"], manager, refresh=refresh)
+        manager.push(screen)
+    assert calls == []  # not called yet -- only on_push()'s own initial _render()
+
+    screen._tick(dt=0.0)
+    assert calls == [True]
+    assert "updated line" in row_text(buffer, 2)
+
+
+def test_hardware_detail_screen_unschedules_the_tick_on_pop():
+    buffer = ScreenBuffer(40, 10)
+    manager = ScreenManager()
+    with patch("pyglet.clock.schedule_interval"):
+        screen = HardwareDetailScreen(buffer, "CPU", ["line"], manager, refresh=lambda: ["line"])
         manager.push(screen)
     with patch("pyglet.clock.unschedule") as mock_unschedule:
         manager.pop()

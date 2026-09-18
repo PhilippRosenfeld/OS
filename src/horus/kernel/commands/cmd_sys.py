@@ -1,7 +1,103 @@
 from horus.hardware.spec import HardwareSpec
 from horus.kernel.registry import command
 from horus.processes.process_view import format_system_summary
+from horus.ui.screens.hardware_detail_screen import HardwareDetailScreen
 from horus.ui.screens.hardware_screen import HardwareScreen, HardwareTile
+
+
+def _cpu_detail_lines(hardware, table) -> list[str]:
+    cpus = hardware.installed_cpus()
+    used_cpu = table.used_cpu_mhz()
+    total_cpu = table.total_cpu_mhz
+    cpu_percent = (used_cpu / total_cpu * 100) if total_cpu else 0.0
+    lines = [
+        hardware.cpu_name,
+        f"Manufacturer: {cpus[0].manufacturer}" if cpus else "Manufacturer: -",
+        f"Cores: {hardware.cpu_cores}",
+        f"Clock: {hardware.cpu_mhz} MHz",
+        f"Power range: {cpus[0].power_usage_watts_min}-{cpus[0].power_usage_watts_max} W" if cpus else "Power range: -",
+        "",
+        f"Load: {used_cpu:.0f}/{total_cpu} MHz ({cpu_percent:.1f}%)",
+        f"Current draw: {sum(cpu.calc_current_power_usage() for cpu in cpus):.0f} W",
+    ]
+    return lines
+
+
+def _ram_detail_lines(hardware, table) -> list[str]:
+    ram_sticks = hardware.installed_ram()
+    used_mem = table.used_mem_kb()
+    total_mem = table.total_memory_kb
+    mem_percent = (used_mem / total_mem * 100) if total_mem else 0.0
+    lines = [
+        f"{hardware.memory_count} x {hardware.memory_kb}",
+        f"Manufacturer: {ram_sticks[0].manufacturer}" if ram_sticks else "Manufacturer: -",
+        f"Power range per stick: {ram_sticks[0].power_usage_watts_min}-{ram_sticks[0].power_usage_watts_max} W" if ram_sticks else "Power range: -",
+        "",
+        f"Total: {total_mem} KB",
+        f"Used: {used_mem} KB ({mem_percent:.1f}%)",
+        f"Current draw: {sum(ram.calc_current_power_usage() for ram in ram_sticks):.0f} W",
+    ]
+    return lines
+
+
+def _storage_detail_lines(hardware) -> list[str]:
+    return ["No drives detected."]
+
+
+def _power_detail_lines(hardware) -> list[str]:
+    psu_unit = hardware.power_supply_unit
+    total_draw = hardware.calculate_total_power_usage()
+    over_budget = total_draw > psu_unit.power_output_watts
+    lines = [
+        psu_unit.name,
+        f"Manufacturer: {psu_unit.manufacturer}",
+        f"Rated output: {psu_unit.power_output_watts} W",
+        "",
+        f"Current total draw: {total_draw:.0f} W",
+        f"Headroom: {psu_unit.power_output_watts - total_draw:.0f} W",
+        f"Status: {'OVER BUDGET' if over_budget else 'OK'}",
+    ]
+    return lines
+
+
+def _cooling_detail_lines(hardware) -> list[str]:
+    cooling_system = hardware.motherboard.cooling_system
+    lines = [
+        cooling_system.name,
+        f"Manufacturer: {cooling_system.manufacturer}",
+        f"Coolant: {cooling_system.coolant_type.value} ({cooling_system.coolant_amount}%)",
+        f"Base modifier: {cooling_system.base_cooling_modifier}",
+        "",
+        f"Cooling power: {cooling_system.calculate_cooling_power():.1f}",
+        f"Current draw: {cooling_system.calc_current_power_usage():.0f} W",
+        f"System temperature: {hardware.temperature_celsius:.1f} C",
+    ]
+    return lines
+
+
+def _network_detail_lines(hardware) -> list[str]:
+    interfaces = hardware.motherboard.network_interfaces
+    if not interfaces:
+        return ["No network interfaces."]
+    lines = []
+    for iface in interfaces:
+        if lines:
+            lines.append("")
+        lines.extend([
+            iface.name,
+            f"MAC: {iface.mac_address}",
+            f"IP: {iface.ip_address}",
+            f"Manufacturer: {iface.manufacturer}",
+            f"Power: {iface.power_usage_watts} W",
+        ])
+    return lines
+
+
+def _push_detail_screen(ctx, title: str, lines_fn) -> None:
+    """Opens a live-refreshing HardwareDetailScreen for one component --
+    `lines_fn` is called both now (initial render) and again on every
+    refresh tick, so it must stay cheap and side-effect free."""
+    ctx.screens.push(HardwareDetailScreen(ctx.screen, title, lines_fn(), ctx.screens, refresh=lines_fn))
 
 
 def _build_hardware_screen(ctx) -> HardwareScreen:
@@ -14,18 +110,23 @@ def _build_hardware_screen(ctx) -> HardwareScreen:
     those tiles -- and the Overview summary at the top -- are kept current
     the same way TopScreen keeps `top` live: refresh() below re-derives
     their `.lines` from `table`/`hardware` on every HardwareScreen tick,
-    not just once at push time."""
+    not just once at push time.
+
+    Each tile's on_select opens the matching HardwareDetailScreen (see
+    _push_detail_screen) -- more room than a small tile has for details, and
+    kept just as live via its own refresh callback."""
     hardware = ctx.hardware if ctx.hardware is not None else HardwareSpec()
     table = ctx.process_table
 
     overview = HardwareTile("Overview")
-    cpu = HardwareTile("CPU")
-    ram = HardwareTile("RAM")
-    storage = HardwareTile("Storage", ["No drives detected."])
+    cpu = HardwareTile("CPU", on_select=lambda: _push_detail_screen(ctx, "CPU", lambda: _cpu_detail_lines(hardware, table)))
+    ram = HardwareTile("RAM", on_select=lambda: _push_detail_screen(ctx, "RAM", lambda: _ram_detail_lines(hardware, table)))
+    storage = HardwareTile("Storage", ["No drives detected."],
+                            on_select=lambda: _push_detail_screen(ctx, "Storage", lambda: _storage_detail_lines(hardware)))
     external = HardwareTile("External")
-    power = HardwareTile("Power")
-    cooling = HardwareTile("Cooling")
-    network = HardwareTile("Network")
+    power = HardwareTile("Power", on_select=lambda: _push_detail_screen(ctx, "Power", lambda: _power_detail_lines(hardware)))
+    cooling = HardwareTile("Cooling", on_select=lambda: _push_detail_screen(ctx, "Cooling", lambda: _cooling_detail_lines(hardware)))
+    network = HardwareTile("Network", on_select=lambda: _push_detail_screen(ctx, "Network", lambda: _network_detail_lines(hardware)))
 
     def refresh() -> None:
         overview.lines = [format_system_summary(table)]

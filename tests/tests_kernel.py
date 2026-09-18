@@ -27,6 +27,7 @@ from horus.session.user import UserRegistry
 from horus.shell.input_handler import InputHandler
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.screens.crash_screen import CrashScreen
+from horus.ui.screens.hardware_detail_screen import HardwareDetailScreen
 from horus.ui.screens.hardware_screen import HardwareScreen
 from horus.ui.screens.menu_screen import MenuScreen
 from horus.ui.screens.settings_screen import SettingScreen
@@ -1312,3 +1313,96 @@ def test_sys_without_a_hardware_spec_falls_back_to_defaults():
                   process_table=ProcessTable())
     sys_command(ctx, [])  # should not raise
     assert isinstance(screens.active, HardwareScreen)
+
+
+# --- sys command: tile detail screens (Enter drills in) ---
+
+def _select(screen, col_moves, row_moves):
+    for _ in range(col_moves):
+        screen.handle_motion(pyglet.window.key.MOTION_RIGHT)
+    for _ in range(row_moves):
+        screen.handle_motion(pyglet.window.key.MOTION_DOWN)
+
+
+def test_sys_enter_on_cpu_opens_its_detail_screen():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, [])
+    screens.active.handle_enter()  # CPU is selected by default
+    assert isinstance(screens.active, HardwareDetailScreen)
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    assert hardware.cpu_name in full
+    assert "Cores:" in full
+
+
+def test_sys_enter_on_ram_opens_its_detail_screen():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, [])
+    _select(screens.active, col_moves=0, row_moves=1)
+    screens.active.handle_enter()
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    assert hardware.memory_kb in full
+    assert "Total:" in full
+
+
+def test_sys_enter_on_storage_opens_its_detail_screen():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, [])
+    _select(screens.active, col_moves=0, row_moves=2)
+    screens.active.handle_enter()
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    assert "No drives detected." in full
+
+
+def test_sys_enter_on_power_opens_its_detail_screen():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, [])
+    _select(screens.active, col_moves=1, row_moves=0)
+    screens.active.handle_enter()
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    assert hardware.power_supply_unit.name in full
+    assert "Rated output:" in full
+
+
+def test_sys_enter_on_cooling_opens_its_detail_screen():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, [])
+    _select(screens.active, col_moves=1, row_moves=1)
+    screens.active.handle_enter()
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    assert hardware.motherboard.cooling_system.name in full
+    assert "System temperature:" in full
+
+
+def test_sys_enter_on_network_opens_its_detail_screen():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, [])
+    _select(screens.active, col_moves=1, row_moves=2)
+    screens.active.handle_enter()
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    iface = hardware.motherboard.network_interfaces[0]
+    assert iface.ip_address in full
+    assert "MAC:" in full
+
+
+def test_sys_detail_screen_escape_returns_to_the_hardware_screen():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, [])
+    hardware_screen = screens.active
+    hardware_screen.handle_enter()
+    assert isinstance(screens.active, HardwareDetailScreen)
+    screens.active.handle_key(pyglet.window.key.ESCAPE, 0)
+    assert screens.active is hardware_screen
+
+
+def test_sys_cooling_detail_screen_updates_live_with_temperature():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, [])
+    _select(screens.active, col_moves=1, row_moves=1)
+    screens.active.handle_enter()
+    detail_screen = screens.active
+    assert detail_screen._refresh is not None
+
+    hardware.temperature_celsius = 88.5
+    detail_screen._tick(dt=0.0)
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    assert "88.5" in full
