@@ -6,6 +6,7 @@ from horus.display.screen_buffer import ScreenBuffer
 from horus.ui.box_drawing import draw_box, draw_line_graph
 from horus.ui.screen import Screen
 from horus.ui.screen_manager import ScreenManager
+from horus.ui.screens.settings_screen import SettingOption
 
 key = pyglet.window.key
 
@@ -38,13 +39,20 @@ class DetailScreen(Screen):
     plain list since a threshold can itself change over time (e.g. the
     ambient/minimum-temperature marker). Leaving history_fn unset keeps
     today's single full-width box for every panel that doesn't have history
-    to show yet."""
+    to show yet.
+
+    `options`, if given (and only together with history_fn -- it fills the
+    otherwise-empty top-right box), is a list of SettingOption (the same
+    type SettingScreen uses, with the same behavior): Up/Down moves the
+    selection, Left/Right directly calls the selected option's on_left/
+    on_right. `on_select`/Enter is unused here."""
 
     def __init__(self, buffer: ScreenBuffer, title: str, lines: list[str], screens: ScreenManager,
                  refresh: Callable[[], list[str]] | None = None, refresh_interval: float = 1.0,
                  history_fn: Callable[[], list[float]] | None = None, history_title: str = "History",
                  history_y_label: str = "Value",
-                 history_markers_fn: Callable[[], list[float]] | None = None) -> None:
+                 history_markers_fn: Callable[[], list[float]] | None = None,
+                 options: list[SettingOption] | None = None) -> None:
         self._buffer = buffer
         self._title = title
         self._lines = lines
@@ -57,6 +65,8 @@ class DetailScreen(Screen):
         self._history_markers_fn = history_markers_fn
         self._history_values = history_fn() if history_fn is not None else []
         self._history_markers = history_markers_fn() if history_markers_fn is not None else None
+        self._options = options
+        self._options_selected = 0
         self._saved_screen: dict | None = None
 
     def on_push(self) -> None:
@@ -105,16 +115,50 @@ class DetailScreen(Screen):
         top_height = rows // 2
         bottom_height = rows - top_height
         draw_box(self._buffer, 0, 0, left_width, rows, self._title, self._lines)
-        draw_box(self._buffer, left_width, 0, right_width, top_height, "")  # reserved for later
+        if self._options:
+            self._render_options(left_width, 0, right_width, top_height)
+        else:
+            draw_box(self._buffer, left_width, 0, right_width, top_height, "")  # reserved for later
         draw_line_graph(self._buffer, left_width, top_height, right_width, bottom_height,
                          self._history_title, self._history_values, y_label=self._history_y_label,
                          markers=self._history_markers)
+
+    def _render_options(self, x: int, y: int, width: int, height: int) -> None:
+        """Draws the border itself via draw_box, then writes each option's
+        row by hand (like draw_line_graph does for its plot) since draw_box's
+        own `lines` has no way to color just the selected row."""
+        draw_box(self._buffer, x, y, width, height, "Options")
+        interior_width = max(0, width - 4)
+        for i, option in enumerate(self._options):
+            row = y + 2 + i
+            if row >= y + height - 1:
+                break
+            selected = i == self._options_selected
+            marker = "> " if selected else "  "
+            text = f"{marker}{option.label}: < {option.get_value()} >"[:interior_width]
+            if selected:
+                self._buffer.write_string(x + 2, row, text, fg=self._buffer.default_bg, bg=self._buffer.default_fg)
+            else:
+                self._buffer.write_string(x + 2, row, text)
 
     def handle_text(self, text: str) -> None:
         pass
 
     def handle_motion(self, motion: int) -> None:
-        pass
+        if not self._options:
+            return
+        if motion == key.MOTION_UP:
+            self._options_selected = (self._options_selected - 1) % len(self._options)
+            self._render()
+        elif motion == key.MOTION_DOWN:
+            self._options_selected = (self._options_selected + 1) % len(self._options)
+            self._render()
+        elif motion in (key.MOTION_LEFT, key.MOTION_RIGHT):
+            option = self._options[self._options_selected]
+            handler = option.on_left if motion == key.MOTION_LEFT else option.on_right
+            if handler is not None:
+                handler()
+            self._render()
 
     def handle_enter(self) -> None:
         pass

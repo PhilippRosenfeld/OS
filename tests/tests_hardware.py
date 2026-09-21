@@ -215,6 +215,42 @@ def test_cooling_system_save_then_load_round_trips():
     assert loaded.coolant_type is CoolantType.LIQUID_NITROGEN
 
 
+def test_cooling_system_deactivated_cools_nothing_regardless_of_everything_else():
+    """A deactivated unit produces (and draws) zero cooling power no matter
+    how strong its coolant/type/rating would otherwise make it."""
+    cooling = CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50,
+                             coolant_type=CoolantType.LIQUID_NITROGEN, coolant_amount=100,
+                             temperature_celsius=90.0, base_cooling_modifier=2.0, active=False)
+    assert cooling.calculate_cooling_power() == 0.0
+    assert cooling.calc_current_power_usage() == 0.0
+
+
+def test_cooling_system_defaults_to_active():
+    cooling = CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50)
+    assert cooling.active is True
+
+
+def test_cooling_system_max_cooling_temperature_is_configurable_per_instance():
+    """Regression guard: this used to be a module-level constant shared by
+    every CoolingSystem -- now it's a per-instance field so one unit's
+    tuning can't leak into another's."""
+    low_ceiling = CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50, coolant_amount=100,
+                                 temperature_celsius=50.0, max_cooling_temperature_celsius=50.0)
+    high_ceiling = CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50, coolant_amount=100,
+                                  temperature_celsius=50.0, max_cooling_temperature_celsius=200.0)
+    # low_ceiling is already at its max -- running flat out; high_ceiling still has a long way to go
+    assert low_ceiling.calculate_cooling_power() > high_ceiling.calculate_cooling_power()
+
+
+def test_cooling_system_active_and_max_cooling_temperature_persist_through_save_and_load():
+    cooling = CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50,
+                             active=False, max_cooling_temperature_celsius=123.0)
+    loaded = CoolingSystem.from_dict(cooling.to_dict())
+    assert loaded == cooling
+    assert loaded.active is False
+    assert loaded.max_cooling_temperature_celsius == 123.0
+
+
 # --- HardwareSpec: defaults / flat backward-compatible properties ---
 
 def test_defaults_when_nothing_loaded():

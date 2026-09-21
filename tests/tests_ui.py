@@ -1484,6 +1484,103 @@ def test_hardware_detail_screen_history_fn_alone_schedules_a_tick():
     mock_schedule.assert_called_once_with(screen._tick, screen._refresh_interval)
 
 
+# --- DetailScreen options panel (top-right box, only with history_fn + options) ---
+
+def make_options():
+    state = {"value": 0}
+    return [
+        SettingOption("First", get_value=lambda: str(state["value"]),
+                      on_left=lambda: state.__setitem__("value", state["value"] - 1),
+                      on_right=lambda: state.__setitem__("value", state["value"] + 1)),
+        SettingOption("Second", get_value=lambda: "off"),
+    ], state
+
+
+def test_detail_screen_without_options_keeps_the_top_right_box_empty():
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    screen = DetailScreen(buffer, "Cooling", ["line"], manager, history_fn=lambda: [1.0])
+    manager.push(screen)
+    full = "".join(row_text(buffer, r) for r in range(20))
+    assert "Options" not in full
+
+
+def test_detail_screen_with_options_shows_them_in_the_top_right_box():
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    options, _ = make_options()
+    screen = DetailScreen(buffer, "Cooling", ["line"], manager, history_fn=lambda: [1.0], options=options)
+    manager.push(screen)
+    full = "".join(row_text(buffer, r) for r in range(20))
+    assert "Options" in full
+    assert "First: < 0 >" in full
+    assert "Second: < off >" in full
+
+
+def test_detail_screen_down_moves_the_option_selection():
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    options, _ = make_options()
+    screen = DetailScreen(buffer, "Cooling", ["line"], manager, history_fn=lambda: [1.0], options=options)
+    manager.push(screen)
+    assert screen._options_selected == 0
+    screen.handle_motion(key.MOTION_DOWN)
+    assert screen._options_selected == 1
+    screen.handle_motion(key.MOTION_DOWN)
+    assert screen._options_selected == 0  # wraps around
+
+
+def test_detail_screen_left_right_directly_change_the_selected_options_value():
+    """Same interaction as SettingScreen: no Enter needed -- Left/Right acts
+    directly on whatever Up/Down currently has selected."""
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    options, state = make_options()
+    screen = DetailScreen(buffer, "Cooling", ["line"], manager, history_fn=lambda: [1.0], options=options)
+    manager.push(screen)
+
+    screen.handle_motion(key.MOTION_RIGHT)
+    screen.handle_motion(key.MOTION_RIGHT)
+    screen.handle_motion(key.MOTION_LEFT)
+    assert state["value"] == 1
+
+
+def test_detail_screen_left_right_act_on_whichever_option_is_currently_selected():
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    options, state = make_options()
+    screen = DetailScreen(buffer, "Cooling", ["line"], manager, history_fn=lambda: [1.0], options=options)
+    manager.push(screen)
+
+    screen.handle_motion(key.MOTION_DOWN)  # select "Second", which has no on_left/on_right
+    screen.handle_motion(key.MOTION_RIGHT)
+    assert state["value"] == 0  # "First" untouched -- selection moved away from it
+
+    screen.handle_motion(key.MOTION_UP)  # back to "First"
+    screen.handle_motion(key.MOTION_RIGHT)
+    assert state["value"] == 1
+
+
+def test_detail_screen_escape_pops_the_screen():
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    options, _ = make_options()
+    screen = DetailScreen(buffer, "Cooling", ["line"], manager, history_fn=lambda: [1.0], options=options)
+    manager.push(screen)
+
+    screen.handle_key(key.ESCAPE, 0)
+    assert manager.active is None
+
+
+def test_detail_screen_motion_and_enter_are_a_noop_without_options():
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    screen = DetailScreen(buffer, "Cooling", ["line"], manager, history_fn=lambda: [1.0])
+    manager.push(screen)
+    screen.handle_motion(key.MOTION_DOWN)  # should not raise
+    screen.handle_enter()  # should not raise
+
+
 # --- box_drawing.draw_line_graph ---
 
 def test_draw_line_graph_plots_within_a_bordered_box():
@@ -1491,6 +1588,20 @@ def test_draw_line_graph_plots_within_a_bordered_box():
     draw_line_graph(buffer, 0, 0, 30, 10, "History", [1.0, 5.0, 3.0])
     assert row_text(buffer, 0).startswith("+ History ")
     assert row_text(buffer, 9).startswith("+")  # bottom border present
+
+
+def test_draw_line_graph_shows_the_latest_value_next_to_the_label():
+    buffer = ScreenBuffer(30, 10)
+    draw_line_graph(buffer, 0, 0, 30, 10, "History", [30.0, 45.2])
+    assert row_text(buffer, 0).startswith("+ History |45.2C|")  # values[-1], not the first or a random one
+
+
+def test_draw_line_graph_without_any_values_shows_no_current_reading():
+    buffer = ScreenBuffer(30, 10)
+    draw_line_graph(buffer, 0, 0, 30, 10, "History", [])
+    top_border = row_text(buffer, 0)
+    assert top_border.startswith("+ History ")
+    assert top_border.rstrip("-+ ") == "+ History"  # nothing but dashes after the label
 
 
 def test_draw_line_graph_higher_values_plot_higher_up():

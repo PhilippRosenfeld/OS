@@ -34,7 +34,10 @@ _MAX_COOLING_TEMPERATURE_CELSIUS = 75.0
 class CoolingSystem:
     def __init__(self, name: str, manufacturer: str, power_usage_watts_max: int,
                  coolant_type: CoolantType = CoolantType.WATER, coolant_amount: int = 100,
-                 temperature_celsius: float = 25.0, env_temperature_celsius: float = 25.0, base_cooling_modifier: float = 1.0):
+                 temperature_celsius: float = 25.0, env_temperature_celsius: float = 25.0,
+                 base_cooling_modifier: float = 1.0,
+                 max_cooling_temperature_celsius: float = _MAX_COOLING_TEMPERATURE_CELSIUS,
+                 active: bool = True):
         self.name = name
         self.manufacturer = manufacturer
         self.power_usage_watts_max = power_usage_watts_max
@@ -43,6 +46,8 @@ class CoolingSystem:
         self.temperature_celsius = temperature_celsius
         self.env_temperature_celsius = env_temperature_celsius
         self.base_cooling_modifier = base_cooling_modifier
+        self.max_cooling_temperature_celsius = max_cooling_temperature_celsius
+        self.active = active  # a deactivated unit cools nothing, regardless of coolant/type/rating
         self._cooling_power = self.calculate_cooling_power()
 
     def update_temperature(self, new_temperature: float) -> None:
@@ -66,7 +71,13 @@ class CoolingSystem:
         system currently is (see _temperature_factor): idling at power_usage_
         watts_max=0 output when the system is no hotter than its environment,
         ramping up to the full rated power_usage_watts_max once it's as hot
-        as _MAX_COOLING_TEMPERATURE_CELSIUS."""
+        as max_cooling_temperature_celsius.
+
+        A deactivated unit (active=False) always returns 0 here, before any
+        of the above even runs -- switched off is switched off, regardless
+        of coolant, type, or rating."""
+        if not self.active:
+            return 0.0
         multiplier = _COOLANT_MULTIPLIERS[self.coolant_type]
         env_factor = max(0.1, 1.0 - (self.env_temperature_celsius - _NEUTRAL_ENV_TEMPERATURE_CELSIUS) * _ENV_TEMP_SCALE)
         return (self.base_cooling_modifier * self.power_usage_watts_max * multiplier
@@ -75,8 +86,8 @@ class CoolingSystem:
     def _temperature_factor(self) -> float:
         """How hard the unit is currently working, from 0 (the system is no
         hotter than the environment -- nothing to cool) to 1 (the system is
-        at/above _MAX_COOLING_TEMPERATURE_CELSIUS -- running flat out)."""
-        span = _MAX_COOLING_TEMPERATURE_CELSIUS - self.env_temperature_celsius
+        at/above max_cooling_temperature_celsius -- running flat out)."""
+        span = self.max_cooling_temperature_celsius - self.env_temperature_celsius
         if span <= 0:
             return 1.0
         return min(1.0, max(0.0, (self.temperature_celsius - self.env_temperature_celsius) / span))
@@ -103,6 +114,8 @@ class CoolingSystem:
             "temperature_celsius": self.temperature_celsius,
             "env_temperature_celsius": self.env_temperature_celsius,
             "base_cooling_modifier": self.base_cooling_modifier,
+            "max_cooling_temperature_celsius": self.max_cooling_temperature_celsius,
+            "active": self.active,
         }
 
     @classmethod

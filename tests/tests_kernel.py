@@ -1541,6 +1541,47 @@ def test_sys_cooling_detail_screen_shows_a_history_graph():
     assert "90" in full  # critical_temperature marker line
 
 
+def test_sys_cooling_detail_screen_has_the_four_tunable_options():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, [])
+    _select(screens.active, col_moves=1, row_moves=1)
+    screens.active.handle_enter()
+    detail_screen = screens.active
+
+    labels = [option.label for option in detail_screen._options]
+    assert labels == ["Maximum cooling factor at", "Maximum power draw", "Warning temperature", "Status"]
+
+
+def test_sys_cooling_options_panel_edits_the_live_hardware_state():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, [])
+    _select(screens.active, col_moves=1, row_moves=1)
+    screens.active.handle_enter()
+    detail_screen = screens.active
+    cooling_system = hardware.motherboard.cooling_system
+    before = cooling_system.max_cooling_temperature_celsius
+
+    detail_screen.handle_motion(pyglet.window.key.MOTION_RIGHT)  # "Maximum cooling factor at" is selected first
+
+    assert cooling_system.max_cooling_temperature_celsius == before + 5.0
+
+
+def test_sys_cooling_options_panel_toggles_the_active_status():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, [])
+    _select(screens.active, col_moves=1, row_moves=1)
+    screens.active.handle_enter()
+    detail_screen = screens.active
+    cooling_system = hardware.motherboard.cooling_system
+    assert cooling_system.active is True
+
+    for _ in range(3):  # Down to "Status" (index 3)
+        detail_screen.handle_motion(pyglet.window.key.MOTION_DOWN)
+    detail_screen.handle_motion(pyglet.window.key.MOTION_LEFT)
+
+    assert cooling_system.active is False
+
+
 def test_sys_enter_on_other_tiles_does_not_open_a_history_graph():
     """Only Cooling gets a graph for now -- every other detail screen keeps
     the plain single-box layout."""

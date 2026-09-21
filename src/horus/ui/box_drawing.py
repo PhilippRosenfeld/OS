@@ -62,8 +62,20 @@ def draw_line_graph(buffer: ScreenBuffer, x: int, y: int, width: int, height: in
     UNDER the data points -- also stretching the y-axis scale to include
     them even if no sample has reached that value yet, so e.g. a "90"
     threshold line is visible well before the plotted series ever gets
-    that high."""
+    that high.
+
+    Whenever there's at least one sample, the latest one (values[-1] --
+    MetricHistory.values() is oldest first) is also written into the top
+    border just after `label`, so the current reading is visible at a
+    glance without having to read it off the plot itself."""
     draw_box(buffer, x, y, width, height, label)
+    if values:
+        label_text = f" {label} "[:max(0, width - 2)]
+        start_col = x + 1 + len(label_text)
+        max_len = max(0, (x + width - 1) - start_col)
+        if max_len > 0:
+            buffer.write_string(start_col, y, f"|{values[-1]:.1f}C|"[:max_len])
+
     interior_width = width - 4
     interior_height = height - 3
     if interior_width < 3 or interior_height < 3:

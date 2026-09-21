@@ -59,7 +59,7 @@ def register_temperature_reactions(bus: EventBus, screens, window, sounds, buffe
 
     def _on_temperature_critical(event) -> None:
         if sounds is not None:
-            sounds.play("system_error_notification")
+            sounds.play("system_crashed")
         if screens is not None:
             screens.push(CrashScreen(buffer, window, event.process_killed.name,
                                       reason=f"killed due to critical temperature ({event.temperature:.1f}C)"))
