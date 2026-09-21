@@ -17,13 +17,24 @@ class StatusBar:
     Driven by register_status_bar() (see processes.system_reactions), which
     calls set_lit() as events come in over the EventBus. TEMP and MSC have
     no real trigger yet -- they just never light up until something exists
-    to drive them."""
+    to drive them.
 
-    def __init__(self, cols: int) -> None:
+    `source_buffer`, if given, is read live on every render for its
+    `default_fg` -- the *unlit* label text always tracks whatever color the
+    shell itself is currently set to (see cmd_misc.color), instead of a
+    fixed one. No explicit notification is needed when that color changes:
+    the blinking timer alone already forces a re-render at least every
+    `start_blinking(interval)` seconds, which is enough to pick it up. The
+    lit background always stays amber regardless -- that's the warning-light
+    color, not a themeable one. Falls back to the buffer's own default_fg
+    for unlit text when no source is given (e.g. in isolation, tests)."""
+
+    def __init__(self, cols: int, source_buffer: ScreenBuffer | None = None) -> None:
         self.buffer = ScreenBuffer(cols, 1)
+        self._source_buffer = source_buffer
         self._lit = dict.fromkeys(LABELS, False)
         self._visible = False
-        self._blink_on = True  # lit labels only actually show amber while this is True
+        self._blink_on = True  # lit labels only actually show the accent color while this is True
         self._render()
 
     def set_lit(self, label: str, lit: bool) -> None:
@@ -71,11 +82,12 @@ class StatusBar:
         self.buffer.clear()
         if not self._visible:
             return
+        text_color = self._source_buffer.default_fg if self._source_buffer is not None else self.buffer.default_fg
         col = 0
         for label in LABELS:
             lit = self._lit[label] and self._blink_on
             text = f" {label} "
-            fg = self.buffer.default_bg if lit else self.buffer.default_fg
+            fg = self.buffer.default_bg if lit else text_color
             bg = NAMED_COLORS["amber"] if lit else self.buffer.default_bg
             self.buffer.write_string(col, 0, text, fg=fg, bg=bg)
             col += len(text) + 1  # 1-cell gap between lights

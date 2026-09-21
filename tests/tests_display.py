@@ -705,6 +705,55 @@ def test_blinking_toggles_a_lit_indicator_on_and_off():
     assert bar.buffer.get_cell(col, 0).bg_color == NAMED_COLORS["amber"]  # back on
 
 
+# --- StatusBar: unlit text color tracks a source buffer (e.g. the shell's own) ---
+
+def test_status_bar_without_a_source_buffer_uses_its_own_default_text_color():
+    """Same as every plain make_status_bar() test above -- locked in
+    explicitly here as the fallback this feature must not break."""
+    bar = StatusBar(40)
+    bar.set_visible(True)
+    col = bar_text(bar).index("SYS")  # unlit
+    assert bar.buffer.get_cell(col, 0).fg_color == bar.buffer.default_fg
+
+
+def test_status_bar_lit_background_always_stays_amber_regardless_of_source_color():
+    """The lit/blinking highlight is the warning-light color, not a themeable
+    one -- only the unlit text follows the shell's color (see the test
+    below), never the amber highlight itself."""
+    source = ScreenBuffer(40, 24)
+    source.set_default_color(fg=NAMED_COLORS["cyan"])
+    bar = StatusBar(40, source_buffer=source)
+    bar.set_visible(True)
+    bar.set_lit("PWR", True)
+    col = bar_text(bar).index("PWR")
+    assert bar.buffer.get_cell(col, 0).bg_color == NAMED_COLORS["amber"]
+
+
+def test_status_bar_unlit_text_tracks_the_source_buffers_color():
+    source = ScreenBuffer(40, 24)
+    source.set_default_color(fg=NAMED_COLORS["cyan"])
+    bar = StatusBar(40, source_buffer=source)
+    bar.set_visible(True)
+    col = bar_text(bar).index("SYS")  # never lit in this test
+    assert bar.buffer.get_cell(col, 0).fg_color == NAMED_COLORS["cyan"]
+
+
+def test_status_bar_picks_up_a_color_change_on_the_next_render():
+    """No explicit notification wiring exists between cmd_misc.color and
+    StatusBar -- the text color is simply read live every time _render()
+    runs (e.g. every blink tick), so a change shows up the next time
+    anything triggers a render, same as it would in the real game loop."""
+    source = ScreenBuffer(40, 24)
+    bar = StatusBar(40, source_buffer=source)
+    bar.set_visible(True)
+    col = bar_text(bar).index("SYS")  # unlit
+    assert bar.buffer.get_cell(col, 0).fg_color == source.default_fg  # starts as the source's original color
+
+    source.set_default_color(fg=NAMED_COLORS["cyan"])
+    bar._toggle_blink(dt=0.0)  # forces a re-render, same as the running blink timer would
+    assert bar.buffer.get_cell(col, 0).fg_color == NAMED_COLORS["cyan"]
+
+
 def test_blinking_does_not_affect_unlit_indicators():
     bar = make_status_bar()
     bar.set_visible(True)

@@ -27,7 +27,7 @@ class DisplayWindow:
         if rows is None:
             rows = max(1, (height - 2 * margin) // char_height)
         self.buffer = ScreenBuffer(cols, rows)
-        self.status_bar = StatusBar(cols)
+        self.status_bar = StatusBar(cols, source_buffer=self.buffer)
         self._ctx: moderngl.Context = moderngl.create_context()
         font_atlas = FontAtlas(font_path, char_width, char_height)
         self._renderer: Renderer = Renderer(self.buffer, font_atlas, self._ctx, status_bar=self.status_bar.buffer)
