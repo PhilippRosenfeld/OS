@@ -314,6 +314,8 @@ def rm(ctx, argv: list[str]) -> None:
         ctx.write_line(f"rm: cannot remove '{args.path[0]}': No such file or directory")
     except ProtectedFileError:
         ctx.write_line(f"rm: cannot remove '{args.path[0]}': File is protected")
+    except AccessDeniedError:
+        ctx.write_line(f"rm: cannot remove '{args.path[0]}': Permission denied")
 
 
 @command("chmod", help_text="Change file/directory permissions")

@@ -11,7 +11,7 @@ from horus.events.types import CommandExecutedEvent, PowerUsageCheckedEvent, Pro
 from horus.filesystem.backend.memory import InMemoryVFS
 from horus.hardware.spec import HardwareSpec
 from horus.kernel.commands.cmd_err import err as err_command
-from horus.kernel.commands.cmd_fs import cat, chattr, decrypt, encrypt, ls
+from horus.kernel.commands.cmd_fs import cat, chattr, decrypt, encrypt, ls, rm
 from horus.kernel.commands.cmd_menu import horus_menu, open_settings_menu
 from horus.kernel.commands.cmd_misc import color, su
 from horus.kernel.commands.cmd_proc import kill, ps, top
@@ -660,6 +660,52 @@ def test_cat_without_read_permission_writes_error():
     cat(ctx, ["secret.txt"])
 
     assert "Permission denied" in row_text(buffer, 0)
+
+
+# --- rm command ---
+
+def test_rm_removes_a_file():
+    ctx, buffer = make_context()
+    ctx.fs = InMemoryVFS()
+    ctx.fs.mkdir("/home", user="root")
+    ctx.fs.write_file("/home/notes.txt", "hello there\n", user="root")
+    ctx.cwd = "/home"
+
+    rm(ctx, ["notes.txt"])
+
+    assert "Removed:" in full_text(buffer)
+    assert not ctx.fs.exists("/home/notes.txt")
+
+
+def test_rm_missing_file_writes_error():
+    ctx, buffer = make_context(cols=60)
+    ctx.fs = InMemoryVFS()
+
+    rm(ctx, ["nope.txt"])
+
+    assert "No such file or directory" in row_text(buffer, 0)
+
+
+def test_rm_without_write_permission_writes_error_instead_of_raising():
+    """Regression test: rm used to only catch FileNotFoundError/
+    ProtectedFileError -- a non-owner without write permission hit the
+    uncaught AccessDeniedError from VFS.remove(), which the kernel dispatcher
+    then reported as a generic 'rm: internal error' instead of a proper
+    permission-denied message."""
+    ctx, buffer = make_context(cols=60)
+    ctx.fs = InMemoryVFS()
+    ctx.fs.mkdir("/home", user="root")
+    ctx.fs.write_file("/home/readme.txt", "eyes only", user="root")
+    ctx.fs.chmod("/home/readme.txt", mode="700", user="root")
+    ctx.cwd = "/home"
+    ctx.user = "user1"
+    ctx.effective_user = "user1"
+
+    rm(ctx, ["readme.txt"])
+
+    assert "Permission denied" in row_text(buffer, 0)
+    assert "internal error" not in row_text(buffer, 0)
+    assert ctx.fs.exists("/home/readme.txt")  # not actually removed
 
 
 # --- encrypt / decrypt commands ---
