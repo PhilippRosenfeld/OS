@@ -173,8 +173,8 @@ def test_defaults_when_nothing_loaded():
 
 def test_default_flat_properties_delegate_to_the_installed_components():
     spec = HardwareSpec()
-    assert spec.cpu_name == "Coeles X3201"
-    assert spec.cpu_mhz == 3200
+    assert spec.cpu_name == "Coele X551"
+    assert spec.cpu_mhz == 550
     assert spec.memory_kb == "16384K"
     assert spec.coolant_type == "Water"
     assert spec.coolant_amount == 99
@@ -186,7 +186,7 @@ def test_two_hardware_specs_default_to_independent_motherboards():
     default-argument hazard -- mutating one must not affect the other."""
     a, b = HardwareSpec(), HardwareSpec()
     a.motherboard.cpu_sockets[0].supported_cpus[0].mhz = 9999
-    assert b.cpu_mhz == 3200
+    assert b.cpu_mhz == 550
 
 
 # --- save / load ---
@@ -234,8 +234,8 @@ def test_total_cpu_mhz_sums_every_installed_cpu():
 
 
 def test_total_cpu_mhz_with_default_spec():
-    spec = HardwareSpec()  # cpu_mhz=3200, cpu_cores=1
-    assert spec.total_cpu_mhz() == 3200
+    spec = HardwareSpec()  # cpu_mhz=550, cpu_cores=1
+    assert spec.total_cpu_mhz() == 550
 
 
 # --- calculate_total_power_usage ---

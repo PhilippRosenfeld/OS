@@ -37,9 +37,9 @@ def _default_motherboard() -> Motherboard:
         power_usage_watts=20,
         cpu_sockets=[
             CpuSocket(name="Socket A", supported_cpus=[
-                Cpu(name="Coeles X3201", cores=1, mhz=3200,
+                Cpu(name="Coele X551", cores=1, mhz=550,
                     power_usage_watts_max=65, power_usage_watts_min=5,
-                    manufacturer="Coeles"),
+                    manufacturer="Coele Systems"),
             ]),
         ],
         ram_slots=[
@@ -75,7 +75,7 @@ def _default_motherboard() -> Motherboard:
 
 
 def _default_power_supply_unit() -> PowerSupplyUnit:
-    return PowerSupplyUnit(name="Horus PSU", manufacturer="Horus Inc.", power_output_watts=5)
+    return PowerSupplyUnit(name="Horus PSU", manufacturer="Horus Inc.", power_output_watts=500)
 
 
 @dataclass

@@ -41,7 +41,20 @@ def _ram_detail_lines(hardware, table) -> list[str]:
 
 
 def _storage_detail_lines(hardware) -> list[str]:
-    return ["No drives detected."]
+    drives = hardware.installed_storage()
+    if not drives:
+        return ["No drives detected."]
+    lines = []
+    for drive in drives:
+        if lines:
+            lines.append("")
+        lines.extend([
+            drive.name,
+            f"Manufacturer: {drive.manufacturer}",
+            f"Size: {drive.size} KB",
+            f"Power: {drive.power_usage_watts} W",
+        ])
+    return lines
 
 
 def _power_detail_lines(hardware) -> list[str]:
@@ -103,8 +116,9 @@ def _push_detail_screen(ctx, title: str, lines_fn) -> None:
 def _build_hardware_screen(ctx) -> HardwareScreen:
     """Assembles the hardware overview from live data: HardwareSpec for the
     machine's static specs, ProcessTable for how much of its CPU/RAM budget
-    is currently in use. Storage doesn't have a real activity signal yet
-    (no I/O simulation exists), so that tile stays a placeholder.
+    is currently in use. Storage shows the installed drives' specs, same as
+    Network -- it just has no live usage percentage the way CPU/RAM do,
+    since there's no I/O simulation to derive one from.
 
     CPU/RAM load (and, downstream, PSU draw) can change every tick, so
     those tiles -- and the Overview summary at the top -- are kept current
@@ -121,8 +135,7 @@ def _build_hardware_screen(ctx) -> HardwareScreen:
     overview = HardwareTile("Overview")
     cpu = HardwareTile("CPU", on_select=lambda: _push_detail_screen(ctx, "CPU", lambda: _cpu_detail_lines(hardware, table)))
     ram = HardwareTile("RAM", on_select=lambda: _push_detail_screen(ctx, "RAM", lambda: _ram_detail_lines(hardware, table)))
-    storage = HardwareTile("Storage", ["No drives detected."],
-                            on_select=lambda: _push_detail_screen(ctx, "Storage", lambda: _storage_detail_lines(hardware)))
+    storage = HardwareTile("Storage", on_select=lambda: _push_detail_screen(ctx, "Storage", lambda: _storage_detail_lines(hardware)))
     external = HardwareTile("External")
     power = HardwareTile("Power", on_select=lambda: _push_detail_screen(ctx, "Power", lambda: _power_detail_lines(hardware)))
     cooling = HardwareTile("Cooling", on_select=lambda: _push_detail_screen(ctx, "Cooling", lambda: _cooling_detail_lines(hardware)))
@@ -148,6 +161,9 @@ def _build_hardware_screen(ctx) -> HardwareScreen:
             f"Total: {total_mem} KB",
             f"Used: {used_mem} KB ({mem_percent:.1f}%)",
         ]
+
+        drives = hardware.installed_storage()
+        storage.lines = [f"{drive.name}: {drive.size} KB" for drive in drives] or ["No drives detected."]
 
         psu_unit = hardware.power_supply_unit
         power.lines = [

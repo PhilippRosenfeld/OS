@@ -1394,6 +1394,20 @@ def test_sys_enter_on_storage_opens_its_detail_screen():
     _select(screens.active, col_moves=0, row_moves=2)
     screens.active.handle_enter()
     full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    drive = hardware.installed_storage()[0]
+    assert drive.name in full
+    assert f"{drive.size} KB" in full
+
+
+def test_sys_storage_shows_a_placeholder_when_no_drives_are_installed():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    hardware.motherboard.storage_slots = []
+
+    sys_command(ctx, [])
+    _select(screens.active, col_moves=0, row_moves=2)
+    screens.active.handle_enter()
+
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
     assert "No drives detected." in full
 
 
