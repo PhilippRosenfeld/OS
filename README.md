@@ -16,7 +16,7 @@ Early development (`v0.2.0`). See the [Releases](../../releases) page for change
 ## Planned 
 Software installer for packages(Audioplayer, Videoplayer...)
 Videorendering
-Network(Server, Lan)
+Network(Server, Lan, wiki)
 Different Computers
 Malware
 Mailing/Message system
