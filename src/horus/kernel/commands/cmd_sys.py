@@ -1,9 +1,35 @@
 from horus.hardware.spec import HardwareSpec
+from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
 from horus.kernel.registry import command
 from horus.processes.process_view import format_system_summary
 from horus.ui.screens.detail_screen import DetailScreen
 from horus.ui.screens.hardware_screen import HardwareScreen, HardwareTile
 from horus.ui.screens.settings_screen import SettingOption
+
+# One (mutually exclusive) flag per hardware tile, so e.g. 'sys -c' jumps
+# straight to the Cooling detail screen instead of opening the overview and
+# navigating to it by hand. Letters chosen to avoid clashing with each other
+# case-sensitively (-C is CPU, -c is Cooling).
+_TILE_FLAGS = {
+    "cpu": ("-C", "--cpu"),
+    "ram": ("-r", "--ram"),
+    "storage": ("-s", "--storage"),
+    "power": ("-p", "--power"),
+    "cooling": ("-c", "--cooling"),
+    "network": ("-n", "--network"),
+}
+
+
+def _build_sys_parser() -> CommandArgumentParser:
+    parser = CommandArgumentParser(prog="sys", add_help=True,
+                                    description="Show a hardware overview, or jump straight to one component's detail screen")
+    group = parser.add_mutually_exclusive_group()
+    for name, (short, long) in _TILE_FLAGS.items():
+        group.add_argument(short, long, dest=name, action="store_true", help=f"Open the {name.capitalize()} detail screen directly")
+    return parser
+
+
+_sys_parser = _build_sys_parser()
 
 
 def _cpu_detail_lines(hardware, table) -> list[str]:
@@ -177,7 +203,7 @@ def _push_detail_screen(ctx, title: str, lines_fn, history_fn=None, history_titl
                                    options=options))
 
 
-def _build_hardware_screen(ctx) -> HardwareScreen:
+def _build_hardware_screen(ctx) -> tuple[HardwareScreen, dict[str, HardwareTile]]:
     """Assembles the hardware overview from live data: HardwareSpec for the
     machine's static specs, ProcessTable for how much of its CPU/RAM budget
     is currently in use. Storage shows the installed drives' specs, same as
@@ -192,7 +218,9 @@ def _build_hardware_screen(ctx) -> HardwareScreen:
 
     Each tile's on_select opens the matching DetailScreen (see
     _push_detail_screen) -- more room than a small tile has for details, and
-    kept just as live via its own refresh callback."""
+    kept just as live via its own refresh callback. Returns the tiles
+    keyed by the names in _TILE_FLAGS too, so sys() can jump straight to
+    one of them (its on_select is exactly what Enter would trigger on it)."""
     hardware = ctx.hardware if ctx.hardware is not None else HardwareSpec()
     table = ctx.process_table
 
@@ -255,10 +283,24 @@ def _build_hardware_screen(ctx) -> HardwareScreen:
 
     refresh()  # populate before the first render
 
-    return HardwareScreen(ctx.screen, "System Overview", overview, cpu, ram, storage,
-                           external, power, cooling, network, ctx.screens, refresh=refresh)
+    screen = HardwareScreen(ctx.screen, "System Overview", overview, cpu, ram, storage,
+                             external, power, cooling, network, ctx.screens, refresh=refresh)
+    tiles = {"cpu": cpu, "ram": ram, "storage": storage, "power": power, "cooling": cooling, "network": network}
+    return screen, tiles
 
 
 @command("sys", help_text="Show a hardware overview")
 def sys(ctx, argv: list[str]) -> None:
-    ctx.screens.push(_build_hardware_screen(ctx))
+    try:
+        args = _sys_parser.parse_args(argv)
+    except CommandParseError as e:
+        ctx.write_line(e.message or e.usage)
+        return
+
+    screen, tiles = _build_hardware_screen(ctx)
+    ctx.screens.push(screen)
+
+    for name, tile in tiles.items():
+        if getattr(args, name):
+            tile.on_select()
+            break

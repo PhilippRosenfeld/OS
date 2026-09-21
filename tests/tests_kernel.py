@@ -1364,6 +1364,46 @@ def test_sys_pushes_a_hardware_screen():
     assert isinstance(screens.active, HardwareScreen)
 
 
+def test_sys_dash_capital_c_jumps_straight_to_cpu():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, ["-C"])
+    assert isinstance(screens.active, DetailScreen)
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    assert hardware.cpu_name in full
+
+
+def test_sys_dash_lowercase_c_jumps_straight_to_cooling():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, ["-c"])
+    assert isinstance(screens.active, DetailScreen)
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    assert hardware.motherboard.cooling_system.name in full
+
+
+def test_sys_jump_flag_still_pushes_the_overview_underneath():
+    """Escape from the detail screen must land back on the overview, not
+    close the shell entirely -- so the overview screen still needs to be on
+    the stack below it, exactly like navigating there by hand would leave."""
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, ["-C"])
+    screens.active.handle_key(pyglet.window.key.ESCAPE, 0)
+    assert isinstance(screens.active, HardwareScreen)
+
+
+def test_sys_long_flags_jump_too():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, ["--ram"])
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    assert hardware.memory_kb in full
+
+
+def test_sys_combining_two_jump_flags_is_a_parse_error():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, ["-C", "-c"])
+    assert screens.active is None  # never got as far as pushing anything
+    assert "not allowed" in full_text(buffer) or "usage" in full_text(buffer).lower()
+
+
 def test_sys_overview_tile_reports_the_combined_system_summary():
     ctx, buffer, screens, table, hardware = make_sys_context()
     table.add_process(Process(name="a", pid=0, owner="root", cpu_mhz=100.0, mem_kb=2048))
