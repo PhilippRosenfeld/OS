@@ -1421,6 +1421,15 @@ def test_sys_enter_on_power_opens_its_detail_screen():
     assert "Rated output:" in full
 
 
+def test_sys_cooling_tile_shows_cooling_power_without_entering_the_detail_screen():
+    """Cooling power (not just the electrical draw) must be visible on the
+    overview tile itself, before Enter opens the detail screen."""
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, [])
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    assert "Cooling power:" in full
+
+
 def test_sys_enter_on_cooling_opens_its_detail_screen():
     ctx, buffer, screens, table, hardware = make_sys_context()
     sys_command(ctx, [])

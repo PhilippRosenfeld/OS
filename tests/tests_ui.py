@@ -505,6 +505,24 @@ def test_top_screen_refresh_reflects_new_processes():
     assert "new_proc" in screen_text  # row position isn't fixed -- rows are sorted by cpu usage
 
 
+def test_top_screen_tick_is_a_noop_while_covered_by_an_externally_pushed_screen():
+    """See the matching HardwareScreen regression test: a CrashScreen pushed
+    by an event reaction while top is open must not get clobbered by top's
+    own still-running tick."""
+    buffer = ScreenBuffer(60, 10)
+    manager = ScreenManager()
+    with patch("pyglet.clock.schedule_interval"):
+        screen = TopScreen(buffer, make_table(), manager)
+        manager.push(screen)
+
+    with patch("pyglet.clock.schedule_once"):
+        manager.push(CrashScreen(buffer, None, "hog"))
+    screen._tick(dt=0.0)  # must not raise, and must not re-render over the crash screen
+
+    screen_text = "".join(row_text(buffer, r) for r in range(buffer.rows))
+    assert "KERNEL PANIC" in screen_text
+
+
 def test_top_screen_ctrl_c_pops_back_to_the_shell():
     buffer = ScreenBuffer(60, 10)
     manager = ScreenManager()
@@ -572,6 +590,28 @@ def test_crash_screen_renders_a_kernel_panic_message_and_disables_cursor():
     screen_text = "".join(row_text(buffer, r) for r in range(buffer.rows))
     assert "KERNEL PANIC" in screen_text
     assert "init" in screen_text
+
+
+def test_crash_screen_default_reason_says_terminated_unexpectedly():
+    buffer = ScreenBuffer(60, 10)
+    manager = ScreenManager()
+    with patch("pyglet.clock.schedule_once"):
+        manager.push(CrashScreen(buffer, FakeCloseableWindow(), "init"))
+    screen_text = "".join(row_text(buffer, r) for r in range(buffer.rows))
+    assert "terminated unexpectedly" in screen_text
+
+
+def test_crash_screen_shows_a_custom_reason():
+    """A CrashScreen pushed for a specific cause (e.g. a thermal shutdown)
+    must say so, not just name the process."""
+    buffer = ScreenBuffer(100, 10)  # wide enough that the message doesn't wrap across rows
+    manager = ScreenManager()
+    with patch("pyglet.clock.schedule_once"):
+        manager.push(CrashScreen(buffer, FakeCloseableWindow(), "hog",
+                                  reason="killed due to critical temperature (95.0C)"))
+    screen_text = "".join(row_text(buffer, r) for r in range(buffer.rows))
+    assert "hog" in screen_text
+    assert "killed due to critical temperature (95.0C)" in screen_text
 
 
 def test_crash_screen_schedules_the_window_close_after_a_delay():
@@ -1142,6 +1182,31 @@ def test_hardware_screen_enter_pauses_its_own_tick_while_a_detail_screen_is_open
     mock_unschedule.assert_called_once_with(screen._tick)
 
 
+def test_hardware_screen_tick_is_a_noop_while_covered_by_an_externally_pushed_screen():
+    """Regression test: a screen can also end up covering HardwareScreen from
+    outside its own code entirely -- e.g. a CrashScreen pushed by a
+    temperature/power event reaction while HardwareScreen is active.
+    handle_enter()'s unschedule can't help there (HardwareScreen never gets a
+    chance to react before being covered), so _tick must guard itself
+    instead, or it keeps clobbering the CrashScreen's content every tick,
+    flickering back and forth between it and the overview."""
+    buffer = ScreenBuffer(40, 20)
+    manager = ScreenManager()
+    tile = HardwareTile("X")
+    calls = []
+    with patch("pyglet.clock.schedule_interval"):
+        screen = HardwareScreen(buffer, "Hardware", tile, tile, tile, tile, tile, tile, tile, tile,
+                                 manager, refresh=lambda: calls.append(True))
+        manager.push(screen)
+    calls.clear()  # drop the call from on_push()'s own initial render
+
+    with patch("pyglet.clock.schedule_once"):
+        manager.push(CrashScreen(buffer, None, "hog"))  # covers HardwareScreen from outside
+    screen._tick(dt=0.0)
+
+    assert calls == []  # refresh() was not called -- the tick no-op'd instead of rendering over the crash screen
+
+
 def test_hardware_screen_on_resume_reschedules_the_tick_and_rerenders():
     buffer = ScreenBuffer(40, 20)
     manager = ScreenManager()
@@ -1308,6 +1373,29 @@ def test_hardware_detail_screen_tick_calls_refresh_then_rerenders():
     screen._tick(dt=0.0)
     assert calls == [True]
     assert "updated line" in row_text(buffer, 2)
+
+
+def test_hardware_detail_screen_tick_is_a_noop_while_covered_by_an_externally_pushed_screen():
+    """See the matching HardwareScreen regression test: a CrashScreen pushed
+    by an event reaction while a detail screen is open must not get
+    clobbered by the detail screen's own still-running tick."""
+    buffer = ScreenBuffer(40, 10)
+    manager = ScreenManager()
+    calls = []
+
+    def refresh():
+        calls.append(True)
+        return ["updated line"]
+
+    with patch("pyglet.clock.schedule_interval"):
+        screen = DetailScreen(buffer, "CPU", ["stale line"], manager, refresh=refresh)
+        manager.push(screen)
+
+    with patch("pyglet.clock.schedule_once"):
+        manager.push(CrashScreen(buffer, None, "hog"))
+    screen._tick(dt=0.0)
+
+    assert calls == []
 
 
 def test_hardware_detail_screen_unschedules_the_tick_on_pop():

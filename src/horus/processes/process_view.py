@@ -48,12 +48,16 @@ def format_cpu_percent(proc, process_table) -> float:
     return (proc.cpu_mhz / capacity * 100) if capacity else 0.0
 
 
-def format_system_summary(process_table) -> str:
+def format_system_summary(process_table, hardware=None) -> str:
     """One-line summary of combined resource usage across every process
     currently tracked by `process_table`, for the header of top/ps. Always
     within budget -- ProcessTable._enforce_resource_caps() guarantees the
     combined cpu/mem usage reported here never exceeds the table's
-    total_cpu_mhz or total_memory_kb (normally read from HardwareSpec)."""
+    total_cpu_mhz or total_memory_kb (normally read from HardwareSpec).
+
+    `hardware` is optional and separate from `process_table` -- ProcessTable
+    deliberately has no reference to HardwareSpec (see cmd_sys.py) -- so the
+    TEMP segment is only appended when a HardwareSpec is actually passed in."""
     used_cpu = process_table.used_cpu_mhz()
     cpu_capacity = process_table.total_cpu_mhz
     cpu_percent = (used_cpu / cpu_capacity * 100) if cpu_capacity else 0.0
@@ -62,5 +66,8 @@ def format_system_summary(process_table) -> str:
     mem_capacity = process_table.total_memory_kb
     mem_percent = (used_mem / mem_capacity * 100) if mem_capacity else 0.0
 
-    return (f"System: CPU {used_cpu:.0f}/{cpu_capacity} MHz ({cpu_percent:.1f}%)   "
-            f"MEM {used_mem}/{mem_capacity} KB ({mem_percent:.1f}%)")
+    summary = (f"System: CPU {used_cpu:.0f}/{cpu_capacity} MHz ({cpu_percent:.1f}%)   "
+               f"MEM {used_mem}/{mem_capacity} KB ({mem_percent:.1f}%)")
+    if hardware is not None:
+        summary += f"   TEMP {hardware.temperature_celsius:.1f}C"
+    return summary

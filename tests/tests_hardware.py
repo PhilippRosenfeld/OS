@@ -3,7 +3,7 @@ from datetime import datetime
 from unittest.mock import patch
 
 from horus.events.bus import EventBus
-from horus.events.types import PowerUsageCheckedEvent
+from horus.events.types import PowerUsageCheckedEvent, TemperatureCriticalEvent, TemperatureWarningEvent
 from horus.hardware.cooling_system import CoolantType, CoolingSystem
 from horus.hardware.cpu import Cpu
 from horus.hardware.metric_history import MetricHistory
@@ -115,10 +115,14 @@ def test_cooling_system_with_no_coolant_left_cools_nothing():
 
 
 def test_cooling_system_draw_increases_with_coolant_amount():
-    """More coolant -> more cooling power -> more watts drawn, monotonically."""
+    """More coolant -> more cooling power -> more watts drawn, monotonically.
+    Pinned at the max temperature_celsius so the new temperature throttle
+    (see _temperature_factor) runs at 1.0 and doesn't interfere -- this test
+    is only about the coolant_amount axis."""
     draws = [
         CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50,
-                       coolant_type=CoolantType.WATER, coolant_amount=amount).calc_current_power_usage()
+                       coolant_type=CoolantType.WATER, coolant_amount=amount,
+                       temperature_celsius=90.0).calc_current_power_usage()
         for amount in (0, 25, 50, 75, 100)
     ]
     assert draws == sorted(draws)
@@ -129,22 +133,70 @@ def test_cooling_system_draw_increases_with_coolant_amount():
 def test_cooling_system_stronger_coolant_type_draws_more_power():
     """A more effective coolant produces more cooling power for the same
     amount/modifier -- and, per calc_current_power_usage, that costs more
-    energy to run, not less (until it hits the unit's rated max)."""
+    energy to run, not less (until it hits the unit's rated max). Pinned at
+    the max temperature_celsius, see test_cooling_system_draw_increases_
+    with_coolant_amount above."""
     def draw_for(coolant_type):
         return CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50,
-                              coolant_type=coolant_type, coolant_amount=50).calc_current_power_usage()
+                              coolant_type=coolant_type, coolant_amount=50,
+                              temperature_celsius=90.0).calc_current_power_usage()
 
     assert draw_for(CoolantType.AIR) < draw_for(CoolantType.WATER) < draw_for(CoolantType.OIL)
 
 
 def test_cooling_system_draw_is_capped_at_power_usage_watts_max():
     """A coolant type/modifier combo strong enough to exceed the unit's
-    rated wattage still can't draw more than power_usage_watts_max."""
+    rated wattage still can't draw more than power_usage_watts_max. Pinned
+    at the max temperature_celsius, see test_cooling_system_draw_increases_
+    with_coolant_amount above."""
     cooling = CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50,
                              coolant_type=CoolantType.LIQUID_NITROGEN, coolant_amount=100,
-                             base_cooling_modifier=2.0)
+                             base_cooling_modifier=2.0, temperature_celsius=90.0)
     assert cooling.calculate_cooling_power() > 50  # would exceed the rating uncapped
     assert cooling.calc_current_power_usage() == 50
+
+
+def test_cooling_system_cooling_power_drops_in_a_hotter_environment():
+    """A hotter room leaves less of a gradient to dump heat into, so the
+    same unit delivers less cooling power than at neutral (25C). Pinned at
+    the max temperature_celsius, see test_cooling_system_draw_increases_
+    with_coolant_amount above."""
+    def power_at(env_temp):
+        return CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50, coolant_amount=100,
+                              env_temperature_celsius=env_temp, temperature_celsius=90.0).calculate_cooling_power()
+
+    assert power_at(45.0) < power_at(25.0) < power_at(5.0)
+
+
+def test_cooling_system_idles_when_no_hotter_than_the_environment():
+    """The new bit: the unit shouldn't run at its rated power all the time --
+    at/below the environment's own temperature there's nothing to cool, so
+    it should produce (and draw) no cooling power at all."""
+    cooling = CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50,
+                             coolant_amount=100, temperature_celsius=25.0, env_temperature_celsius=25.0)
+    assert cooling.calculate_cooling_power() == 0.0
+    assert cooling.calc_current_power_usage() == 0.0
+
+
+def test_cooling_system_ramps_up_with_temperature():
+    """Between idling at the environment's temperature and running flat out
+    at _MAX_COOLING_TEMPERATURE_CELSIUS, cooling power increases smoothly
+    with how hot the system currently is."""
+    def power_at(temp):
+        return CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50,
+                              coolant_amount=100, temperature_celsius=temp).calculate_cooling_power()
+
+    assert power_at(25.0) < power_at(50.0) < power_at(90.0)
+
+
+def test_cooling_system_temperature_factor_caps_at_one_above_the_max():
+    """Running even hotter than _MAX_COOLING_TEMPERATURE_CELSIUS can't push
+    the unit past its already-flat-out 1.0 temperature factor."""
+    cooling_at_max = CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50,
+                                    coolant_amount=100, temperature_celsius=90.0)
+    cooling_past_max = CoolingSystem("Cooler", "Test Inc.", power_usage_watts_max=50,
+                                      coolant_amount=100, temperature_celsius=150.0)
+    assert cooling_at_max.calculate_cooling_power() == cooling_past_max.calculate_cooling_power()
 
 
 def test_cooling_system_update_temperature_recomputes_cached_cooling_power():
@@ -248,6 +300,9 @@ def test_calculate_total_power_usage_combines_every_component_at_idle():
         ifaces=[NetworkInterface("eth0", "00:00", "0.0.0.0", "Test Inc.", power_usage_watts=2)],
         power_usage_watts=10, cooling_power_usage_watts=5,
     )
+    spec.motherboard.cooling_system.temperature_celsius = 90.0  # pin the cooling throttle at 1.0 --
+                                                                  # this test is about combining components,
+                                                                  # not about CoolingSystem's own temperature curve
     # idle: cpu 5 + ram 1 + storage 3 + network 2 + cooling 5 + board 10
     assert spec.calculate_total_power_usage() == 26
 
@@ -260,6 +315,7 @@ def test_calculate_total_power_usage_scales_cpu_and_ram_with_load():
         ifaces=[NetworkInterface("eth0", "00:00", "0.0.0.0", "Test Inc.", power_usage_watts=2)],
         power_usage_watts=10, cooling_power_usage_watts=5,
     )
+    spec.motherboard.cooling_system.temperature_celsius = 90.0  # see test above
     spec.motherboard.cpu_sockets[0].supported_cpus[0].load = 1.0
     spec.motherboard.ram_slots[0].supported_ram_types[0].load = 1.0
     # full load: cpu 50 + ram 4 + storage 3 + network 2 + cooling 5 + board 10
@@ -362,15 +418,27 @@ def test_update_temperature_rises_when_heat_exceeds_cooling():
 
 
 def test_update_temperature_cools_back_toward_ambient_when_idle():
-    spec = make_spec(cooling_power_usage_watts=50)  # idle CPU/RAM draw far less than 50W of cooling
+    # rated cooling power high enough to still dominate idle heat even
+    # throttled down at 40C (see CoolingSystem._temperature_factor)
+    spec = make_spec(cooling_power_usage_watts=500)
     spec.temperature_celsius = 40.0
     spec._update_temperature()
     assert spec.temperature_celsius < 40.0
 
 
 def test_update_temperature_never_drops_below_ambient():
-    spec = make_spec(cooling_power_usage_watts=1000)  # vastly more cooling than any heat generated
-    spec.temperature_celsius = 25.0
+    """Even an enormous amount of cooling relative to heat can't push the
+    temperature below ambient -- max() floors it. Heat is zeroed out and the
+    starting temperature is nudged just above ambient so the cooling
+    throttle (idle exactly at ambient, see CoolingSystem._temperature_factor)
+    actually engages."""
+    spec = make_spec(
+        cpus=[make_cpu(power_min=0, power_max=0)], rams=[make_ram(power_min=0, power_max=0)],
+        storages=[Storage("Disk", 1024, "Test Inc.", power_usage_watts=0)],
+        ifaces=[NetworkInterface("eth0", "00:00", "0.0.0.0", "Test Inc.", power_usage_watts=0)],
+        power_usage_watts=0, cooling_power_usage_watts=100000,
+    )
+    spec.temperature_celsius = 26.0
     spec._update_temperature()
     assert spec.temperature_celsius == 25.0
 
@@ -382,6 +450,16 @@ def test_update_temperature_rises_when_no_coolant_left():
     spec = make_spec(cpus=[make_cpu(power_min=5, power_max=50)], cooling_power_usage_watts=1000)
     spec.motherboard.cooling_system.coolant_amount = 0
     spec.motherboard.cpu_sockets[0].supported_cpus[0].load = 1.0
+    before = spec.temperature_celsius
+    spec._update_temperature()
+    assert spec.temperature_celsius > before
+
+
+def test_update_temperature_rises_from_idle_non_compute_components_alone():
+    """Storage, network and the motherboard's own base draw generate heat
+    too, even with CPU/RAM completely idle -- not just CPU/RAM as before."""
+    spec = make_spec(cpus=[make_cpu(power_min=0, power_max=0)], rams=[make_ram(power_min=0, power_max=0)],
+                      power_usage_watts=10, cooling_power_usage_watts=0)
     before = spec.temperature_celsius
     spec._update_temperature()
     assert spec.temperature_celsius > before
@@ -404,6 +482,116 @@ def test_check_power_usage_updates_the_temperature():
     spec._check_power_usage(dt=0.0)
 
     assert spec.temperature_celsius > before
+
+
+def test_check_temperature_does_nothing_below_the_warning_threshold():
+    spec = make_spec()
+    events = EventBus()
+    spec._events = events
+    received = []
+    events.subscribe(TemperatureWarningEvent, received.append)
+
+    spec.temperature_celsius = 79.9
+    spec._check_temperature()
+
+    assert received == []
+
+
+def test_check_temperature_publishes_a_warning_above_the_threshold():
+    spec = make_spec()
+    events = EventBus()
+    spec._events = events
+    received = []
+    events.subscribe(TemperatureWarningEvent, received.append)
+
+    spec.temperature_celsius = 85.0
+    spec._check_temperature()
+
+    assert len(received) == 1
+    assert received[0].temperature == 85.0
+    assert received[0].critical_temperature == spec.critical_temperature
+
+
+def test_check_temperature_triggers_a_shutdown_above_the_critical_threshold():
+    spec = make_spec()
+    table = ProcessTable(total_cpu_mhz=1000, total_memory_kb=1024)
+    table.add_process(Process(name="hog", pid=1, owner="root", cpu_mhz=100, mem_kb=1))
+    events = EventBus()
+    spec._events = events
+    spec._process_table = table
+    warnings = []
+    criticals = []
+    events.subscribe(TemperatureWarningEvent, warnings.append)
+    events.subscribe(TemperatureCriticalEvent, criticals.append)
+
+    spec.temperature_celsius = 95.0
+    spec._check_temperature()
+
+    assert len(warnings) == 1  # still crosses the (lower) warning threshold too
+    assert len(criticals) == 1
+    assert criticals[0].temperature == 95.0
+    assert criticals[0].process_killed.pid == 1
+    assert table.get_process(1) is None  # the offending process was actually killed
+
+
+def test_check_temperature_stops_reacting_once_a_shutdown_has_fired():
+    """Regression guard: while the system stays critically hot, repeated
+    ticks must not keep killing more processes or keep publishing more
+    warning/critical events -- the first shutdown already latches the
+    system into "going down", so everything past that point is a no-op."""
+    spec = make_spec()
+    table = ProcessTable(total_cpu_mhz=1000, total_memory_kb=1024)
+    table.add_process(Process(name="hog", pid=1, owner="root", cpu_mhz=100, mem_kb=1))
+    table.add_process(Process(name="other", pid=2, owner="root", cpu_mhz=100, mem_kb=1))
+    events = EventBus()
+    spec._events = events
+    spec._process_table = table
+    warnings = []
+    criticals = []
+    events.subscribe(TemperatureWarningEvent, warnings.append)
+    events.subscribe(TemperatureCriticalEvent, criticals.append)
+
+    spec.temperature_celsius = 95.0
+    for _ in range(5):
+        spec._check_temperature()
+
+    assert len(warnings) == 1
+    assert len(criticals) == 1
+    assert len(table.processes) == 1  # only the one process from the first shutdown was killed
+
+
+def test_handle_thermal_shutdown_does_nothing_with_no_processes_to_kill():
+    spec = make_spec()
+    table = ProcessTable(total_cpu_mhz=1000, total_memory_kb=1024)
+    events = EventBus()
+    spec._events = events
+    spec._process_table = table
+    received = []
+    events.subscribe(TemperatureCriticalEvent, received.append)
+
+    spec.temperature_celsius = 95.0
+    spec._check_temperature()
+
+    assert received == []
+    assert spec._thermal_shutdown_triggered is False  # no CrashScreen ever appeared -- keep checking
+
+
+def test_check_power_usage_fires_temperature_reactions_when_hot():
+    """Regression guard: _check_power_usage (the actual periodic tick) must
+    call _check_temperature too, not just _update_temperature -- otherwise
+    TemperatureWarningEvent/TemperatureCriticalEvent never fire in the real
+    game loop even though the temperature itself is tracked correctly."""
+    spec = make_spec()
+    table = ProcessTable(total_cpu_mhz=1000, total_memory_kb=1024)
+    events = EventBus()
+    received = []
+    events.subscribe(TemperatureWarningEvent, received.append)
+
+    spec.start_power_monitoring(table, events)
+    spec.temperature_celsius = 85.0
+    spec._check_power_usage(dt=0.0)
+
+    assert len(received) == 1
 
 
 def test_hardware_spec_temperature_persists_through_save_and_load(tmp_path):

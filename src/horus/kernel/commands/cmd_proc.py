@@ -19,7 +19,7 @@ def _render_top(ctx, sort_by: str | None = None) -> None:
     processes = ctx.process_table.list_processes()
     if sort_by is not None:
         processes = sort_processes(processes, sort_by)
-    ctx.write_line(format_system_summary(ctx.process_table))
+    ctx.write_line(format_system_summary(ctx.process_table, ctx.hardware))
     ctx.write_line(f"{'PID':<8}{'USER':<12}{'CPU%':<10}{'MEM(KB)':<12}{'UPTIME':<10}{'NAME'}")
     ctx.write_line("-" * 70)
     for proc in processes:
@@ -58,7 +58,7 @@ def top(ctx, argv: list[str]) -> None:
         _render_top(ctx, sort_by=args.sort)
         return
 
-    ctx.screens.push(TopScreen(ctx.screen, ctx.process_table, ctx.screens, sort_by=args.sort))
+    ctx.screens.push(TopScreen(ctx.screen, ctx.process_table, ctx.screens, sort_by=args.sort, hardware=ctx.hardware))
     
 @command("ps", help_text="Display system processes snapshot")
 def ps(ctx, argv: list[str]) -> None:

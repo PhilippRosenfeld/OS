@@ -81,6 +81,7 @@ def _cooling_detail_lines(hardware) -> list[str]:
         f"Coolant: {cooling_system.coolant_type.value} ({cooling_system.coolant_amount}%)",
         f"Base modifier: {cooling_system.base_cooling_modifier}",
         "",
+        f"Max output: {cooling_system.power_usage_watts_max} W",
         f"Cooling power: {cooling_system.calculate_cooling_power():.1f}",
         f"Current draw: {cooling_system.calc_current_power_usage():.0f} W",
         f"System temperature: {hardware.temperature_celsius:.1f} C",
@@ -142,7 +143,7 @@ def _build_hardware_screen(ctx) -> HardwareScreen:
     network = HardwareTile("Network", on_select=lambda: _push_detail_screen(ctx, "Network", lambda: _network_detail_lines(hardware)))
 
     def refresh() -> None:
-        overview.lines = [format_system_summary(table)]
+        overview.lines = [format_system_summary(table, hardware)]
 
         used_cpu = table.used_cpu_mhz()
         total_cpu = table.total_cpu_mhz
@@ -176,6 +177,7 @@ def _build_hardware_screen(ctx) -> HardwareScreen:
         cooling.lines = [
             cooling_system.name,
             f"{cooling_system.coolant_type.value}: {cooling_system.coolant_amount}%",
+            f"Cooling power: {cooling_system.calculate_cooling_power():.0f}",
             f"Draw: {cooling_system.calc_current_power_usage():.0f} W",
         ]
 

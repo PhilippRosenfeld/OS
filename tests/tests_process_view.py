@@ -115,3 +115,18 @@ def test_format_system_summary_with_no_processes():
     assert "0/100 MHz" in summary
     assert "0/10000 KB" in summary
     assert "0.0%" in summary
+
+
+def test_format_system_summary_without_hardware_omits_temp():
+    table = ProcessTable(total_memory_kb=10000, total_cpu_mhz=100)
+    assert "TEMP" not in format_system_summary(table)
+
+
+def test_format_system_summary_with_hardware_appends_temp():
+    table = ProcessTable(total_memory_kb=10000, total_cpu_mhz=100)
+
+    class FakeHardware:
+        temperature_celsius = 42.5
+
+    summary = format_system_summary(table, FakeHardware())
+    assert "TEMP 42.5C" in summary

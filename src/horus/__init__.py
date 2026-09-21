@@ -21,6 +21,7 @@ from horus.processes.system_reactions import (
     register_status_bar,
     register_system_log,
     register_system_reactions,
+    register_temperature_reactions,
 )
 from horus.session.context import Context
 from horus.session.history import CommandHistory
@@ -97,7 +98,8 @@ def main() -> None:
     process_table.start_fluctuating()
     hardware.start_power_monitoring(process_table, bus)
     register_system_reactions(bus, screens, window, sounds, window.buffer)
-    register_power_reactions(bus, screens, window, sounds, window.buffer)
+    register_power_reactions(bus, sounds)
+    register_temperature_reactions(bus, screens, window, sounds, window.buffer)
     system_log = SystemLog()
     register_system_log(bus, system_log)
     register_status_bar(bus, window.status_bar)

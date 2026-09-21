@@ -4,8 +4,14 @@ from horus.display.screen_buffer import ScreenBuffer
 from horus.display.status_bar import StatusBar
 from horus.events.bus import EventBus
 from horus.events.system_log import LogSeverity, SystemLog
-from horus.events.types import PowerUsageCheckedEvent, ProcessKilledEvent, ProcessStartedEvent
-from horus.processes.system_reactions import register_status_bar, register_system_log, register_system_reactions
+from horus.events.types import PowerUsageCheckedEvent, ProcessKilledEvent, ProcessStartedEvent, TemperatureCriticalEvent, TemperatureWarningEvent
+from horus.processes.process import process as Process
+from horus.processes.system_reactions import (
+    register_status_bar,
+    register_system_log,
+    register_system_reactions,
+    register_temperature_reactions,
+)
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.screens.crash_screen import CrashScreen
 
@@ -117,6 +123,85 @@ def test_crash_screen_receives_the_killed_process_name():
         "".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows)
     )
     assert "init" in screen_text
+
+
+# --- register_temperature_reactions ---
+
+def test_temperature_warning_does_not_push_a_crash_screen():
+    """Regression guard: a mere warning-level temperature must not trigger
+    the kernel-panic-and-close-the-window treatment -- only
+    TemperatureCriticalEvent does. Firing this every tick the system stays
+    hot previously spammed a new CrashScreen (and rescheduled the window
+    close) on nothing worse than a warning."""
+    bus = EventBus()
+    screens = ScreenManager()
+    buffer = ScreenBuffer(60, 10)
+    register_temperature_reactions(bus, screens, window=None, sounds=None, buffer=buffer)
+
+    bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0))
+
+    assert screens.active is None
+
+
+def test_temperature_warning_plays_a_sound():
+    bus = EventBus()
+    screens = ScreenManager()
+    buffer = ScreenBuffer(60, 10)
+    sounds = FakeSounds()
+    register_temperature_reactions(bus, screens, window=None, sounds=sounds, buffer=buffer)
+
+    bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0))
+
+    assert sounds.played == ["system_error_notification"]
+
+
+def test_temperature_critical_pushes_a_crash_screen():
+    bus = EventBus()
+    screens = ScreenManager()
+    buffer = ScreenBuffer(60, 10)
+    register_temperature_reactions(bus, screens, window=None, sounds=None, buffer=buffer)
+    killed = Process(name="hog", pid=3)
+
+    with patch("pyglet.clock.schedule_once"):
+        bus.publish(TemperatureCriticalEvent(temperature=95.0, critical_temperature=90.0, process_killed=killed))
+
+    assert isinstance(screens.active, CrashScreen)
+
+
+def test_temperature_critical_crash_screen_names_the_killed_process():
+    bus = EventBus()
+    screens = ScreenManager()
+    buffer = ScreenBuffer(60, 10)
+    register_temperature_reactions(bus, screens, window=None, sounds=None, buffer=buffer)
+    killed = Process(name="hog", pid=3)
+
+    with patch("pyglet.clock.schedule_once"):
+        bus.publish(TemperatureCriticalEvent(temperature=95.0, critical_temperature=90.0, process_killed=killed))
+
+    screen_text = "".join(
+        "".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows)
+    )
+    assert "hog" in screen_text
+
+
+def test_temperature_critical_crash_screen_mentions_the_critical_temperature():
+    """The CrashScreen must actually say it was the critical temperature
+    that killed the process, not just name the process like an ordinary
+    process-killed crash."""
+    bus = EventBus()
+    screens = ScreenManager()
+    buffer = ScreenBuffer(100, 10)  # wide enough that the message doesn't wrap across rows
+    register_temperature_reactions(bus, screens, window=None, sounds=None, buffer=buffer)
+    killed = Process(name="hog", pid=3)
+
+    with patch("pyglet.clock.schedule_once"):
+        bus.publish(TemperatureCriticalEvent(temperature=95.0, critical_temperature=90.0, process_killed=killed))
+
+    screen_text = "".join(
+        "".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows)
+    )
+    assert "critical temperature" in screen_text
+    assert "95.0" in screen_text
 
 
 # --- register_system_log ---

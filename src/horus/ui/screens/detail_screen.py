@@ -51,6 +51,12 @@ class DetailScreen(Screen):
         self._buffer.restore(self._saved_screen)
 
     def _tick(self, dt: float) -> None:
+        """Guarded against ticking while covered by something pushed on top
+        of us from outside our own code (e.g. a CrashScreen from a
+        temperature/power event reaction) -- see HardwareScreen._tick for
+        why this can't just rely on our own on_push()/on_pop()."""
+        if self._screens.active is not self:
+            return
         self._lines = self._refresh()
         self._render()
 

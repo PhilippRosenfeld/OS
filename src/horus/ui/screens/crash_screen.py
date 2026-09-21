@@ -3,7 +3,7 @@ import pyglet
 from horus.display.screen_buffer import ScreenBuffer
 from horus.ui.screen import Screen
 
-_DEFAULT_DELAY = 4.0  # seconds before the window actually closes
+_DEFAULT_DELAY = 6.0  # seconds before the window actually closes
 
 
 class CrashScreen(Screen):
@@ -13,10 +13,12 @@ class CrashScreen(Screen):
     this -- it's the end of the session, matching a real OS going down hard
     when its init process dies."""
 
-    def __init__(self, buffer: ScreenBuffer, window, proc_name: str, delay: float = _DEFAULT_DELAY) -> None:
+    def __init__(self, buffer: ScreenBuffer, window, proc_name: str,
+                 reason: str = "terminated unexpectedly", delay: float = _DEFAULT_DELAY) -> None:
         self._buffer = buffer
         self._window = window  # anything with .close(); None is safe (just never closes)
         self._proc_name = proc_name
+        self._reason = reason
         self._delay = delay
 
     def on_push(self) -> None:
@@ -29,7 +31,7 @@ class CrashScreen(Screen):
         lines = [
             "*** KERNEL PANIC ***",
             "",
-            f"Fatal exception: essential process '{self._proc_name}' terminated unexpectedly.",
+            f"Fatal exception: essential process '{self._proc_name}' {self._reason}.",
             "",
             "System halted.",
         ]

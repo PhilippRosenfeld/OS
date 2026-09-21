@@ -55,3 +55,20 @@ class PowerUsageCheckedEvent(Event):
     total_power_usage: float
     psu_output_watts: float
     over_budget: bool
+
+@dataclass(frozen=True)
+class TemperatureCriticalEvent(Event):
+    """Published when the system's temperature exceeds the critical threshold
+    (see HardwareSpec._update_temperature_and_cooling). Subscribers can react
+    to this event by killing a process, playing a sound, etc."""
+    temperature: float
+    critical_temperature: float
+    process_killed: object  # Process instance that was killed to reduce heat
+    
+@dataclass(frozen=True)
+class TemperatureWarningEvent(Event):
+    """Published when the system's temperature exceeds the warning threshold
+    (see HardwareSpec._update_temperature_and_cooling). Subscribers can react
+    to this event by playing a sound, showing a warning, etc."""
+    temperature: float
+    critical_temperature: float

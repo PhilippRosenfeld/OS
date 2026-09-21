@@ -87,6 +87,14 @@ class HardwareScreen(Screen):
         self._render()
 
     def _tick(self, dt: float) -> None:
+        """Guarded, not just paused via handle_enter()'s unschedule: a screen
+        can also end up covering us from outside our own code entirely (e.g.
+        a CrashScreen pushed by a temperature/power event reaction while
+        we're active) -- without this check, our own tick keeps clobbering
+        its content on the shared buffer every interval, making it flicker
+        in and out instead of staying put."""
+        if self._screens.active is not self:
+            return
         self._refresh()
         self._render()
 

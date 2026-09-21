@@ -17,12 +17,13 @@ class TopScreen(Screen):
     Ctrl+C."""
 
     def __init__(self, buffer: ScreenBuffer, process_table: ProcessTable, screens: ScreenManager,
-                 refresh_interval: float = 1.0, sort_by: str = DEFAULT_SORT) -> None:
+                 refresh_interval: float = 1.0, sort_by: str = DEFAULT_SORT, hardware=None) -> None:
         self._buffer = buffer
         self._process_table = process_table
         self._screens = screens
         self._refresh_interval = refresh_interval
         self._sort_by = sort_by
+        self._hardware = hardware
         self._saved_screen: dict | None = None
 
     def on_push(self) -> None:
@@ -36,11 +37,17 @@ class TopScreen(Screen):
         self._buffer.restore(self._saved_screen)
 
     def _tick(self, dt: float) -> None:
+        """Guarded against ticking while covered by something pushed on top
+        of us from outside our own code (e.g. a CrashScreen from a
+        temperature/power event reaction) -- see HardwareScreen._tick for
+        why this can't just rely on our own on_push()/on_pop()."""
+        if self._screens.active is not self:
+            return
         self._render()
 
     def _render(self) -> None:
         self._buffer.clear()
-        self._buffer.write_string(0, 0, format_system_summary(self._process_table))
+        self._buffer.write_string(0, 0, format_system_summary(self._process_table, self._hardware))
         self._buffer.write_string(0, 1, f"{'PID':<8}{'USER':<12}{'CPU%':<10}{'MEM(KB)':<12}{'UPTIME':<10}{'NAME'}")
         self._buffer.write_string(0, 2, "-" * 70)
 

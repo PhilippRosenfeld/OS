@@ -4,7 +4,7 @@ happen no matter *what* killed a process."""
 from horus.display.status_bar import StatusBar
 from horus.events.bus import EventBus
 from horus.events.system_log import SystemLog
-from horus.events.types import PowerUsageCheckedEvent, ProcessKilledEvent
+from horus.events.types import PowerUsageCheckedEvent, ProcessKilledEvent, TemperatureCriticalEvent, TemperatureWarningEvent
 from horus.ui.screens.crash_screen import CrashScreen
 
 
@@ -24,7 +24,7 @@ def register_system_reactions(bus: EventBus, screens, window, sounds, buffer) ->
 
     bus.subscribe(ProcessKilledEvent, _on_process_killed)
     
-def register_power_reactions(bus: EventBus, screens, window, sounds, buffer) -> None:
+def register_power_reactions(bus: EventBus, sounds) -> None:
     was_over_budget = False
 
     def _on_power_usage_checked(event: PowerUsageCheckedEvent) -> None:
@@ -41,6 +41,31 @@ def register_power_reactions(bus: EventBus, screens, window, sounds, buffer) -> 
 
     bus.subscribe(PowerUsageCheckedEvent, _on_power_usage_checked)
 
+def register_temperature_reactions(bus: EventBus, screens, window, sounds, buffer) -> None:
+    """Subscribes to TemperatureCriticalEvent so when the system overheats, it
+    kills a random process and plays a sound. This is a placeholder for a more
+    sophisticated thermal management system that would eventually exist.
+
+    Only TemperatureCriticalEvent takes the system down (CrashScreen, same
+    kernel-panic-and-close-the-window treatment as a critical process kill --
+    see register_system_reactions) -- TemperatureWarningEvent just plays a
+    sound. A warning firing every tick the system stays hot must not also
+    push a new CrashScreen every tick; that's what crashed (and closed) the
+    window on nothing worse than a warning-level temperature before."""
+
+    def _on_temperature_warning(event) -> None:
+        if sounds is not None:
+            sounds.play("system_error_notification")
+
+    def _on_temperature_critical(event) -> None:
+        if sounds is not None:
+            sounds.play("system_error_notification")
+        if screens is not None:
+            screens.push(CrashScreen(buffer, window, event.process_killed.name,
+                                      reason=f"killed due to critical temperature ({event.temperature:.1f}C)"))
+
+    bus.subscribe(TemperatureCriticalEvent, _on_temperature_critical)
+    bus.subscribe(TemperatureWarningEvent, _on_temperature_warning)
 
 def register_system_log(bus: EventBus, log: SystemLog) -> None:
     """Feeds `log` from events that represent something going wrong, for the
@@ -61,9 +86,17 @@ def register_system_log(bus: EventBus, log: SystemLog) -> None:
         if event.critical:
             log.error(f"Critical process '{event.name}' (PID {event.pid}) "
                       f"was killed by {event.killed_by} -- system crashed")
+            
+    def _on_temperature_warning(event: TemperatureWarningEvent) -> None:
+        log.warning(f"System temperature warning at {event.temperature:.1f}C. System is close to critical temperature {event.critical_temperature:.1f}C soon and will start to shut down processes to prevent overheating.")
+
+    def _on_temperature_critical(event: TemperatureCriticalEvent) -> None:
+        log.error(f"System temperature critical at {event.temperature:.1f}C")
 
     bus.subscribe(PowerUsageCheckedEvent, _on_power_usage_checked)
     bus.subscribe(ProcessKilledEvent, _on_process_killed)
+    bus.subscribe(TemperatureWarningEvent, _on_temperature_warning)
+    bus.subscribe(TemperatureCriticalEvent, _on_temperature_critical)
 
 
 def register_status_bar(bus: EventBus, status_bar: StatusBar) -> None:
