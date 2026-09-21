@@ -222,6 +222,7 @@ class HardwareSpec:
 
     # --- temperature ---
     critical_temperature: float = 90.0  # arbitrary threshold for thermal shutdown
+    warning_temperature: float = 80.0  # arbitrary threshold for warning before shutdown
 
     def _update_temperature(self) -> None:
         """System temperature drifts based on the balance between heat
@@ -261,7 +262,7 @@ class HardwareSpec:
         to react to a system that's already crashing."""
         if self._thermal_shutdown_triggered:
             return
-        if self.temperature_celsius > 80.0:  # arbitrary threshold for "too hot"
+        if self.temperature_celsius > self.warning_temperature:  # arbitrary threshold for "too hot"
             self._events.publish(TemperatureWarningEvent(temperature=self.temperature_celsius, critical_temperature=self.critical_temperature))
             if self.temperature_celsius > self.critical_temperature:  # critical threshold for thermal shutdown
                 self._handle_thermal_shutdown()

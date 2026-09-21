@@ -1,3 +1,4 @@
+from horus.hardware.cooling_system import _MAX_COOLING_TEMPERATURE_CELSIUS
 from horus.hardware.spec import HardwareSpec
 from horus.kernel.registry import command
 from horus.processes.process_view import format_system_summary
@@ -79,12 +80,15 @@ def _cooling_detail_lines(hardware) -> list[str]:
         cooling_system.name,
         f"Manufacturer: {cooling_system.manufacturer}",
         f"Coolant: {cooling_system.coolant_type.value} ({cooling_system.coolant_amount}%)",
-        f"Base modifier: {cooling_system.base_cooling_modifier}",
-        "",
-        f"Max output: {cooling_system.power_usage_watts_max} W",
-        f"Cooling power: {cooling_system.calculate_cooling_power():.1f}",
-        f"Current draw: {cooling_system.calc_current_power_usage():.0f} W",
+        "---",
+        f"Current draw: {cooling_system.calc_current_power_usage():.0f}/{cooling_system.power_usage_watts_max} W",
+        "---",
+        f"Environment temperature: {cooling_system.env_temperature_celsius:.1f} C",
+        f"Warning/Maximum temperature: {hardware.warning_temperature:.1f} / {hardware.critical_temperature:.1f} C",
+        f"Maximum cooling factor at: {_MAX_COOLING_TEMPERATURE_CELSIUS:.1f} C",
         f"System temperature: {hardware.temperature_celsius:.1f} C",
+        f"Cooling power: {cooling_system.calculate_cooling_power():.1f} ",
+        f"Status: {'CRITICAL' if hardware.temperature_celsius >= hardware.critical_temperature else 'OK'}",
     ]
     return lines
 
@@ -178,7 +182,7 @@ def _build_hardware_screen(ctx) -> HardwareScreen:
             cooling_system.name,
             f"{cooling_system.coolant_type.value}: {cooling_system.coolant_amount}%",
             f"Cooling power: {cooling_system.calculate_cooling_power():.0f}",
-            f"Draw: {cooling_system.calc_current_power_usage():.0f} W",
+            f"Draw: {cooling_system.calc_current_power_usage():.0f}/{cooling_system.power_usage_watts_max} W",
         ]
 
         interfaces = hardware.motherboard.network_interfaces
