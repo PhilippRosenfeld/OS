@@ -16,7 +16,12 @@ from horus.kernel.registry import registry
 from horus.paths import BOOT_DIR, BOOT_PROGRESS_PATH, BOOT_SOUNDS_DIR, DATA_DIR, HARDWARE_SPEC_PATH, SAVES_DIR, SHELL_SOUNDS_DIR, SOUNDS_DIR
 from horus.processes.processTable import ProcessTable
 from horus.processes.seed_process import seed_processes
-from horus.processes.system_reactions import register_power_reactions, register_system_log, register_system_reactions
+from horus.processes.system_reactions import (
+    register_power_reactions,
+    register_status_bar,
+    register_system_log,
+    register_system_reactions,
+)
 from horus.session.context import Context
 from horus.session.history import CommandHistory
 from horus.session.seed import seed_users
@@ -74,7 +79,13 @@ def main() -> None:
     if fs.is_empty():
         seed_minimal(fs)
 
-    screens = ScreenManager()
+    def _on_active_screen_changed(screen) -> None:
+        # The status bar (see DisplayWindow.status_bar) is only meaningful
+        # while the interactive shell is what's on screen -- boot/menus/
+        # settings/etc. all hide it again.
+        window.status_bar.set_visible(isinstance(screen, ShellScreen))
+
+    screens = ScreenManager(on_active_changed=_on_active_screen_changed)
     users = UserRegistry()
     seed_users(users)
 
@@ -89,6 +100,8 @@ def main() -> None:
     register_power_reactions(bus, screens, window, sounds, window.buffer)
     system_log = SystemLog()
     register_system_log(bus, system_log)
+    register_status_bar(bus, window.status_bar)
+    window.status_bar.start_blinking()
 
     context = Context(
         session_id = "local",

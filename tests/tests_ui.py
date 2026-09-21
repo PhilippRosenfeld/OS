@@ -3,6 +3,7 @@ from unittest.mock import patch
 import pyglet
 
 from horus.display.screen_buffer import ScreenBuffer
+from horus.display.status_bar import StatusBar
 from horus.processes.process import process as Process
 from horus.processes.processTable import ProcessTable
 from horus.session.history import CommandHistory
@@ -131,6 +132,87 @@ def test_replace_on_empty_stack_just_pushes():
     manager.replace(screen)
     assert manager.active is screen
     assert events == ["only.on_push"]
+
+
+def test_on_active_changed_fires_on_push():
+    seen = []
+    manager = ScreenManager(on_active_changed=seen.append)
+    screen = RecordingScreen("a", [])
+    manager.push(screen)
+    assert seen == [screen]
+
+
+def test_on_active_changed_fires_on_pop_with_the_new_top():
+    seen = []
+    manager = ScreenManager(on_active_changed=seen.append)
+    bottom = RecordingScreen("bottom", [])
+    top = RecordingScreen("top", [])
+    manager.push(bottom)
+    manager.push(top)
+    seen.clear()
+
+    manager.pop()
+
+    assert seen == [bottom]
+
+
+def test_on_active_changed_fires_on_pop_to_empty_with_none():
+    seen = []
+    manager = ScreenManager(on_active_changed=seen.append)
+    manager.push(RecordingScreen("only", []))
+    seen.clear()
+
+    manager.pop()
+
+    assert seen == [None]
+
+
+def test_on_active_changed_does_not_fire_on_pop_of_an_empty_stack():
+    seen = []
+    manager = ScreenManager(on_active_changed=seen.append)
+    manager.pop()  # no-op, nothing was ever pushed
+    assert seen == []
+
+
+def test_on_active_changed_fires_on_replace():
+    seen = []
+    manager = ScreenManager(on_active_changed=seen.append)
+    manager.push(RecordingScreen("first", []))
+    seen.clear()
+
+    replacement = RecordingScreen("second", [])
+    manager.replace(replacement)
+
+    assert seen == [replacement]
+
+
+def test_without_on_active_changed_push_pop_replace_do_not_raise():
+    manager = ScreenManager()  # no callback given
+    manager.push(RecordingScreen("a", []))
+    manager.replace(RecordingScreen("b", []))
+    manager.pop()  # should not raise at any point
+
+
+def test_status_bar_shows_only_while_the_shell_is_active():
+    """Integration test for the actual feature (see horus.__init__'s
+    ScreenManager(on_active_changed=...) wiring): the status bar becomes
+    visible once the shell is pushed, hides again the moment something
+    covers it (e.g. the 'horus' menu), and reappears once that's popped."""
+    buffer = ScreenBuffer(40, 20)
+    status_bar = StatusBar(40)
+    manager = ScreenManager(on_active_changed=lambda screen: status_bar.set_visible(isinstance(screen, ShellScreen)))
+    handler = InputHandler(buffer, CommandHistory())
+    shell = ShellScreen(handler, manager)
+
+    manager.push(shell)
+    assert status_bar.is_visible() is True
+
+    menu = MenuScreen(buffer, "Menu", [MenuOption("Back", lambda: manager.pop())], manager)
+    manager.push(menu)
+    assert status_bar.is_visible() is False
+
+    manager.pop()  # back to shell
+    assert status_bar.is_visible() is True
 
 
 def test_shell_screen_writes_prompt_on_push():

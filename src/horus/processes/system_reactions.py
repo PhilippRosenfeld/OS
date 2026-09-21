@@ -1,6 +1,7 @@
 """System-wide reactions to process lifecycle events -- things that should
 happen no matter *what* killed a process."""
 
+from horus.display.status_bar import StatusBar
 from horus.events.bus import EventBus
 from horus.events.system_log import SystemLog
 from horus.events.types import PowerUsageCheckedEvent, ProcessKilledEvent
@@ -60,6 +61,28 @@ def register_system_log(bus: EventBus, log: SystemLog) -> None:
         if event.critical:
             log.error(f"Critical process '{event.name}' (PID {event.pid}) "
                       f"was killed by {event.killed_by} -- system crashed")
+
+    bus.subscribe(PowerUsageCheckedEvent, _on_power_usage_checked)
+    bus.subscribe(ProcessKilledEvent, _on_process_killed)
+
+
+def register_status_bar(bus: EventBus, status_bar: StatusBar) -> None:
+    """Drives the PWR/SYS indicator lights on `status_bar` from the same
+    events that feed the SystemLog -- PWR auto-clears when usage drops back
+    under budget (it just mirrors the event's own current over_budget flag,
+    no edge-tracking needed here since it always reflects live state, unlike
+    the log which only wants the transition). SYS latches on a critical
+    process kill; there's no meaningful 'recovered' event for that (the
+    system crashes shortly after -- see register_system_reactions), so it
+    doesn't auto-clear. TEMP/MSC have no real trigger yet -- they simply
+    never light up until something exists to drive them."""
+
+    def _on_power_usage_checked(event: PowerUsageCheckedEvent) -> None:
+        status_bar.set_lit("PWR", event.over_budget)
+
+    def _on_process_killed(event: ProcessKilledEvent) -> None:
+        if event.critical:
+            status_bar.set_lit("SYS", True)
 
     bus.subscribe(PowerUsageCheckedEvent, _on_power_usage_checked)
     bus.subscribe(ProcessKilledEvent, _on_process_killed)

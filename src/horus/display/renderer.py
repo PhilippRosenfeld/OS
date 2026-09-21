@@ -12,15 +12,21 @@ SHADER_DIR = Path(__file__).parent / "shaders"
 
 class Renderer:
     """Converts a ScreenBuffer into pixels, uploads to GPU, runs the CRT shader, and displays the result on the screen."""
-    
+
     PLACEHOLDER_CHAR = "?"
 
-    def __init__(self, screen_buffer: ScreenBuffer, font_atlas: FontAtlas, ctx: moderngl.Context) -> None:
+    def __init__(self, screen_buffer: ScreenBuffer, font_atlas: FontAtlas, ctx: moderngl.Context,
+                 status_bar: ScreenBuffer | None = None) -> None:
+        """`status_bar`, if given, is a second (normally one-row) ScreenBuffer
+        rendered directly below `screen_buffer`'s rows on every frame --
+        outside the Screen stack entirely, so it stays on screen no matter
+        which Screen is active. See display.status_bar.StatusBar."""
         self.screen_buffer = screen_buffer
         self.font_atlas = font_atlas
         self.ctx = ctx
+        self.status_bar = status_bar
         pixel_width = screen_buffer.cols * font_atlas.char_width
-        pixel_height = screen_buffer.rows * font_atlas.char_height
+        pixel_height = self._total_rows() * font_atlas.char_height
         self._pixel_buffer = np.zeros((pixel_height, pixel_width, 3), dtype=np.uint8)
         self._texture: moderngl.Texture = self.ctx.texture((pixel_width, pixel_height), 3, data=self._pixel_buffer.tobytes())
         self._program: moderngl.Program = None
@@ -75,11 +81,18 @@ class Renderer:
         self.font_atlas = font_atlas
         self._block_cache = {}
         self.screen_buffer.dirty = True
+        if self.status_bar is not None:
+            self.status_bar.dirty = True
+
+    def _total_rows(self) -> int:
+        """screen_buffer's rows plus the status bar's (if any) -- the status
+        bar is rendered as extra rows appended below the main content."""
+        return self.screen_buffer.rows + (self.status_bar.rows if self.status_bar is not None else 0)
 
     def _ensure_pixel_buffer_size(self) -> bool:
         """Reallocate the pixel buffer/texture if the ScreenBuffer's grid size has changed (e.g. after a window resize). Returns True if a reallocation happened."""
         pixel_width = self.screen_buffer.cols * self.font_atlas.char_width
-        pixel_height = self.screen_buffer.rows * self.font_atlas.char_height
+        pixel_height = self._total_rows() * self.font_atlas.char_height
         if self._pixel_buffer.shape[1] == pixel_width and self._pixel_buffer.shape[0] == pixel_height:
             return False
         self._pixel_buffer = np.zeros((pixel_height, pixel_width, 3), dtype=np.uint8)
@@ -130,14 +143,27 @@ class Renderer:
                 x0 = col * char_width
                 self._pixel_buffer[y0:y0 + char_height, x0:x0 + char_width] = block
 
+        if self.status_bar is not None:
+            row_base = self.screen_buffer.rows
+            for row in range(self.status_bar.rows):
+                y0 = (row_base + row) * char_height
+                for col in range(self.status_bar.cols):
+                    cell = self.status_bar.get_cell(col, row)
+                    block = self._get_block(cell.char, cell.fg_color, cell.bg_color)
+                    x0 = col * char_width
+                    self._pixel_buffer[y0:y0 + char_height, x0:x0 + char_width] = block
+
     def render(self, window_width: int, window_height: int, margin: int = 0) -> None:
         """Full frame: rebuild pixel buffer and upload as texture only if the content or size changed,
         run the shader, draw the quad sized to preserve aspect ratio."""
         resized = self._ensure_pixel_buffer_size()
-        if resized or self.screen_buffer.dirty:
+        dirty = self.screen_buffer.dirty or (self.status_bar is not None and self.status_bar.dirty)
+        if resized or dirty:
             self._build_pixel_buffer()
             self._texture.write(self._pixel_buffer.tobytes())
             self.screen_buffer.dirty = False
+            if self.status_bar is not None:
+                self.status_bar.dirty = False
         self._update_quad_geometry(window_width, window_height, margin)
         self._program['resolution'].value = self._display_size
         self._texture.use()

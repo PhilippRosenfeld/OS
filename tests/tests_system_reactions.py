@@ -1,10 +1,11 @@
 from unittest.mock import patch
 
 from horus.display.screen_buffer import ScreenBuffer
+from horus.display.status_bar import StatusBar
 from horus.events.bus import EventBus
 from horus.events.system_log import LogSeverity, SystemLog
 from horus.events.types import PowerUsageCheckedEvent, ProcessKilledEvent, ProcessStartedEvent
-from horus.processes.system_reactions import register_system_log, register_system_reactions
+from horus.processes.system_reactions import register_status_bar, register_system_log, register_system_reactions
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.screens.crash_screen import CrashScreen
 
@@ -204,3 +205,65 @@ def test_system_log_is_independent_of_the_sound_screen_reactions():
     bus.publish(ProcessKilledEvent(pid=1, name="init", killed_by="root", critical=True))  # no crash-screen reaction registered
 
     assert len(log) == 1
+
+
+# --- register_status_bar ---
+
+def test_power_overload_lights_the_pwr_indicator():
+    bus = EventBus()
+    status_bar = StatusBar(40)
+    register_status_bar(bus, status_bar)
+
+    bus.publish(PowerUsageCheckedEvent(total_power_usage=150.0, psu_output_watts=100.0, over_budget=True))
+
+    assert status_bar.is_lit("PWR") is True
+
+
+def test_power_recovering_clears_the_pwr_indicator():
+    """Unlike the SystemLog reaction (which only wants the edge), the status
+    bar just mirrors the event's current over_budget flag every time -- it's
+    always showing live state, not a history of transitions."""
+    bus = EventBus()
+    status_bar = StatusBar(40)
+    register_status_bar(bus, status_bar)
+
+    bus.publish(PowerUsageCheckedEvent(total_power_usage=150.0, psu_output_watts=100.0, over_budget=True))
+    assert status_bar.is_lit("PWR") is True
+
+    bus.publish(PowerUsageCheckedEvent(total_power_usage=80.0, psu_output_watts=100.0, over_budget=False))
+    assert status_bar.is_lit("PWR") is False
+
+
+def test_critical_process_kill_lights_the_sys_indicator():
+    bus = EventBus()
+    status_bar = StatusBar(40)
+    register_status_bar(bus, status_bar)
+
+    bus.publish(ProcessKilledEvent(pid=1, name="init", killed_by="root", critical=True))
+
+    assert status_bar.is_lit("SYS") is True
+
+
+def test_non_critical_process_kill_does_not_light_the_sys_indicator():
+    bus = EventBus()
+    status_bar = StatusBar(40)
+    register_status_bar(bus, status_bar)
+
+    bus.publish(ProcessKilledEvent(pid=2, name="bash", killed_by="user1", critical=False))
+
+    assert status_bar.is_lit("SYS") is False
+
+
+def test_temp_and_msc_never_light_up_yet():
+    """No real trigger exists for these two yet -- see register_status_bar's
+    docstring. Locks in that a power overload and a critical kill only light
+    their own indicator, not every light."""
+    bus = EventBus()
+    status_bar = StatusBar(40)
+    register_status_bar(bus, status_bar)
+
+    bus.publish(PowerUsageCheckedEvent(total_power_usage=150.0, psu_output_watts=100.0, over_budget=True))
+    bus.publish(ProcessKilledEvent(pid=1, name="init", killed_by="root", critical=True))
+
+    assert status_bar.is_lit("TEMP") is False
+    assert status_bar.is_lit("MSC") is False

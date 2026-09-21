@@ -1,11 +1,14 @@
 import struct
+from unittest.mock import patch
 
 import moderngl
 import pytest
 
+from horus.display.colors import NAMED_COLORS
 from horus.display.font_atlas import FontAtlas, FontRegistry
 from horus.display.renderer import Renderer
 from horus.display.screen_buffer import Cell, ScreenBuffer
+from horus.display.status_bar import LABELS, StatusBar
 from horus.display.window import DisplayWindow
 
 FONT = "Px437_IBM_VGA_8x16.ttf"
@@ -15,11 +18,11 @@ def make_atlas(char_width=8, char_height=16):
     return FontAtlas(FONT, char_width, char_height)
 
 
-def make_renderer(cols=10, rows=5, char_width=8, char_height=16):
+def make_renderer(cols=10, rows=5, char_width=8, char_height=16, status_bar=None):
     buffer = ScreenBuffer(cols, rows)
     atlas = make_atlas(char_width, char_height)
     ctx = moderngl.create_context(standalone=True)
-    return Renderer(buffer, atlas, ctx), buffer, atlas
+    return Renderer(buffer, atlas, ctx, status_bar=status_bar), buffer, atlas
 
 
 def test_display_window_initialization():
@@ -51,6 +54,25 @@ def test_on_resize_recomputes_grid_size():
         window._on_resize(320, 160)
         assert window.buffer.cols == 40
         assert window.buffer.rows == 10
+    finally:
+        window._window.close()
+
+
+def test_display_window_has_a_status_bar_matching_the_buffer_width():
+    window = DisplayWindow(font_path=FONT, cols=80, rows=25, char_width=8, char_height=16, width=640, height=400)
+    try:
+        assert window.status_bar.buffer.cols == 80
+        assert window.status_bar.buffer.rows == 1
+        assert window._renderer.status_bar is window.status_bar.buffer
+    finally:
+        window._window.close()
+
+
+def test_on_resize_also_resizes_the_status_bar():
+    window = DisplayWindow(font_path=FONT, char_width=8, char_height=16, width=640, height=400, margin=0)
+    try:
+        window._on_resize(320, 160)
+        assert window.status_bar.buffer.cols == window.buffer.cols == 40
     finally:
         window._window.close()
 
@@ -501,3 +523,208 @@ def test_renderer_quad_geometry_insets_by_margin():
     assert top == pytest.approx(-expected_inset)
     assert right < 1.0
     assert bottom > -1.0
+
+
+# --- Renderer + status bar ---
+
+def test_renderer_without_a_status_bar_behaves_as_before():
+    renderer, buffer, atlas = make_renderer(cols=10, rows=5, status_bar=None)
+    assert renderer._pixel_buffer.shape == (5 * atlas.char_height, 10 * atlas.char_width, 3)
+
+
+def test_renderer_pixel_buffer_reserves_extra_rows_for_the_status_bar():
+    status_bar = ScreenBuffer(10, 1)
+    renderer, buffer, atlas = make_renderer(cols=10, rows=5, status_bar=status_bar)
+    assert renderer._pixel_buffer.shape == ((5 + 1) * atlas.char_height, 10 * atlas.char_width, 3)
+
+
+def test_renderer_draws_the_status_bar_below_the_main_content():
+    status_bar = ScreenBuffer(1, 1)
+    status_bar.write_string(0, 0, "X", fg=(9, 9, 9), bg=(8, 8, 8))
+    renderer, buffer, atlas = make_renderer(cols=1, rows=1, status_bar=status_bar)
+    renderer.render(200, 100)
+
+    status_row_pixel = renderer._pixel_buffer[atlas.char_height, 0]  # first pixel row of the status bar
+    x_block = renderer._get_block("X", (9, 9, 9), (8, 8, 8))
+    assert (status_row_pixel == x_block[0, 0]).all()
+
+
+def test_renderer_rebuilds_when_only_the_status_bar_is_dirty():
+    status_bar = ScreenBuffer(10, 1)
+    renderer, buffer, atlas = make_renderer(cols=10, rows=5, status_bar=status_bar)
+    renderer.render(200, 100)  # initial build clears both dirty flags
+    assert buffer.dirty is False
+    assert status_bar.dirty is False
+
+    status_bar.write_string(0, 0, "!")
+    calls = []
+    original = renderer._build_pixel_buffer
+    def counting():
+        calls.append(1)
+        original()
+    renderer._build_pixel_buffer = counting
+
+    renderer.render(200, 100)
+    assert calls == [1]
+    assert status_bar.dirty is False
+
+
+def test_renderer_set_font_atlas_also_marks_the_status_bar_dirty():
+    status_bar = ScreenBuffer(10, 1)
+    renderer, buffer, atlas = make_renderer(cols=10, rows=5, status_bar=status_bar)
+    status_bar.dirty = False
+
+    renderer.set_font_atlas(make_atlas(char_width=16, char_height=32))
+    assert status_bar.dirty is True
+
+
+# --- StatusBar ---
+
+def make_status_bar(cols=40):
+    return StatusBar(cols)
+
+
+def bar_text(bar):
+    return "".join(bar.buffer.get_cell(c, 0).char for c in range(bar.buffer.cols))
+
+
+def test_status_bar_starts_with_every_light_off():
+    bar = make_status_bar()
+    assert all(not bar.is_lit(label) for label in LABELS)
+
+
+def test_status_bar_starts_hidden():
+    """Only visible while the shell is the active screen -- see
+    horus.__init__'s ScreenManager(on_active_changed=...) wiring."""
+    bar = make_status_bar()
+    assert bar.is_visible() is False
+    assert bar_text(bar).strip() == ""
+
+
+def test_status_bar_set_visible_shows_all_four_labels():
+    bar = make_status_bar()
+    bar.set_visible(True)
+    assert bar.is_visible() is True
+    text = bar_text(bar)
+    for label in LABELS:
+        assert label in text
+
+
+def test_status_bar_set_visible_false_blanks_it_again():
+    bar = make_status_bar()
+    bar.set_visible(True)
+    bar.set_visible(False)
+    assert bar_text(bar).strip() == ""
+
+
+def test_status_bar_becoming_visible_again_reflects_current_lit_state():
+    """Lit state is tracked independently of visibility -- toggling the bar
+    hidden and back doesn't lose or reset which lights are on."""
+    bar = make_status_bar()
+    bar.set_lit("PWR", True)  # lit while still hidden
+    bar.set_visible(True)
+    col = bar_text(bar).index("PWR")
+    assert bar.buffer.get_cell(col, 0).bg_color == NAMED_COLORS["amber"]
+
+
+def test_status_bar_set_lit_turns_a_light_on():
+    bar = make_status_bar()
+    bar.set_lit("PWR", True)
+    assert bar.is_lit("PWR") is True
+    assert bar.is_lit("TEMP") is False  # others unaffected
+
+
+def test_status_bar_lit_label_uses_amber_background():
+    bar = make_status_bar()
+    bar.set_visible(True)
+    bar.set_lit("PWR", True)
+    col = bar_text(bar).index("PWR")
+    assert bar.buffer.get_cell(col, 0).bg_color == NAMED_COLORS["amber"]
+
+
+def test_status_bar_unlit_label_uses_the_default_background():
+    bar = make_status_bar()
+    bar.set_visible(True)
+    col = bar_text(bar).index("SYS")
+    assert bar.buffer.get_cell(col, 0).bg_color == bar.buffer.default_bg
+
+
+def test_status_bar_set_lit_off_turns_a_light_back_off():
+    bar = make_status_bar()
+    bar.set_visible(True)
+    bar.set_lit("SYS", True)
+    bar.set_lit("SYS", False)
+    assert bar.is_lit("SYS") is False
+    col = bar_text(bar).index("SYS")
+    assert bar.buffer.get_cell(col, 0).bg_color == bar.buffer.default_bg
+
+
+def test_status_bar_resize_matches_the_new_width():
+    bar = make_status_bar(cols=40)
+    bar.set_visible(True)
+    bar.set_lit("PWR", True)
+    bar.resize(20)
+    assert bar.buffer.cols == 20
+    assert "PWR" in bar_text(bar)  # survives the resize, not blanked out
+
+
+# --- StatusBar: blinking ---
+
+def test_start_blinking_schedules_via_pyglet_clock():
+    bar = make_status_bar()
+    with patch("pyglet.clock.schedule_interval") as mock_schedule:
+        bar.start_blinking(interval=0.25)
+    mock_schedule.assert_called_once()
+    callback, interval = mock_schedule.call_args[0]
+    assert interval == 0.25
+    assert callback == bar._toggle_blink
+
+
+def test_stop_blinking_unschedules_the_tick():
+    bar = make_status_bar()
+    with patch("pyglet.clock.unschedule") as mock_unschedule:
+        bar.stop_blinking()
+    mock_unschedule.assert_called_once_with(bar._toggle_blink)
+
+
+def test_blinking_toggles_a_lit_indicator_on_and_off():
+    """The label text itself always stays put -- only its amber highlight
+    blinks, the same way a car dashboard icon stays visible but its
+    backlight flashes."""
+    bar = make_status_bar()
+    bar.set_visible(True)
+    bar.set_lit("PWR", True)
+    col = bar_text(bar).index("PWR")
+    assert bar.buffer.get_cell(col, 0).bg_color == NAMED_COLORS["amber"]
+
+    bar._toggle_blink(dt=0.0)
+    assert "PWR" in bar_text(bar)  # still there
+    assert bar.buffer.get_cell(col, 0).bg_color == bar.buffer.default_bg  # but blinked off
+
+    bar._toggle_blink(dt=0.0)
+    assert bar.buffer.get_cell(col, 0).bg_color == NAMED_COLORS["amber"]  # back on
+
+
+def test_blinking_does_not_affect_unlit_indicators():
+    bar = make_status_bar()
+    bar.set_visible(True)
+    bar._toggle_blink(dt=0.0)
+    text = bar_text(bar)
+    for label in LABELS:  # nothing lit -- every label stays put regardless of blink phase
+        assert label in text
+
+
+def test_blinking_does_not_render_anything_while_hidden():
+    bar = make_status_bar()
+    bar.set_lit("PWR", True)  # hidden by default
+    bar._toggle_blink(dt=0.0)
+    assert bar_text(bar).strip() == ""
+
+
+def test_newly_lit_indicator_respects_the_current_blink_phase():
+    bar = make_status_bar()
+    bar.set_visible(True)
+    bar._toggle_blink(dt=0.0)  # blink phase now off
+    bar.set_lit("SYS", True)
+    col = bar_text(bar).index("SYS")
+    assert bar.buffer.get_cell(col, 0).bg_color == bar.buffer.default_bg  # lit, but blinked off right now

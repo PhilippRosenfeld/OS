@@ -1,17 +1,24 @@
+from typing import Callable
+
 from horus.ui.screen import Screen
 
 
 class ScreenManager:
     """Owns a stack of Screens. Only the top screen receives input --
-    push()/pop() switch which one that is."""
+    push()/pop()/replace() switch which one that is."""
 
-    def __init__(self) -> None:
+    def __init__(self, on_active_changed: Callable[["Screen | None"], None] | None = None) -> None:
         self._stack: list[Screen] = []
+        self._on_active_changed = on_active_changed  # notified (with the new self.active) whenever
+                                                       # push()/pop()/replace() change what's on top --
+                                                       # e.g. so the status bar can show only while the
+                                                       # active screen is the shell (see horus.__init__)
 
     def push(self, screen: Screen) -> None:
         """Make `screen` the active one, on top of whatever was active before."""
         self._stack.append(screen)
         screen.on_push()
+        self._notify_active_changed()
 
     def pop(self) -> None:
         """Deactivate the current screen and return to whatever was below it. No-op if empty.
@@ -23,6 +30,7 @@ class ScreenManager:
         screen.on_pop()
         if self._stack:
             self._stack[-1].on_resume()
+        self._notify_active_changed()
 
     def replace(self, screen: Screen) -> None:
         """Atomically swaps the current top screen for `screen`, without ever
@@ -36,6 +44,11 @@ class ScreenManager:
             old.on_pop()
         self._stack.append(screen)
         screen.on_push()
+        self._notify_active_changed()
+
+    def _notify_active_changed(self) -> None:
+        if self._on_active_changed is not None:
+            self._on_active_changed(self.active)
 
     @property
     def active(self) -> Screen | None:

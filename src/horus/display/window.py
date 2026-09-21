@@ -4,6 +4,7 @@ import pyglet
 from .font_atlas import FontAtlas
 from .renderer import Renderer
 from .screen_buffer import ScreenBuffer
+from .status_bar import StatusBar
 
 
 class DisplayWindow:
@@ -26,9 +27,10 @@ class DisplayWindow:
         if rows is None:
             rows = max(1, (height - 2 * margin) // char_height)
         self.buffer = ScreenBuffer(cols, rows)
+        self.status_bar = StatusBar(cols)
         self._ctx: moderngl.Context = moderngl.create_context()
         font_atlas = FontAtlas(font_path, char_width, char_height)
-        self._renderer: Renderer = Renderer(self.buffer, font_atlas, self._ctx)
+        self._renderer: Renderer = Renderer(self.buffer, font_atlas, self._ctx, status_bar=self.status_bar.buffer)
         self._on_key_callback = None
         self._on_text_callback = None
         self._on_motion_callback = None
@@ -123,6 +125,7 @@ class DisplayWindow:
         cols = max(1, (width - 2 * self._margin) // self._char_width)
         rows = max(1, (height - 2 * self._margin) // self._char_height)
         self.buffer.resize(cols, rows)
+        self.status_bar.resize(cols)
 
     def _on_key_press(self, symbol, modifiers) -> None:
         """pyglet event handler: forwards to self._on_key_callback."""
