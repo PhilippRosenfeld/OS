@@ -25,7 +25,7 @@
 0.00|
 0.50|Auxiliary Systems...
 1.50|   COOLING ..... ONLINE
-0.00|   NETWORK ..... OFFLINE
+0.00|   NETWORK ..... ONLINE
 0.00|   Z ..... OFFLINE
 0.00|
 0.05|Starting services...
