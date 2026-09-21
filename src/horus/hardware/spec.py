@@ -103,6 +103,7 @@ class HardwareSpec:
         # hardware, e.g. after a save/load round trip).
         self.power_history = MetricHistory()
         self.cooling_history = MetricHistory()
+        self.temperature_history = MetricHistory()
         self._thermal_shutdown_triggered = False  # latches once _handle_thermal_shutdown
                                                     # fires -- the system is already going
                                                     # down (see _check_temperature), so
@@ -214,6 +215,7 @@ class HardwareSpec:
         psu_output_watts = self.power_supply_unit.power_output_watts
         self.power_history.record(total_power_usage)
         self.cooling_history.record(self.motherboard.cooling_system.calc_current_power_usage())
+        self.temperature_history.record(self.temperature_celsius)
         self._events.publish(PowerUsageCheckedEvent(
             total_power_usage=total_power_usage,
             psu_output_watts=psu_output_watts,

@@ -8,6 +8,7 @@ from horus.processes.process import process as Process
 from horus.processes.processTable import ProcessTable
 from horus.session.history import CommandHistory
 from horus.shell.input_handler import InputHandler
+from horus.ui.box_drawing import draw_line_graph
 from horus.ui.screen import Screen
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.screens.boot_screen import BootFrame, BootScreen
@@ -1407,6 +1408,202 @@ def test_hardware_detail_screen_unschedules_the_tick_on_pop():
     with patch("pyglet.clock.unschedule") as mock_unschedule:
         manager.pop()
     mock_unschedule.assert_called_once_with(screen._tick)
+
+
+# --- DetailScreen with history_fn (line-graph layout) ---
+
+def test_hardware_detail_screen_without_history_fn_keeps_the_single_full_width_box():
+    """Every panel that doesn't pass history_fn keeps today's layout exactly
+    -- one box spanning the whole buffer, same as before this existed."""
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    screen = DetailScreen(buffer, "CPU", ["line"], manager)
+    manager.push(screen)
+    assert buffer.get_cell(0, 0).char == "+"
+    assert buffer.get_cell(59, 0).char == "+"
+    assert buffer.get_cell(30, 0).char == "-"  # unbroken border -- no second box starting mid-row
+
+
+def test_hardware_detail_screen_with_history_fn_splits_into_three_regions():
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    screen = DetailScreen(buffer, "Cooling", ["Coolant System", "Draw: 5 W"], manager,
+                           history_fn=lambda: [1.0, 2.0, 3.0], history_title="Cooling draw (W)")
+    manager.push(screen)
+
+    assert "Coolant System" in row_text(buffer, 2)  # left column: the usual data lines
+    left_width = buffer.cols // 2
+    assert row_text(buffer, 0)[left_width] == "+"  # a second box starts right where the left one ends
+    top_height = buffer.rows // 2
+    assert "Cooling draw (W)" in row_text(buffer, top_height)  # bottom-right box is the graph, labeled
+
+
+def test_hardware_detail_screen_history_fn_top_right_box_stays_empty():
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    screen = DetailScreen(buffer, "Cooling", ["line"], manager, history_fn=lambda: [1.0, 2.0])
+    manager.push(screen)
+
+    left_width = buffer.cols // 2
+    right_width = buffer.cols - left_width
+    top_height = buffer.rows // 2
+    # only the box's true interior (excluding its own border/side characters)
+    interior_text = "".join(
+        buffer.get_cell(c, r).char
+        for r in range(2, top_height - 1)
+        for c in range(left_width + 2, left_width + right_width - 2)
+    )
+    assert interior_text.strip() == ""  # no label, no content -- reserved for later
+
+
+def test_hardware_detail_screen_history_fn_refreshes_the_graph_on_tick():
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    values = [1.0, 2.0]
+
+    with patch("pyglet.clock.schedule_interval"):
+        screen = DetailScreen(buffer, "Cooling", ["line"], manager, refresh=lambda: ["line"],
+                               history_fn=lambda: values)
+        manager.push(screen)
+
+    values.append(99.0)
+    screen._tick(dt=0.0)
+
+    assert screen._history_values == [1.0, 2.0, 99.0]
+
+
+def test_hardware_detail_screen_history_fn_alone_schedules_a_tick():
+    """Regression guard: a screen could pass history_fn without refresh (no
+    text lines change, only the graph does) -- the tick must still get
+    scheduled, not just when refresh is also given."""
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    with patch("pyglet.clock.schedule_interval") as mock_schedule:
+        screen = DetailScreen(buffer, "Cooling", ["line"], manager, history_fn=lambda: [1.0])
+        manager.push(screen)
+    mock_schedule.assert_called_once_with(screen._tick, screen._refresh_interval)
+
+
+# --- box_drawing.draw_line_graph ---
+
+def test_draw_line_graph_plots_within_a_bordered_box():
+    buffer = ScreenBuffer(30, 10)
+    draw_line_graph(buffer, 0, 0, 30, 10, "History", [1.0, 5.0, 3.0])
+    assert row_text(buffer, 0).startswith("+ History ")
+    assert row_text(buffer, 9).startswith("+")  # bottom border present
+
+
+def test_draw_line_graph_higher_values_plot_higher_up():
+    buffer = ScreenBuffer(30, 10)
+    draw_line_graph(buffer, 0, 0, 30, 10, "History", [0.0, 10.0])
+    # right-aligned: with only 2 samples and plot_width=25, they land in the last two columns (26, 27)
+    plot_rows = range(2, 8)
+    low_row = next(r for r in plot_rows if buffer.get_cell(26, r).char == "*")
+    high_row = next(r for r in plot_rows if buffer.get_cell(27, r).char == "*")
+    assert high_row < low_row  # the later, higher value (10.0) sits above the first (0.0)
+
+
+def test_draw_line_graph_flat_series_draws_a_single_middle_row():
+    buffer = ScreenBuffer(30, 10)
+    draw_line_graph(buffer, 0, 0, 30, 10, "History", [5.0, 5.0, 5.0])
+    rows_with_marks = {r for r in range(2, 9) for c in range(2, 28) if buffer.get_cell(c, r).char == "*"}
+    assert len(rows_with_marks) == 1  # every sample lands on the same row
+
+
+def test_draw_line_graph_with_no_values_shows_a_placeholder():
+    buffer = ScreenBuffer(30, 10)
+    draw_line_graph(buffer, 0, 0, 30, 10, "History", [])
+    assert "No data yet" in row_text(buffer, 2)
+
+
+def test_draw_line_graph_only_shows_the_most_recent_window():
+    """More samples than there are columns to plot them in -- only the
+    latest interior_width-worth should show, not a squashed-together whole
+    history."""
+    buffer = ScreenBuffer(10, 10)  # interior_width = 10 - 4 = 6
+    draw_line_graph(buffer, 0, 0, 10, 10, "H", [0.0] * 50 + [10.0])
+    last_col_char = buffer.get_cell(7, 2).char  # x=0+2+(6-1)=7 -- the graph's last plottable column
+    assert last_col_char == "*"  # the most recent sample (10.0) is the one actually shown there
+
+
+def test_draw_line_graph_fills_in_from_the_right_while_the_window_is_not_yet_full():
+    """Before there's enough data to fill the whole plot width, the newest
+    sample must stay pinned at the fixed rightmost column -- unused columns
+    sit empty on the *left*, and each further sample extends the marked
+    range one column further left, not right."""
+    buffer = ScreenBuffer(10, 10)  # plot_width = (10 - 4) - 1 = 5
+
+    def marked_columns() -> set[int]:
+        return {c for c in range(10) for r in range(10) if buffer.get_cell(c, r).char == "*"}
+
+    draw_line_graph(buffer, 0, 0, 10, 10, "H", [1.0, 2.0])
+    cols_after_two = marked_columns()
+    assert len(cols_after_two) == 2
+
+    draw_line_graph(buffer, 0, 0, 10, 10, "H", [1.0, 2.0, 3.0])
+    cols_after_three = marked_columns()
+
+    assert max(cols_after_three) == max(cols_after_two)  # newest still lands in the same rightmost column
+    assert min(cols_after_three) == min(cols_after_two) - 1  # extends one column further left
+
+
+def test_draw_line_graph_once_full_keeps_the_newest_on_the_right_and_drops_the_oldest():
+    """Once there are more samples than plot columns, the window must not
+    keep growing -- the same amount of columns stay marked (the oldest
+    sample falls off the left), and the newest one always lands in the same
+    rightmost column instead of advancing further, since there's nowhere
+    further right to go."""
+    buffer = ScreenBuffer(11, 10)  # plot_width = (11 - 4) - 2 = 5
+
+    def marked_columns() -> set[int]:
+        return {c for c in range(11) for r in range(10) if buffer.get_cell(c, r).char == "*"}
+
+    draw_line_graph(buffer, 0, 0, 11, 10, "H", [1.0, 2.0, 3.0, 4.0, 5.0])  # exactly fills the window
+    assert len(marked_columns()) == 5
+    rightmost_when_full = max(marked_columns())
+
+    draw_line_graph(buffer, 0, 0, 11, 10, "H", [1.0, 2.0, 3.0, 4.0, 5.0, 6.0])  # one more than fits
+    columns_after = marked_columns()
+
+    assert len(columns_after) == 5  # still capped at plot_width, not growing
+    assert max(columns_after) == rightmost_when_full  # the newest sample lands in the same rightmost column
+
+
+def test_draw_line_graph_shows_the_y_axis_label_and_time_on_the_x_axis():
+    buffer = ScreenBuffer(30, 10)
+    draw_line_graph(buffer, 0, 0, 30, 10, "History", [1.0, 2.0], y_label="Temp")
+
+    label_col = 2  # x + 2 -- the y-axis label's column, one letter per row
+    y_axis_text = "".join(buffer.get_cell(label_col, r).char for r in range(2, 6))
+    assert y_axis_text == "Temp"
+
+    full = "".join(row_text(buffer, r) for r in range(10))
+    assert "Time" in full  # the x-axis label is a normal horizontal string, unlike the y one
+
+
+def test_draw_line_graph_markers_draw_labeled_reference_lines():
+    buffer = ScreenBuffer(30, 10)
+    draw_line_graph(buffer, 0, 0, 30, 10, "History", [25.0, 26.0], markers=[0.0, 80.0, 90.0])
+    full = "".join(row_text(buffer, r) for r in range(10))
+    assert "80" in full
+    assert "90" in full
+
+
+def test_draw_line_graph_markers_show_even_without_any_data():
+    buffer = ScreenBuffer(30, 10)
+    draw_line_graph(buffer, 0, 0, 30, 10, "History", [], markers=[0.0, 90.0])
+    full = "".join(row_text(buffer, r) for r in range(10))
+    assert "No data yet" not in full
+    assert "90" in full
+
+
+def test_draw_line_graph_markers_extend_the_scale_beyond_the_data():
+    """A marker far outside the data's own range must still be visible --
+    the y-axis scale stretches to include it, not just the plotted data."""
+    buffer = ScreenBuffer(30, 10)
+    draw_line_graph(buffer, 0, 0, 30, 10, "History", [25.0, 25.0, 25.0], markers=[0.0, 90.0])
+    assert buffer.get_cell(4, 2).char == "9"  # the "90" marker line sits at the very top plot row
+    assert buffer.get_cell(26, 6).char == "*"  # the flat 25.0 data sits well below it, not at the top
 
 
 # --- BootScreen / LogoScreen sound hooks ---

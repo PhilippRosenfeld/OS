@@ -1521,6 +1521,37 @@ def test_sys_cooling_detail_screen_updates_live_with_temperature():
     assert "88.5" in full
 
 
+def test_sys_cooling_detail_screen_shows_a_history_graph():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    hardware.temperature_history.record(30.0)
+    hardware.temperature_history.record(45.0)
+    sys_command(ctx, [])
+    _select(screens.active, col_moves=1, row_moves=1)
+    screens.active.handle_enter()
+    detail_screen = screens.active
+
+    assert detail_screen._history_fn is not None
+    assert detail_screen._history_fn() == [30.0, 45.0]
+    env_temp = hardware.motherboard.cooling_system.env_temperature_celsius
+    assert detail_screen._history_markers == [env_temp, hardware.warning_temperature, hardware.critical_temperature]
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    assert "Temperature History" in full
+    assert "Time" in full
+    assert "80" in full  # warning_temperature marker line
+    assert "90" in full  # critical_temperature marker line
+
+
+def test_sys_enter_on_other_tiles_does_not_open_a_history_graph():
+    """Only Cooling gets a graph for now -- every other detail screen keeps
+    the plain single-box layout."""
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, [])
+    screens.active.handle_enter()  # CPU tile, selected first by default
+    detail_screen = screens.active
+
+    assert detail_screen._history_fn is None
+
+
 # --- err command ---
 
 def make_err_context(cols=80, rows=24):

@@ -111,11 +111,16 @@ def _network_detail_lines(hardware) -> list[str]:
     return lines
 
 
-def _push_detail_screen(ctx, title: str, lines_fn) -> None:
+def _push_detail_screen(ctx, title: str, lines_fn, history_fn=None, history_title: str = "History",
+                         history_y_label: str = "Value", history_markers_fn=None) -> None:
     """Opens a live-refreshing DetailScreen for one component --
     `lines_fn` is called both now (initial render) and again on every
-    refresh tick, so it must stay cheap and side-effect free."""
-    ctx.screens.push(DetailScreen(ctx.screen, title, lines_fn(), ctx.screens, refresh=lines_fn))
+    refresh tick, so it must stay cheap and side-effect free. `history_fn`,
+    if given, is the same idea for a MetricHistory.values()-shaped line
+    graph (see DetailScreen) instead of a second text panel."""
+    ctx.screens.push(DetailScreen(ctx.screen, title, lines_fn(), ctx.screens, refresh=lines_fn,
+                                   history_fn=history_fn, history_title=history_title,
+                                   history_y_label=history_y_label, history_markers_fn=history_markers_fn))
 
 
 def _build_hardware_screen(ctx) -> HardwareScreen:
@@ -143,7 +148,12 @@ def _build_hardware_screen(ctx) -> HardwareScreen:
     storage = HardwareTile("Storage", on_select=lambda: _push_detail_screen(ctx, "Storage", lambda: _storage_detail_lines(hardware)))
     external = HardwareTile("External")
     power = HardwareTile("Power", on_select=lambda: _push_detail_screen(ctx, "Power", lambda: _power_detail_lines(hardware)))
-    cooling = HardwareTile("Cooling", on_select=lambda: _push_detail_screen(ctx, "Cooling", lambda: _cooling_detail_lines(hardware)))
+    cooling = HardwareTile("Cooling", on_select=lambda: _push_detail_screen(
+        ctx, "Cooling", lambda: _cooling_detail_lines(hardware),
+        history_fn=lambda: hardware.temperature_history.values(),
+        history_title="Temperature History", history_y_label="Temp",
+        history_markers_fn=lambda: [hardware.motherboard.cooling_system.env_temperature_celsius,
+                                     hardware.warning_temperature, hardware.critical_temperature]))
     network = HardwareTile("Network", on_select=lambda: _push_detail_screen(ctx, "Network", lambda: _network_detail_lines(hardware)))
 
     def refresh() -> None:

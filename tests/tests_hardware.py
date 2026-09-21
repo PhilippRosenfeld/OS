@@ -401,6 +401,8 @@ def test_check_power_usage_records_power_and_cooling_history():
     assert spec.power_history.latest() == spec.calculate_total_power_usage()
     assert len(spec.cooling_history) == 2
     assert spec.cooling_history.latest() == spec.motherboard.cooling_system.calc_current_power_usage()
+    assert len(spec.temperature_history) == 2
+    assert spec.temperature_history.latest() == spec.temperature_celsius
 
 
 # --- system temperature ---
@@ -668,6 +670,7 @@ def test_hardware_spec_starts_with_empty_history():
     spec = HardwareSpec()
     assert len(spec.power_history) == 0
     assert len(spec.cooling_history) == 0
+    assert len(spec.temperature_history) == 0
 
 
 def test_hardware_spec_history_is_independent_per_instance():
