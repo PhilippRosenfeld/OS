@@ -35,6 +35,17 @@ class SoundManager:
             self._sources[name] = pyglet.media.load(str(path), streaming=False)
         except Exception:
             logger.warning(f"failed to load sound '{name}' from {path}", exc_info=True)
+            
+    def load_all_from_directory(self, directory: str | Path) -> None:
+        """Loads all files in the given directory recursively, using the filename
+        (without extension) as the sound name. Ignores any non-wav files."""
+        directory = Path(directory)
+        if not directory.is_dir():
+            logger.warning(f"sound directory {directory} does not exist or is not a directory")
+            return
+        for file in directory.rglob("*"):
+            if file.is_file():
+                self.load(file.stem, file)
 
     @property
     def volume(self) -> float:

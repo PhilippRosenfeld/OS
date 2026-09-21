@@ -13,7 +13,7 @@ from horus.hardware.spec import HardwareSpec
 from horus.kernel.commands.cmd_menu import horus_menu, open_settings_menu
 from horus.kernel.kernel import Kernel
 from horus.kernel.registry import registry
-from horus.paths import BOOT_DIR, BOOT_PROGRESS_PATH, BOOT_SOUNDS_DIR, DATA_DIR, HARDWARE_SPEC_PATH, SAVES_DIR, SHELL_SOUNDS_DIR, SOUNDS_DIR
+from horus.paths import BOOT_DIR, BOOT_PROGRESS_PATH, DATA_DIR, HARDWARE_SPEC_PATH, SAVES_DIR, SOUNDS_DIR
 from horus.processes.processTable import ProcessTable
 from horus.processes.seed_process import seed_processes
 from horus.processes.system_reactions import (
@@ -47,6 +47,8 @@ logger = logging.getLogger(__name__)
 
 def main() -> None:
     logger.info("-------------------- Application started --------------------")
+    
+    # ---- DISPLAY -----
     window = DisplayWindow(font_path = "Px437_IBM_VGA_8x16.ttf",
                            title="Horus OS",
                            char_width=8*char_size,
@@ -57,25 +59,16 @@ def main() -> None:
                            height=cfg['display']['height'])
     
 
+    # ----- SOUNDS -----
     sounds = SoundManager()
     sounds.set_volume(cfg['sound']['volume'])
-    sounds.load("boot_tick", BOOT_SOUNDS_DIR / "boot_tick.wav")
-    sounds.load("boot_complete", BOOT_SOUNDS_DIR / "boot_complete.wav")
-    sounds.load("logo_stinger", BOOT_SOUNDS_DIR / "ont5.wav")
-    sounds.load("monitor_switch_on", BOOT_SOUNDS_DIR / "monitor_switch_on.mp3")
-    sounds.load("hard_disk_spinup", BOOT_SOUNDS_DIR / "hard_disk_spinup.mp3")
-    sounds.load("startup_up_weird_noise", BOOT_SOUNDS_DIR / "startup_up_weird_noise.mp3")
-    sounds.load("menu_music", SOUNDS_DIR / "menu_music.mp3")
-    sounds.load("crypt", SHELL_SOUNDS_DIR / "crypt.mp3")
-    sounds.load("background", SHELL_SOUNDS_DIR / "background.mp3")
-    sounds.load("error_notification", SHELL_SOUNDS_DIR / "error_notification.mp3")
-    sounds.load("process_kill_buzz", SHELL_SOUNDS_DIR / "process_kill_buzz.mp3")
-    sounds.load("process_kill_bang", SHELL_SOUNDS_DIR / "process_kill_bang.mp3")
-    sounds.load("system_crashed", SHELL_SOUNDS_DIR / "system_crashed.mp3")   
-    sounds.load("system_error_notification", SHELL_SOUNDS_DIR / "system_error_notification.mp3")   
+    sounds.load_all_from_directory(SOUNDS_DIR)
 
+    #---- KERNEL -----
     bus = EventBus()
     kernel = Kernel(registry=registry, bus=bus)
+    
+    #--- FILESYSTEM -----
     fs = SQLiteVFS(SAVES_DIR / "horus.db")
     if fs.is_empty():
         seed_minimal(fs)
@@ -86,17 +79,25 @@ def main() -> None:
         # settings/etc. all hide it again.
         window.status_bar.set_visible(isinstance(screen, ShellScreen))
 
+    #---- SCREENS -----
     screens = ScreenManager(on_active_changed=_on_active_screen_changed)
+    
+    #---- USERS -----
     users = UserRegistry()
     seed_users(users)
 
+    #--- HARDWARE -----
     hardware = HardwareSpec.load(HARDWARE_SPEC_PATH)
 
+    #--- PROCESSES -----
     process_table = ProcessTable(events=bus, total_memory_kb=hardware.total_memory_kb(),
                                   total_cpu_mhz=hardware.total_cpu_mhz())
     seed_processes(process_table)
     process_table.start_fluctuating()
+    
     hardware.start_power_monitoring(process_table, bus)
+    
+    #--- SYSTEM REACTIONS -----
     register_system_reactions(bus, screens, window, sounds, window.buffer)
     register_power_reactions(bus, sounds)
     register_temperature_reactions(bus, screens, window, sounds, window.buffer)
@@ -105,6 +106,7 @@ def main() -> None:
     register_status_bar(bus, window.status_bar)
     window.status_bar.start_blinking()
 
+    # ---- CONTEXT -----
     context = Context(
         session_id = "local",
         user="root",
@@ -165,7 +167,8 @@ def main() -> None:
     def _load_logo_lines(path: Path) -> list[str]:
         with open(path, "r", encoding="utf-8") as f:
             return [line.rstrip("\n") for line in f]
-            
+    
+    # ---- INPUT HANDLER -----
     history = CommandHistory()
     input_handler = InputHandler(window.buffer, history, on_submit=on_submit, get_prompt=get_prompt, complete=complete_file)
     context.input_handler = input_handler
@@ -189,6 +192,7 @@ def main() -> None:
     def _exit_game() -> None:
         window.close() 
 
+    # ---- MAIN MENU -----
     main_menu = MainMenuScreen(
         window.buffer,
         title="H O R U S   S Y S T E M S",
@@ -215,7 +219,8 @@ def main() -> None:
         on_enter=screens.handle_enter,
         on_key=screens.handle_key,
     )
-
+    
+    # ---- BOOT SEQUENCE -----
     boot_progress = BootProgress.load(BOOT_PROGRESS_PATH)
     latest_disk = boot_progress.latest_ok_disk()
     boot_disk_name = f"Disk {latest_disk}" if latest_disk is not None else "Disk 0 (recovery mode)"
