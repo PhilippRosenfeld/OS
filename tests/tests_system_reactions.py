@@ -339,8 +339,8 @@ def test_non_critical_process_kill_does_not_light_the_sys_indicator():
     assert status_bar.is_lit("SYS") is False
 
 
-def test_temp_and_msc_never_light_up_yet():
-    """No real trigger exists for these two yet -- see register_status_bar's
+def test_msc_never_lights_up_yet():
+    """No real trigger exists for MSC yet -- see register_status_bar's
     docstring. Locks in that a power overload and a critical kill only light
     their own indicator, not every light."""
     bus = EventBus()
@@ -350,5 +350,26 @@ def test_temp_and_msc_never_light_up_yet():
     bus.publish(PowerUsageCheckedEvent(total_power_usage=150.0, psu_output_watts=100.0, over_budget=True))
     bus.publish(ProcessKilledEvent(pid=1, name="init", killed_by="root", critical=True))
 
-    assert status_bar.is_lit("TEMP") is False
+    assert status_bar.is_lit("MSC") is False
+
+
+def test_temperature_warning_lights_the_temp_indicator():
+    bus = EventBus()
+    status_bar = StatusBar(40)
+    register_status_bar(bus, status_bar)
+
+    bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0))
+
+    assert status_bar.is_lit("TEMP") is True
+
+
+def test_temperature_warning_does_not_light_other_indicators():
+    bus = EventBus()
+    status_bar = StatusBar(40)
+    register_status_bar(bus, status_bar)
+
+    bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0))
+
+    assert status_bar.is_lit("PWR") is False
+    assert status_bar.is_lit("SYS") is False
     assert status_bar.is_lit("MSC") is False

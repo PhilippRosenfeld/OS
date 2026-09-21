@@ -100,15 +100,19 @@ def register_system_log(bus: EventBus, log: SystemLog) -> None:
 
 
 def register_status_bar(bus: EventBus, status_bar: StatusBar) -> None:
-    """Drives the PWR/SYS indicator lights on `status_bar` from the same
+    """Drives the PWR/TEMP/SYS indicator lights on `status_bar` from the same
     events that feed the SystemLog -- PWR auto-clears when usage drops back
     under budget (it just mirrors the event's own current over_budget flag,
     no edge-tracking needed here since it always reflects live state, unlike
     the log which only wants the transition). SYS latches on a critical
     process kill; there's no meaningful 'recovered' event for that (the
     system crashes shortly after -- see register_system_reactions), so it
-    doesn't auto-clear. TEMP/MSC have no real trigger yet -- they simply
-    never light up until something exists to drive them."""
+    doesn't auto-clear. TEMP latches the same way on a temperature warning --
+    HardwareSpec._check_temperature simply stops publishing once the
+    temperature drops back down rather than announcing a recovery, so
+    there's nothing to clear it on either. Once lit, a light actually blinks
+    via StatusBar.start_blinking(), not anything done here. MSC still has no
+    real trigger yet."""
 
     def _on_power_usage_checked(event: PowerUsageCheckedEvent) -> None:
         status_bar.set_lit("PWR", event.over_budget)
@@ -117,5 +121,9 @@ def register_status_bar(bus: EventBus, status_bar: StatusBar) -> None:
         if event.critical:
             status_bar.set_lit("SYS", True)
 
+    def _on_temperature_warning(event: TemperatureWarningEvent) -> None:
+        status_bar.set_lit("TEMP", True)
+
     bus.subscribe(PowerUsageCheckedEvent, _on_power_usage_checked)
     bus.subscribe(ProcessKilledEvent, _on_process_killed)
+    bus.subscribe(TemperatureWarningEvent, _on_temperature_warning)

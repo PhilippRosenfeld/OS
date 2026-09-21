@@ -28,7 +28,7 @@ _ENV_TEMP_SCALE = 0.01
 # power_usage_watts_max) -- duplicated locally rather than imported from
 # HardwareSpec.critical_temperature (like _NEUTRAL_ENV_TEMPERATURE_CELSIUS
 # above) to avoid a circular import back to spec.py.
-_MAX_COOLING_TEMPERATURE_CELSIUS = 90.0
+_MAX_COOLING_TEMPERATURE_CELSIUS = 75.0
 
 
 class CoolingSystem:
