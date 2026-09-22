@@ -58,12 +58,13 @@ class PowerUsageCheckedEvent(Event):
 
 @dataclass(frozen=True)
 class TemperatureCriticalEvent(Event):
-    """Published when the system's temperature exceeds the critical threshold
-    (see HardwareSpec._update_temperature_and_cooling). Subscribers can react
-    to this event by killing a process, playing a sound, etc."""
+    """Published once when the system's temperature crosses the critical
+    threshold, triggering a full thermal shutdown (see HardwareSpec.
+    _handle_thermal_shutdown) -- no process is singled out or killed, the
+    whole system goes down. Subscribers can react to this event by playing
+    a sound, showing a crash screen, etc."""
     temperature: float
     critical_temperature: float
-    process_killed: object  # Process instance that was killed to reduce heat
     
 @dataclass(frozen=True)
 class TemperatureWarningEvent(Event):

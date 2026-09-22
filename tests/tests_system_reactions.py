@@ -5,7 +5,6 @@ from horus.display.status_bar import StatusBar
 from horus.events.bus import EventBus
 from horus.events.system_log import LogSeverity, SystemLog
 from horus.events.types import PowerUsageCheckedEvent, ProcessKilledEvent, ProcessStartedEvent, TemperatureCriticalEvent, TemperatureWarningEvent
-from horus.processes.process import process as Process
 from horus.processes.system_reactions import (
     register_status_bar,
     register_system_log,
@@ -191,42 +190,24 @@ def test_temperature_critical_pushes_a_crash_screen():
     screens = ScreenManager()
     buffer = ScreenBuffer(60, 10)
     register_temperature_reactions(bus, screens, window=None, sounds=None, buffer=buffer)
-    killed = Process(name="hog", pid=3)
 
     with patch("pyglet.clock.schedule_once"):
-        bus.publish(TemperatureCriticalEvent(temperature=95.0, critical_temperature=90.0, process_killed=killed))
+        bus.publish(TemperatureCriticalEvent(temperature=95.0, critical_temperature=90.0))
 
     assert isinstance(screens.active, CrashScreen)
 
 
-def test_temperature_critical_crash_screen_names_the_killed_process():
-    bus = EventBus()
-    screens = ScreenManager()
-    buffer = ScreenBuffer(60, 10)
-    register_temperature_reactions(bus, screens, window=None, sounds=None, buffer=buffer)
-    killed = Process(name="hog", pid=3)
-
-    with patch("pyglet.clock.schedule_once"):
-        bus.publish(TemperatureCriticalEvent(temperature=95.0, critical_temperature=90.0, process_killed=killed))
-
-    screen_text = "".join(
-        "".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows)
-    )
-    assert "hog" in screen_text
-
-
 def test_temperature_critical_crash_screen_mentions_the_critical_temperature():
-    """The CrashScreen must actually say it was the critical temperature
-    that killed the process, not just name the process like an ordinary
-    process-killed crash."""
+    """No process is named (a thermal shutdown no longer kills one) -- the
+    CrashScreen must instead say it was the critical temperature that took
+    the system down."""
     bus = EventBus()
     screens = ScreenManager()
     buffer = ScreenBuffer(100, 10)  # wide enough that the message doesn't wrap across rows
     register_temperature_reactions(bus, screens, window=None, sounds=None, buffer=buffer)
-    killed = Process(name="hog", pid=3)
 
     with patch("pyglet.clock.schedule_once"):
-        bus.publish(TemperatureCriticalEvent(temperature=95.0, critical_temperature=90.0, process_killed=killed))
+        bus.publish(TemperatureCriticalEvent(temperature=95.0, critical_temperature=90.0))
 
     screen_text = "".join(
         "".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows)

@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pyglet
-from numpy import random
 
 from horus.events.types import PowerUsageCheckedEvent, TemperatureCriticalEvent, TemperatureWarningEvent
 from horus.hardware.cooling_system import CoolantType, CoolingSystem
@@ -15,7 +14,6 @@ from horus.hardware.network_interface import NetworkInterface
 from horus.hardware.power_supply_unit import PowerSupplyUnit
 from horus.hardware.ram import Ram
 from horus.hardware.storage import Storage
-from horus.session.user import UserRole
 
 if TYPE_CHECKING:
     # deferred to avoid a hard runtime dependency -- HardwareSpec only needs
@@ -255,16 +253,15 @@ class HardwareSpec:
     def _check_temperature(self) -> None:
         """Publishes a TemperatureWarningEvent every tick (not just while
         over the warning threshold -- see the event's own docstring), then
-        kills a random process if the temperature is over the critical
-        threshold too, to simulate a thermal shutdown. This is called from
-        the same clock tick as _check_power_usage, so it runs at the same
-        interval.
+        triggers a thermal shutdown of the whole system if the temperature
+        is over the critical threshold too. This is called from the same
+        clock tick as _check_power_usage, so it runs at the same interval.
 
         Once a thermal shutdown has actually fired, the system is already
         going down (CrashScreen is up, the window closes itself shortly --
         see register_temperature_reactions), so this stops checking
-        altogether: no more events, no more killed processes, nothing left
-        to react to a system that's already crashing."""
+        altogether: no more events, nothing left to react to a system
+        that's already crashing."""
         if self._thermal_shutdown_triggered:
             return
         over_warning = self.temperature_celsius > self.warning_temperature
@@ -277,24 +274,15 @@ class HardwareSpec:
             self._handle_thermal_shutdown()
 
     def _handle_thermal_shutdown(self) -> None:
-        """Simulate a thermal shutdown by killing a random process. In a real
-        system, this would be more complex and involve shutting down the CPU,
-        but for this simulation, we'll just kill a process to reduce load.
-        Acts as "system"/ROOT so it can kill any process regardless of
-        owner, same as a real OS's OOM killer would. Latches
-        _thermal_shutdown_triggered (but only once it actually publishes
-        TemperatureCriticalEvent -- an empty process table means no
-        CrashScreen ever appeared, so there's nothing to stop reacting to
-        yet) so _check_temperature stops calling this again on every
-        subsequent tick -- one shutdown, not one per tick for as long as the
-        system stays critically hot."""
-        processes = self._process_table.list_processes()
-        if not processes:
-            return
+        """Simulate a thermal shutdown: the whole system just goes down, the
+        same way a real machine cuts power when it overheats -- no process
+        is singled out or killed (unlike a critical process kill, see
+        register_system_reactions). Latches _thermal_shutdown_triggered so
+        _check_temperature stops calling this again on every subsequent
+        tick -- one shutdown, not one per tick for as long as the system
+        stays critically hot."""
         self._thermal_shutdown_triggered = True
-        random_process = random.choice(processes)
-        self._process_table.remove_process(random_process.pid, user="system", role=UserRole.ROOT)
-        self._events.publish(TemperatureCriticalEvent(temperature=self.temperature_celsius, critical_temperature=self.critical_temperature, process_killed=random_process))
+        self._events.publish(TemperatureCriticalEvent(temperature=self.temperature_celsius, critical_temperature=self.critical_temperature))
 
     # --- persistence ---
 

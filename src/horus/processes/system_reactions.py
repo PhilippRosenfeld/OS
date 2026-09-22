@@ -42,9 +42,9 @@ def register_power_reactions(bus: EventBus, sounds) -> None:
     bus.subscribe(PowerUsageCheckedEvent, _on_power_usage_checked)
 
 def register_temperature_reactions(bus: EventBus, screens, window, sounds, buffer) -> None:
-    """Subscribes to TemperatureCriticalEvent so when the system overheats, it
-    kills a random process and plays a sound. This is a placeholder for a more
-    sophisticated thermal management system that would eventually exist.
+    """Subscribes to TemperatureCriticalEvent so when the system overheats,
+    it crashes outright -- no process is singled out or killed, the whole
+    system just goes down (see HardwareSpec._handle_thermal_shutdown).
 
     Only TemperatureCriticalEvent takes the system down (CrashScreen, same
     kernel-panic-and-close-the-window treatment as a critical process kill --
@@ -66,8 +66,8 @@ def register_temperature_reactions(bus: EventBus, screens, window, sounds, buffe
         if sounds is not None:
             sounds.play("system_crashed")
         if screens is not None:
-            screens.push(CrashScreen(buffer, window, event.process_killed.name,
-                                      reason=f"killed due to critical temperature ({event.temperature:.1f}C)"))
+            screens.push(CrashScreen(buffer, window, "System",
+                                      reason=f"shut down due to critical temperature ({event.temperature:.1f}C)"))
 
     bus.subscribe(TemperatureCriticalEvent, _on_temperature_critical)
     bus.subscribe(TemperatureWarningEvent, _on_temperature_warning)

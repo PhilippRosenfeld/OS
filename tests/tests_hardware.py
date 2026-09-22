@@ -555,6 +555,8 @@ def test_check_temperature_publishes_a_warning_above_the_threshold():
 
 
 def test_check_temperature_triggers_a_shutdown_above_the_critical_threshold():
+    """The whole system crashes outright above the critical threshold -- no
+    process is singled out or killed (unlike a critical process kill)."""
     spec = make_spec()
     table = ProcessTable(total_cpu_mhz=1000, total_memory_kb=1024)
     table.add_process(Process(name="hog", pid=1, owner="root", cpu_mhz=100, mem_kb=1))
@@ -572,19 +574,18 @@ def test_check_temperature_triggers_a_shutdown_above_the_critical_threshold():
     assert len(warnings) == 1  # still crosses the (lower) warning threshold too
     assert len(criticals) == 1
     assert criticals[0].temperature == 95.0
-    assert criticals[0].process_killed.pid == 1
-    assert table.get_process(1) is None  # the offending process was actually killed
+    assert spec._thermal_shutdown_triggered is True
+    assert table.get_process(1) is not None  # nothing was killed
 
 
 def test_check_temperature_stops_reacting_once_a_shutdown_has_fired():
     """Regression guard: while the system stays critically hot, repeated
-    ticks must not keep killing more processes or keep publishing more
-    warning/critical events -- the first shutdown already latches the
-    system into "going down", so everything past that point is a no-op."""
+    ticks must not keep publishing more critical events -- the first
+    shutdown already latches the system into "going down", so everything
+    past that point is a no-op."""
     spec = make_spec()
     table = ProcessTable(total_cpu_mhz=1000, total_memory_kb=1024)
     table.add_process(Process(name="hog", pid=1, owner="root", cpu_mhz=100, mem_kb=1))
-    table.add_process(Process(name="other", pid=2, owner="root", cpu_mhz=100, mem_kb=1))
     events = EventBus()
     spec._events = events
     spec._process_table = table
@@ -599,12 +600,15 @@ def test_check_temperature_stops_reacting_once_a_shutdown_has_fired():
 
     assert len(warnings) == 1
     assert len(criticals) == 1
-    assert len(table.processes) == 1  # only the one process from the first shutdown was killed
+    assert len(table.processes) == 1  # nothing was ever killed
 
 
-def test_handle_thermal_shutdown_does_nothing_with_no_processes_to_kill():
+def test_handle_thermal_shutdown_does_not_depend_on_any_processes_existing():
+    """Regression guard: a thermal shutdown used to require at least one
+    process to kill and silently do nothing without one -- now it always
+    fires, since it no longer touches the process table at all."""
     spec = make_spec()
-    table = ProcessTable(total_cpu_mhz=1000, total_memory_kb=1024)
+    table = ProcessTable(total_cpu_mhz=1000, total_memory_kb=1024)  # no processes added
     events = EventBus()
     spec._events = events
     spec._process_table = table
@@ -614,8 +618,8 @@ def test_handle_thermal_shutdown_does_nothing_with_no_processes_to_kill():
     spec.temperature_celsius = 95.0
     spec._check_temperature()
 
-    assert received == []
-    assert spec._thermal_shutdown_triggered is False  # no CrashScreen ever appeared -- keep checking
+    assert len(received) == 1
+    assert spec._thermal_shutdown_triggered is True
 
 
 def test_check_power_usage_fires_temperature_reactions_when_hot():
