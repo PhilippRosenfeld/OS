@@ -33,8 +33,8 @@ class LogoScreen(Screen):
         self._finished = False
         self._center_offset()
         if self._sounds is not None:
-            self._sounds.set_sound_volume("logo_stinger", 0.5)
-            self._stinger_player = self._sounds.play("logo_stinger")
+            self._sounds.set_sound_volume("logo", 0.5)
+            self._stinger_player = self._sounds.play("logo")
         self._schedule_next(0.0)
 
     def on_pop(self) -> None:

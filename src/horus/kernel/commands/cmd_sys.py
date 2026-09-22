@@ -111,7 +111,6 @@ def _cooling_detail_lines(hardware) -> list[str]:
         elif hardware.temperature_celsius >= hardware.warning_temperature:
             status = "WARNING"
 
-        
     lines = [
         cooling_system.name,
         f"Manufacturer: {cooling_system.manufacturer}",
@@ -124,6 +123,7 @@ def _cooling_detail_lines(hardware) -> list[str]:
         f"Maximum cooling factor at: {cooling_system.max_cooling_temperature_celsius:.1f} C",
         f"System temperature: {hardware.temperature_celsius:.1f} C",
         f"Cooling power: {cooling_system.calculate_cooling_power():.1f} ",
+        "---",
         f"Status: {status}",
     ]
     return lines
