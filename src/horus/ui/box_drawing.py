@@ -37,7 +37,7 @@ def draw_box(buffer: ScreenBuffer, x: int, y: int, width: int, height: int, labe
 
 
 def draw_line_graph(buffer: ScreenBuffer, x: int, y: int, width: int, height: int,
-                     label: str, values: list[float], y_label: str = "Value",
+                     label: str, values: list[float], y_label: str = "Value", unit: str = "",
                      markers: list[float] | None = None) -> None:
     """Draws a bordered box exactly like draw_box, but plots `values` (oldest
     first, e.g. MetricHistory.values()) as a simple ASCII line graph filling
@@ -66,15 +66,16 @@ def draw_line_graph(buffer: ScreenBuffer, x: int, y: int, width: int, height: in
 
     Whenever there's at least one sample, the latest one (values[-1] --
     MetricHistory.values() is oldest first) is also written into the top
-    border just after `label`, so the current reading is visible at a
-    glance without having to read it off the plot itself."""
+    border just after `label`, suffixed with `unit` (e.g. "C" or "W"), so
+    the current reading is visible at a glance without having to read it
+    off the plot itself."""
     draw_box(buffer, x, y, width, height, label)
     if values:
         label_text = f" {label} "[:max(0, width - 2)]
         start_col = x + 1 + len(label_text)
         max_len = max(0, (x + width - 1) - start_col)
         if max_len > 0:
-            buffer.write_string(start_col, y, f"|{values[-1]:.1f}C|"[:max_len])
+            buffer.write_string(start_col, y, f"|{values[-1]:.1f}{unit}|"[:max_len])
 
     interior_width = width - 4
     interior_height = height - 3

@@ -47,7 +47,8 @@ class DetailScreen(Screen):
     tick as `refresh`, so it stays as live as the lines do (new samples
     enter the graph from the right and scroll left as they age -- see
     draw_line_graph). `history_y_label` becomes the graph's y-axis label;
-    its x-axis is always "Time". `history_markers_fn`, if given, is the same
+    its x-axis is always "Time". `history_unit` suffixes the current-reading
+    display next to the graph's title (e.g. "C" or "W"). `history_markers_fn`, if given, is the same
     live-callable idea as `history_fn` but for the graph's dotted reference
     lines (e.g. warning/critical thresholds) -- a callable rather than a
     plain list since a threshold can itself change over time (e.g. the
@@ -66,15 +67,25 @@ class DetailScreen(Screen):
     bottom of the left/main box, right above its border, with a horizontal
     rule above that -- like a small subpanel nested at the bottom, always
     in the same place regardless of how many regular `lines` came before
-    it, rather than just another line that scrolls along with the rest."""
+    it, rather than just another line that scrolls along with the rest.
+
+    `breakdown_fn`, if given, switches to a different three-region layout
+    instead of the one above: `lines` top left, the history graph top right
+    (both half-height instead of full), and a `breakdown_title`-labeled box
+    spanning the *full* width along the bottom, filled with whatever
+    breakdown_fn returns -- e.g. a per-component power draw breakdown,
+    where the full width actually helps fit every component on its own
+    line. Only meaningful together with history_fn; options/status_fn are
+    not supported in this layout since no panel has needed them here yet."""
 
     def __init__(self, buffer: ScreenBuffer, title: str, lines: list[str], screens: ScreenManager,
                  refresh: Callable[[], list[str]] | None = None, refresh_interval: float = 1.0,
                  history_fn: Callable[[], list[float]] | None = None, history_title: str = "History",
-                 history_y_label: str = "Value",
+                 history_y_label: str = "Value", history_unit: str = "",
                  history_markers_fn: Callable[[], list[float]] | None = None,
                  options: list[SettingOption] | None = None,
-                 status_fn: Callable[[], StatusBarInfo] | None = None) -> None:
+                 status_fn: Callable[[], StatusBarInfo] | None = None,
+                 breakdown_fn: Callable[[], list[str]] | None = None, breakdown_title: str = "Breakdown") -> None:
         self._buffer = buffer
         self._title = title
         self._lines = lines
@@ -84,6 +95,7 @@ class DetailScreen(Screen):
         self._history_fn = history_fn
         self._history_title = history_title
         self._history_y_label = history_y_label
+        self._history_unit = history_unit
         self._history_markers_fn = history_markers_fn
         self._history_values = history_fn() if history_fn is not None else []
         self._history_markers = history_markers_fn() if history_markers_fn is not None else None
@@ -92,6 +104,9 @@ class DetailScreen(Screen):
         self._status_fn = status_fn
         self._status = status_fn() if status_fn is not None else None
         self._status_blink_on = True  # only relevant while self._status.blink is True -- see _render_status_bar
+        self._breakdown_fn = breakdown_fn
+        self._breakdown_title = breakdown_title
+        self._breakdown = breakdown_fn() if breakdown_fn is not None else []
         self._saved_screen: dict | None = None
 
     def on_push(self) -> None:
@@ -99,16 +114,16 @@ class DetailScreen(Screen):
         self._buffer.cursor_enabled = False
         self._buffer.clear()
         self._render()
-        if (self._refresh is not None or self._history_fn is not None
-                or self._history_markers_fn is not None or self._status_fn is not None):
+        if (self._refresh is not None or self._history_fn is not None or self._history_markers_fn is not None
+                or self._status_fn is not None or self._breakdown_fn is not None):
             pyglet.clock.schedule_interval(self._tick, self._refresh_interval)
 
     def on_pop(self) -> None:
         """restore() also brings back cursor_enabled from the snapshot, so this
         correctly leaves the cursor disabled when popping back into another menu
         instead of always re-enabling it as if the shell was always underneath."""
-        if (self._refresh is not None or self._history_fn is not None
-                or self._history_markers_fn is not None or self._status_fn is not None):
+        if (self._refresh is not None or self._history_fn is not None or self._history_markers_fn is not None
+                or self._status_fn is not None or self._breakdown_fn is not None):
             pyglet.clock.unschedule(self._tick)
         self._buffer.restore(self._saved_screen)
 
@@ -128,6 +143,8 @@ class DetailScreen(Screen):
         if self._status_fn is not None:
             self._status = self._status_fn()
             self._status_blink_on = not self._status_blink_on
+        if self._breakdown_fn is not None:
+            self._breakdown = self._breakdown_fn()
         self._render()
 
     def _render(self) -> None:
@@ -145,6 +162,16 @@ class DetailScreen(Screen):
         right_width = cols - left_width
         top_height = rows // 2
         bottom_height = rows - top_height
+
+        if self._breakdown_fn is not None:
+            draw_box(self._buffer, 0, 0, left_width, top_height, self._title, self._lines)
+            self._render_status_bar(0, 0, left_width, top_height)
+            draw_line_graph(self._buffer, left_width, 0, right_width, top_height,
+                             self._history_title, self._history_values, y_label=self._history_y_label,
+                             unit=self._history_unit, markers=self._history_markers)
+            draw_box(self._buffer, 0, top_height, cols, bottom_height, self._breakdown_title, self._breakdown)
+            return
+
         draw_box(self._buffer, 0, 0, left_width, rows, self._title, self._lines)
         self._render_status_bar(0, 0, left_width, rows)
         if self._options:
@@ -153,7 +180,7 @@ class DetailScreen(Screen):
             draw_box(self._buffer, left_width, 0, right_width, top_height, "")  # reserved for later
         draw_line_graph(self._buffer, left_width, top_height, right_width, bottom_height,
                          self._history_title, self._history_values, y_label=self._history_y_label,
-                         markers=self._history_markers)
+                         unit=self._history_unit, markers=self._history_markers)
 
     def _render_status_bar(self, x: int, y: int, width: int, height: int) -> None:
         """Overwrites the two rows right above the box's own bottom border

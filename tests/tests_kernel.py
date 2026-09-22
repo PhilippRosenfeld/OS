@@ -1561,6 +1561,45 @@ def test_sys_cooling_detail_screen_updates_live_with_temperature():
     assert "88.5" in full
 
 
+def test_sys_power_detail_screen_shows_a_history_graph_and_breakdown():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    hardware.power_history.record(80.0)
+    hardware.power_history.record(95.0)
+    sys_command(ctx, [])
+    _select(screens.active, col_moves=1, row_moves=0)
+    screens.active.handle_enter()
+    detail_screen = screens.active
+
+    assert detail_screen._history_fn is not None
+    assert detail_screen._history_fn() == [80.0, 95.0]
+    assert detail_screen._breakdown_fn is not None
+    assert detail_screen._history_markers_fn is not None
+    assert detail_screen._history_markers == [0.0, hardware.power_supply_unit.power_output_watts]
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    assert "Power Draw History" in full
+    assert "Power Draw Breakdown" in full
+    assert "CPU:" in full
+    assert "Total:" in full
+    assert str(int(hardware.power_supply_unit.power_output_watts)) in full  # the PSU max-output marker line
+
+    assert detail_screen._status_fn is not None
+    assert detail_screen._status.text == "Status: OK"
+    assert detail_screen._status.blink is False
+    assert "Status: OK" in full
+
+
+def test_sys_power_status_blinks_when_over_budget():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    hardware.power_supply_unit.power_output_watts = 1  # trivially over budget
+    sys_command(ctx, [])
+    _select(screens.active, col_moves=1, row_moves=0)
+    screens.active.handle_enter()
+    detail_screen = screens.active
+
+    assert detail_screen._status.text == "Status: OVER BUDGET"
+    assert detail_screen._status.blink is True
+
+
 def test_sys_cooling_detail_screen_shows_a_history_graph():
     ctx, buffer, screens, table, hardware = make_sys_context()
     hardware.temperature_history.record(30.0)

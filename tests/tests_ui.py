@@ -1695,6 +1695,65 @@ def test_detail_screen_status_bar_alone_schedules_a_tick():
     mock_schedule.assert_called_once_with(screen._tick, screen._refresh_interval)
 
 
+# --- DetailScreen breakdown_fn (full-width-bottom layout, e.g. the Power panel) ---
+
+def test_detail_screen_breakdown_fn_splits_into_top_left_top_right_and_full_width_bottom():
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    screen = DetailScreen(buffer, "Power", ["Horus PSU", "Rated output: 500 W"], manager,
+                           history_fn=lambda: [80.0, 95.0], history_title="Power Draw History",
+                           breakdown_fn=lambda: ["CPU:  45 W", "RAM:   8 W"], breakdown_title="Power Draw Breakdown")
+    manager.push(screen)
+
+    top_height = buffer.rows // 2
+    assert "Horus PSU" in row_text(buffer, 2)  # top-left: the regular lines
+    assert row_text(buffer, 0)[buffer.cols // 2] == "+"  # a second box starts right where the left one ends
+    full = "".join(row_text(buffer, r) for r in range(20))
+    assert "Power Draw History" in full  # top-right: the graph
+    assert "Power Draw Breakdown" in full  # bottom: the breakdown box
+
+    # the breakdown box spans the *full* width, not just the right half
+    assert row_text(buffer, top_height).startswith("+ Power Draw Breakdown")
+    assert "CPU:  45 W" in row_text(buffer, top_height + 2)
+    assert row_text(buffer, top_height + 2).rstrip().endswith("|")  # right border reaches the full width
+
+
+def test_detail_screen_breakdown_fn_updates_on_tick():
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    breakdown = {"value": ["CPU:  45 W"]}
+    with patch("pyglet.clock.schedule_interval"):
+        screen = DetailScreen(buffer, "Power", ["line"], manager, history_fn=lambda: [1.0],
+                               breakdown_fn=lambda: breakdown["value"])
+        manager.push(screen)
+    breakdown["value"] = ["CPU:  99 W"]
+    screen._tick(dt=0.0)
+    full = "".join(row_text(buffer, r) for r in range(20))
+    assert "CPU:  99 W" in full
+    assert "CPU:  45 W" not in full
+
+
+def test_detail_screen_breakdown_fn_alone_schedules_a_tick():
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    with patch("pyglet.clock.schedule_interval") as mock_schedule:
+        screen = DetailScreen(buffer, "Power", ["line"], manager, history_fn=lambda: [1.0],
+                               breakdown_fn=lambda: ["CPU:  45 W"])
+        manager.push(screen)
+    mock_schedule.assert_called_once_with(screen._tick, screen._refresh_interval)
+
+
+def test_detail_screen_without_breakdown_fn_keeps_the_left_column_full_height():
+    """Regression guard: panels that don't pass breakdown_fn (e.g. Cooling)
+    must keep today's layout -- the left column spanning the full height,
+    not shrunk to make room for a bottom strip nobody asked for."""
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    screen = DetailScreen(buffer, "Cooling", ["line"], manager, history_fn=lambda: [1.0])
+    manager.push(screen)
+    assert row_text(buffer, 19).startswith("+---")  # left box's own bottom border reaches the last row
+
+
 # --- box_drawing.draw_line_graph ---
 
 def test_draw_line_graph_plots_within_a_bordered_box():
@@ -1706,8 +1765,14 @@ def test_draw_line_graph_plots_within_a_bordered_box():
 
 def test_draw_line_graph_shows_the_latest_value_next_to_the_label():
     buffer = ScreenBuffer(30, 10)
-    draw_line_graph(buffer, 0, 0, 30, 10, "History", [30.0, 45.2])
+    draw_line_graph(buffer, 0, 0, 30, 10, "History", [30.0, 45.2], unit="C")
     assert row_text(buffer, 0).startswith("+ History |45.2C|")  # values[-1], not the first or a random one
+
+
+def test_draw_line_graph_current_value_has_no_unit_by_default():
+    buffer = ScreenBuffer(30, 10)
+    draw_line_graph(buffer, 0, 0, 30, 10, "History", [30.0, 45.2])
+    assert row_text(buffer, 0).startswith("+ History |45.2|")
 
 
 def test_draw_line_graph_without_any_values_shows_no_current_reading():

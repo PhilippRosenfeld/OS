@@ -87,7 +87,6 @@ def _storage_detail_lines(hardware) -> list[str]:
 def _power_detail_lines(hardware) -> list[str]:
     psu_unit = hardware.power_supply_unit
     total_draw = hardware.calculate_total_power_usage()
-    over_budget = total_draw > psu_unit.power_output_watts
     lines = [
         psu_unit.name,
         f"Manufacturer: {psu_unit.manufacturer}",
@@ -95,9 +94,41 @@ def _power_detail_lines(hardware) -> list[str]:
         "",
         f"Current total draw: {total_draw:.0f} W",
         f"Headroom: {psu_unit.power_output_watts - total_draw:.0f} W",
-        f"Status: {'OVER BUDGET' if over_budget else 'OK'}",
     ]
     return lines
+
+
+def _power_status(hardware) -> StatusBarInfo:
+    """Blinks while over budget, same treatment as Cooling's warning
+    state -- steady OK otherwise."""
+    psu_unit = hardware.power_supply_unit
+    over_budget = hardware.calculate_total_power_usage() > psu_unit.power_output_watts
+    if over_budget:
+        return StatusBarInfo("Status: OVER BUDGET", blink=True)
+    return StatusBarInfo("Status: OK")
+
+
+def _power_breakdown_lines(hardware) -> list[str]:
+    """Who draws how much, shown along the full width under the power
+    history graph (see DetailScreen's `breakdown_fn`) -- one line per
+    component category, matching what calculate_total_power_usage() sums."""
+    motherboard = hardware.motherboard
+    cpu_draw = sum(cpu.calc_current_power_usage() for cpu in hardware.installed_cpus())
+    ram_draw = sum(ram.calc_current_power_usage() for ram in hardware.installed_ram())
+    storage_draw = sum(drive.power_usage_watts for drive in hardware.installed_storage())
+    network_draw = sum(iface.power_usage_watts for iface in motherboard.network_interfaces)
+    cooling_draw = motherboard.cooling_system.calc_current_power_usage()
+    board_draw = motherboard.power_usage_watts
+    return [
+        f"CPU:       {cpu_draw:.0f} W",
+        f"RAM:       {ram_draw:.0f} W",
+        f"Storage:   {storage_draw:.0f} W",
+        f"Network:   {network_draw:.0f} W",
+        f"Cooling:   {cooling_draw:.0f} W",
+        f"Board:     {board_draw:.0f} W",
+        "---",
+        f"Total:     {hardware.calculate_total_power_usage():.0f} W",
+    ]
 
 
 def _cooling_status(hardware) -> StatusBarInfo:
@@ -191,8 +222,9 @@ def _network_detail_lines(hardware) -> list[str]:
 
 
 def _push_detail_screen(ctx, title: str, lines_fn, history_fn=None, history_title: str = "History",
-                         history_y_label: str = "Value", history_markers_fn=None,
-                         options: list[SettingOption] | None = None, status_fn=None) -> None:
+                         history_y_label: str = "Value", history_unit: str = "", history_markers_fn=None,
+                         options: list[SettingOption] | None = None, status_fn=None,
+                         breakdown_fn=None, breakdown_title: str = "Breakdown") -> None:
     """Opens a live-refreshing DetailScreen for one component --
     `lines_fn` is called both now (initial render) and again on every
     refresh tick, so it must stay cheap and side-effect free. `history_fn`,
@@ -200,11 +232,16 @@ def _push_detail_screen(ctx, title: str, lines_fn, history_fn=None, history_titl
     graph (see DetailScreen) instead of a second text panel. `options`, if
     given, fills the graph's otherwise-empty top-right box with live-tunable
     settings (see DetailScreen). `status_fn`, if given, is pinned to its own
-    bar at the bottom of the left panel instead of scrolling with `lines`."""
+    bar at the bottom of the left panel instead of scrolling with `lines`.
+    `breakdown_fn`, if given, switches to the full-width-bottom layout
+    instead (see DetailScreen) -- not meant to be combined with options/
+    status_fn, no panel needs both yet."""
     ctx.screens.push(DetailScreen(ctx.screen, title, lines_fn(), ctx.screens, refresh=lines_fn,
                                    history_fn=history_fn, history_title=history_title,
-                                   history_y_label=history_y_label, history_markers_fn=history_markers_fn,
-                                   options=options, status_fn=status_fn))
+                                   history_y_label=history_y_label, history_unit=history_unit,
+                                   history_markers_fn=history_markers_fn,
+                                   options=options, status_fn=status_fn,
+                                   breakdown_fn=breakdown_fn, breakdown_title=breakdown_title))
 
 
 def _build_hardware_screen(ctx) -> tuple[HardwareScreen, dict[str, HardwareTile]]:
@@ -233,11 +270,17 @@ def _build_hardware_screen(ctx) -> tuple[HardwareScreen, dict[str, HardwareTile]
     ram = HardwareTile("RAM", on_select=lambda: _push_detail_screen(ctx, "RAM", lambda: _ram_detail_lines(hardware, table)))
     storage = HardwareTile("Storage", on_select=lambda: _push_detail_screen(ctx, "Storage", lambda: _storage_detail_lines(hardware)))
     external = HardwareTile("External")
-    power = HardwareTile("Power", on_select=lambda: _push_detail_screen(ctx, "Power", lambda: _power_detail_lines(hardware)))
+    power = HardwareTile("Power", on_select=lambda: _push_detail_screen(
+        ctx, "Power", lambda: _power_detail_lines(hardware),
+        history_fn=lambda: hardware.power_history.values(),
+        history_title="Power Draw History", history_y_label="Watts", history_unit="W",
+        history_markers_fn=lambda: [0.0, hardware.power_supply_unit.power_output_watts],
+        breakdown_fn=lambda: _power_breakdown_lines(hardware), breakdown_title="Power Draw Breakdown",
+        status_fn=lambda: _power_status(hardware)))
     cooling = HardwareTile("Cooling", on_select=lambda: _push_detail_screen(
         ctx, "Cooling", lambda: _cooling_detail_lines(hardware),
         history_fn=lambda: hardware.temperature_history.values(),
-        history_title="Temperature History", history_y_label="Temp",
+        history_title="Temperature History", history_y_label="Temp", history_unit="C",
         history_markers_fn=lambda: [hardware.motherboard.cooling_system.env_temperature_celsius,
                                      hardware.warning_temperature, hardware.critical_temperature],
         options=_cooling_options(hardware), status_fn=lambda: _cooling_status(hardware)))
