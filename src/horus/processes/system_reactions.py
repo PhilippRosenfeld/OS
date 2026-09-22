@@ -97,7 +97,7 @@ def register_system_log(bus: EventBus, log: SystemLog) -> None:
     def _on_temperature_warning(event: TemperatureWarningEvent) -> None:
         nonlocal was_over_warning
         if event.over_warning and not was_over_warning:
-            log.warning(f"System temperature warning at {event.temperature:.1f}C. System is close to critical temperature {event.critical_temperature:.1f}C soon and will start to shut down processes to prevent overheating.")
+            log.warning(f"System temperature warning at {event.temperature:.1f}C. System temperature will go critical at {event.critical_temperature:.1f}C and will start to shut down processes to prevent overheating.")
         was_over_warning = event.over_warning  # tracks the edge, not just the first crossing --
                                                 # recovering and going over the warning threshold again logs again
 

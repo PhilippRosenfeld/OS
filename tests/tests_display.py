@@ -48,12 +48,19 @@ def test_display_window_auto_computes_cols_rows_with_margin():
         window._window.close()
 
 
-def test_on_resize_recomputes_grid_size():
+def test_on_resize_keeps_the_grid_size_fixed_and_scales_the_glyph_size():
+    """Resizing the OS window must not change how many cols/rows fit --
+    every layout (sized in grid cells) stays the same relative size; the
+    window instead zooms the same grid in/out by scaling char_width/height."""
     window = DisplayWindow(font_path=FONT, char_width=8, char_height=16, width=640, height=400, margin=0)
     try:
         window._on_resize(320, 160)
-        assert window.buffer.cols == 40
-        assert window.buffer.rows == 10
+        assert window.buffer.cols == 80  # unchanged from the initial 640 // 8
+        assert window.buffer.rows == 25  # unchanged from the initial 400 // 16
+        assert window.char_width == 320 // 80
+        assert window.char_height == 160 // 25
+        assert window._renderer.font_atlas.char_width == window.char_width
+        assert window._renderer.font_atlas.char_height == window.char_height
     finally:
         window._window.close()
 
@@ -72,7 +79,7 @@ def test_on_resize_also_resizes_the_status_bar():
     window = DisplayWindow(font_path=FONT, char_width=8, char_height=16, width=640, height=400, margin=0)
     try:
         window._on_resize(320, 160)
-        assert window.status_bar.buffer.cols == window.buffer.cols == 40
+        assert window.status_bar.buffer.cols == window.buffer.cols == 80
     finally:
         window._window.close()
 
@@ -104,13 +111,15 @@ def test_set_font_swaps_atlas_without_changing_grid_size():
         window._window.close()
 
 
-def test_set_window_size_resizes_window_and_refits_grid():
+def test_set_window_size_resizes_window_and_scales_the_glyph_size():
     window = DisplayWindow(font_path=FONT, char_width=8, char_height=16, width=320, height=160, margin=0)
     try:
         window.set_window_size(640, 320)
         assert window.window_size == (640, 320)
-        assert window.buffer.cols == 640 // 8
-        assert window.buffer.rows == 320 // 16
+        assert window.buffer.cols == 320 // 8  # unchanged -- same grid, not more characters
+        assert window.buffer.rows == 160 // 16
+        assert window.char_width == 640 // (320 // 8)
+        assert window.char_height == 320 // (160 // 16)
     finally:
         window._window.close()
 

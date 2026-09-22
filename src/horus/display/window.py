@@ -55,11 +55,13 @@ class DisplayWindow:
         return (self._window.width, self._window.height)
 
     def set_char_size(self, char_width: int, char_height: int) -> None:
-        """Rebuild the font atlas at a new glyph size and re-fit the grid to the window."""
-        self._char_width = char_width
-        self._char_height = char_height
-        self._renderer.set_font_atlas(FontAtlas(self._font_path, char_width, char_height))
-        self._on_resize(self._window.width, self._window.height)
+        """Rebuild the font atlas at a new glyph size and re-fit the grid
+        (more or fewer cols/rows) to the current window size -- an explicit
+        zoom, as opposed to _on_resize() below, which holds cols/rows fixed
+        and scales the glyph size instead."""
+        cols = max(1, (self._window.width - 2 * self._margin) // char_width)
+        rows = max(1, (self._window.height - 2 * self._margin) // char_height)
+        self._apply_grid(cols, rows, char_width, char_height)
 
     def set_font(self, font_path: str) -> None:
         """Rebuild the font atlas with a different typeface at the current glyph size."""
@@ -121,9 +123,25 @@ class DisplayWindow:
         self._renderer.render(self._window.width, self._window.height, self._margin)
 
     def _on_resize(self, width: int, height: int) -> None:
-        """pyglet event handler: recompute the grid size so it keeps filling the window (minus the margin)."""
-        cols = max(1, (width - 2 * self._margin) // self._char_width)
-        rows = max(1, (height - 2 * self._margin) // self._char_height)
+        """pyglet event handler: keeps the current cols/rows fixed and scales
+        the glyph size to fill the new window (minus the margin) instead --
+        every layout (which is sized in grid cells, e.g. HardwareScreen's
+        column widths) ends up the same relative size no matter the window
+        size; the window just zooms the same layout in or out, rather than
+        showing more or fewer characters at a fixed glyph size."""
+        cols, rows = self.buffer.cols, self.buffer.rows
+        char_width = max(1, (width - 2 * self._margin) // cols)
+        char_height = max(1, (height - 2 * self._margin) // rows)
+        self._apply_grid(cols, rows, char_width, char_height)
+
+    def _apply_grid(self, cols: int, rows: int, char_width: int, char_height: int) -> None:
+        """Shared by set_char_size() and _on_resize() -- the two differ only
+        in which of (cols, rows) vs (char_width, char_height) they hold
+        fixed and which they derive; applying the final combination (font
+        atlas, buffer, status bar) is identical either way."""
+        self._char_width = char_width
+        self._char_height = char_height
+        self._renderer.set_font_atlas(FontAtlas(self._font_path, char_width, char_height))
         self.buffer.resize(cols, rows)
         self.status_bar.resize(cols)
 

@@ -125,6 +125,7 @@ def _cooling_detail_lines(hardware) -> list[str]:
         f"Environment temperature: {cooling_system.env_temperature_celsius:.1f} C",
         f"Warning/Maximum temperature: {hardware.warning_temperature:.1f} / {hardware.critical_temperature:.1f} C",
         f"Maximum cooling factor at: {cooling_system.max_cooling_temperature_celsius:.1f} C",
+        "---",
         f"System temperature: {hardware.temperature_celsius:.1f} C",
         f"Cooling power: {cooling_system.calculate_cooling_power():.1f} ",
     ]
