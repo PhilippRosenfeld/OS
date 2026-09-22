@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Callable
 
 import pyglet
@@ -9,6 +10,19 @@ from horus.ui.screen_manager import ScreenManager
 from horus.ui.screens.settings_screen import SettingOption
 
 key = pyglet.window.key
+
+
+@dataclass(frozen=True)
+class StatusBarInfo:
+    """What DetailScreen's pinned bottom status bar (see `status_fn`) shows
+    and how: `lit` off means it never highlights at all (e.g. a deactivated
+    component -- nothing to warn about, so nothing lights up); `blink`
+    makes a lit bar alternate with the tick like StatusBar's own warning
+    lights, for states that need attention (e.g. a warning-level reading)
+    without being as severe as a steady/critical one."""
+    text: str
+    lit: bool = True
+    blink: bool = False
 
 
 class DetailScreen(Screen):
@@ -45,14 +59,22 @@ class DetailScreen(Screen):
     otherwise-empty top-right box), is a list of SettingOption (the same
     type SettingScreen uses, with the same behavior): Up/Down moves the
     selection, Left/Right directly calls the selected option's on_left/
-    on_right. `on_select`/Enter is unused here."""
+    on_right. `on_select`/Enter is unused here.
+
+    `status_fn`, if given, is a live callable (same idiom as history_fn)
+    returning a StatusBarInfo, pinned to its own bar centered at the very
+    bottom of the left/main box, right above its border, with a horizontal
+    rule above that -- like a small subpanel nested at the bottom, always
+    in the same place regardless of how many regular `lines` came before
+    it, rather than just another line that scrolls along with the rest."""
 
     def __init__(self, buffer: ScreenBuffer, title: str, lines: list[str], screens: ScreenManager,
                  refresh: Callable[[], list[str]] | None = None, refresh_interval: float = 1.0,
                  history_fn: Callable[[], list[float]] | None = None, history_title: str = "History",
                  history_y_label: str = "Value",
                  history_markers_fn: Callable[[], list[float]] | None = None,
-                 options: list[SettingOption] | None = None) -> None:
+                 options: list[SettingOption] | None = None,
+                 status_fn: Callable[[], StatusBarInfo] | None = None) -> None:
         self._buffer = buffer
         self._title = title
         self._lines = lines
@@ -67,6 +89,9 @@ class DetailScreen(Screen):
         self._history_markers = history_markers_fn() if history_markers_fn is not None else None
         self._options = options
         self._options_selected = 0
+        self._status_fn = status_fn
+        self._status = status_fn() if status_fn is not None else None
+        self._status_blink_on = True  # only relevant while self._status.blink is True -- see _render_status_bar
         self._saved_screen: dict | None = None
 
     def on_push(self) -> None:
@@ -74,14 +99,16 @@ class DetailScreen(Screen):
         self._buffer.cursor_enabled = False
         self._buffer.clear()
         self._render()
-        if self._refresh is not None or self._history_fn is not None or self._history_markers_fn is not None:
+        if (self._refresh is not None or self._history_fn is not None
+                or self._history_markers_fn is not None or self._status_fn is not None):
             pyglet.clock.schedule_interval(self._tick, self._refresh_interval)
 
     def on_pop(self) -> None:
         """restore() also brings back cursor_enabled from the snapshot, so this
         correctly leaves the cursor disabled when popping back into another menu
         instead of always re-enabling it as if the shell was always underneath."""
-        if self._refresh is not None or self._history_fn is not None or self._history_markers_fn is not None:
+        if (self._refresh is not None or self._history_fn is not None
+                or self._history_markers_fn is not None or self._status_fn is not None):
             pyglet.clock.unschedule(self._tick)
         self._buffer.restore(self._saved_screen)
 
@@ -98,6 +125,9 @@ class DetailScreen(Screen):
             self._history_values = self._history_fn()
         if self._history_markers_fn is not None:
             self._history_markers = self._history_markers_fn()
+        if self._status_fn is not None:
+            self._status = self._status_fn()
+            self._status_blink_on = not self._status_blink_on
         self._render()
 
     def _render(self) -> None:
@@ -108,6 +138,7 @@ class DetailScreen(Screen):
         cols, rows = self._buffer.cols, self._buffer.rows
         if self._history_fn is None:
             draw_box(self._buffer, 0, 0, cols, rows, self._title, self._lines)
+            self._render_status_bar(0, 0, cols, rows)
             return
 
         left_width = cols // 2
@@ -115,6 +146,7 @@ class DetailScreen(Screen):
         top_height = rows // 2
         bottom_height = rows - top_height
         draw_box(self._buffer, 0, 0, left_width, rows, self._title, self._lines)
+        self._render_status_bar(0, 0, left_width, rows)
         if self._options:
             self._render_options(left_width, 0, right_width, top_height)
         else:
@@ -122,6 +154,26 @@ class DetailScreen(Screen):
         draw_line_graph(self._buffer, left_width, top_height, right_width, bottom_height,
                          self._history_title, self._history_values, y_label=self._history_y_label,
                          markers=self._history_markers)
+
+    def _render_status_bar(self, x: int, y: int, width: int, height: int) -> None:
+        """Overwrites the two rows right above the box's own bottom border
+        (already drawn by draw_box) with a horizontal rule and a centered
+        status strip -- called after draw_box, so it always wins over
+        whatever regular content landed there. Highlighted (inverted) only
+        while self._status.lit is True, and while blinking, only every
+        other tick (self._status_blink_on) -- see StatusBarInfo."""
+        if self._status_fn is None or width < 5 or height < 5:
+            return
+        divider_row = y + height - 3
+        status_row = y + height - 2
+        self._buffer.write_string(x, divider_row, f"+{'-' * (width - 2)}+")
+        interior_width = width - 4
+        text = self._status.text[:interior_width].center(interior_width)
+        lit = self._status.lit and (self._status_blink_on if self._status.blink else True)
+        if lit:
+            self._buffer.write_string(x + 2, status_row, text, fg=self._buffer.default_bg, bg=self._buffer.default_fg)
+        else:
+            self._buffer.write_string(x + 2, status_row, text)
 
     def _render_options(self, x: int, y: int, width: int, height: int) -> None:
         """Draws the border itself via draw_box, then writes each option's

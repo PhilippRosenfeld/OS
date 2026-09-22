@@ -138,7 +138,7 @@ def test_temperature_warning_does_not_push_a_crash_screen():
     buffer = ScreenBuffer(60, 10)
     register_temperature_reactions(bus, screens, window=None, sounds=None, buffer=buffer)
 
-    bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0))
+    bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0, over_warning=True))
 
     assert screens.active is None
 
@@ -150,9 +150,40 @@ def test_temperature_warning_plays_a_sound():
     sounds = FakeSounds()
     register_temperature_reactions(bus, screens, window=None, sounds=sounds, buffer=buffer)
 
-    bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0))
+    bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0, over_warning=True))
 
-    assert sounds.played == ["system_error_notification"]
+    assert sounds.played == ["greece-eas-alarm"]
+
+
+def test_temperature_warning_sound_does_not_replay_while_continuously_over_warning():
+    """Regression guard: TemperatureWarningEvent fires every tick (see its
+    own docstring), not just on crossing the threshold -- the sound must
+    only play on the edge, not every tick spent over the warning
+    threshold."""
+    bus = EventBus()
+    screens = ScreenManager()
+    buffer = ScreenBuffer(60, 10)
+    sounds = FakeSounds()
+    register_temperature_reactions(bus, screens, window=None, sounds=sounds, buffer=buffer)
+
+    for _ in range(5):
+        bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0, over_warning=True))
+
+    assert sounds.played == ["greece-eas-alarm"]
+
+
+def test_temperature_warning_sound_replays_after_dropping_back_under_and_over_again():
+    bus = EventBus()
+    screens = ScreenManager()
+    buffer = ScreenBuffer(60, 10)
+    sounds = FakeSounds()
+    register_temperature_reactions(bus, screens, window=None, sounds=sounds, buffer=buffer)
+
+    bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0, over_warning=True))
+    bus.publish(TemperatureWarningEvent(temperature=70.0, critical_temperature=90.0, over_warning=False))
+    bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0, over_warning=True))
+
+    assert sounds.played == ["greece-eas-alarm", "greece-eas-alarm"]
 
 
 def test_temperature_critical_pushes_a_crash_screen():
@@ -279,6 +310,42 @@ def test_non_critical_process_kill_does_not_log_anything():
     assert len(log) == 0
 
 
+def test_temperature_warning_logs_once_on_the_edge_not_every_tick():
+    """Regression guard: TemperatureWarningEvent fires every tick (see its
+    own docstring), not just on crossing the threshold -- logging must only
+    happen on the edge, same as the power-overload log above."""
+    bus = EventBus()
+    log = SystemLog()
+    register_system_log(bus, log)
+
+    for _ in range(5):
+        bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0, over_warning=True))
+
+    assert len(log) == 1
+
+
+def test_temperature_warning_logs_again_after_recovering_and_re_exceeding():
+    bus = EventBus()
+    log = SystemLog()
+    register_system_log(bus, log)
+
+    bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0, over_warning=True))
+    bus.publish(TemperatureWarningEvent(temperature=70.0, critical_temperature=90.0, over_warning=False))
+    bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0, over_warning=True))
+
+    assert len(log) == 2
+
+
+def test_temperature_warning_under_threshold_does_not_log():
+    bus = EventBus()
+    log = SystemLog()
+    register_system_log(bus, log)
+
+    bus.publish(TemperatureWarningEvent(temperature=70.0, critical_temperature=90.0, over_warning=False))
+
+    assert len(log) == 0
+
+
 def test_system_log_is_independent_of_the_sound_screen_reactions():
     """register_system_log() works even if register_system_reactions()/
     register_power_reactions() were never wired up -- it's its own
@@ -358,9 +425,24 @@ def test_temperature_warning_lights_the_temp_indicator():
     status_bar = StatusBar(40)
     register_status_bar(bus, status_bar)
 
-    bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0))
+    bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0, over_warning=True))
 
     assert status_bar.is_lit("TEMP") is True
+
+
+def test_temperature_recovering_clears_the_temp_indicator():
+    """Regression guard: TEMP used to latch forever (no event ever announced
+    a recovery) -- now that TemperatureWarningEvent always carries live
+    over_warning state, it must auto-clear just like PWR does."""
+    bus = EventBus()
+    status_bar = StatusBar(40)
+    register_status_bar(bus, status_bar)
+
+    bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0, over_warning=True))
+    assert status_bar.is_lit("TEMP") is True
+
+    bus.publish(TemperatureWarningEvent(temperature=70.0, critical_temperature=90.0, over_warning=False))
+    assert status_bar.is_lit("TEMP") is False
 
 
 def test_temperature_warning_does_not_light_other_indicators():
@@ -368,7 +450,7 @@ def test_temperature_warning_does_not_light_other_indicators():
     status_bar = StatusBar(40)
     register_status_bar(bus, status_bar)
 
-    bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0))
+    bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0, over_warning=True))
 
     assert status_bar.is_lit("PWR") is False
     assert status_bar.is_lit("SYS") is False

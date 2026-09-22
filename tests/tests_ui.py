@@ -13,7 +13,7 @@ from horus.ui.screen import Screen
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.screens.boot_screen import BootFrame, BootScreen
 from horus.ui.screens.crash_screen import CrashScreen
-from horus.ui.screens.detail_screen import DetailScreen
+from horus.ui.screens.detail_screen import DetailScreen, StatusBarInfo
 from horus.ui.screens.hardware_screen import HardwareScreen, HardwareTile
 from horus.ui.screens.loading_screen import LoadingScreen
 from horus.ui.screens.logo_screen import LogoScreen
@@ -1579,6 +1579,120 @@ def test_detail_screen_motion_and_enter_are_a_noop_without_options():
     manager.push(screen)
     screen.handle_motion(key.MOTION_DOWN)  # should not raise
     screen.handle_enter()  # should not raise
+
+
+# --- DetailScreen status bar (pinned to the bottom, independent of layout/lines) ---
+
+def test_detail_screen_without_status_fn_has_no_bottom_bar():
+    buffer = ScreenBuffer(40, 10)
+    manager = ScreenManager()
+    screen = DetailScreen(buffer, "CPU", ["line"], manager)
+    manager.push(screen)
+    full = "".join(row_text(buffer, r) for r in range(10))
+    assert "Status" not in full
+
+
+def test_detail_screen_status_bar_sits_right_above_the_bottom_border():
+    buffer = ScreenBuffer(40, 10)
+    manager = ScreenManager()
+    screen = DetailScreen(buffer, "CPU", ["line"], manager, status_fn=lambda: StatusBarInfo("Status: OK"))
+    manager.push(screen)
+    assert row_text(buffer, 9).startswith("+---")  # box's own bottom border, untouched
+    assert row_text(buffer, 7).startswith("+---")  # the divider rule right above the status row
+    assert "Status: OK" in row_text(buffer, 8)
+
+
+def test_detail_screen_status_bar_text_is_centered():
+    buffer = ScreenBuffer(40, 10)
+    manager = ScreenManager()
+    screen = DetailScreen(buffer, "CPU", ["line"], manager, status_fn=lambda: StatusBarInfo("OK"))
+    manager.push(screen)
+    row = row_text(buffer, 8)
+    left_pad = len(row) - len(row.lstrip())
+    right_pad = len(row) - len(row.rstrip())
+    assert abs(left_pad - right_pad) <= 1  # centered within the box, not flush left/right
+
+
+def test_detail_screen_status_bar_lit_uses_inverted_colors():
+    buffer = ScreenBuffer(40, 10)
+    manager = ScreenManager()
+    screen = DetailScreen(buffer, "CPU", ["line"], manager, status_fn=lambda: StatusBarInfo("Status: OK", lit=True))
+    manager.push(screen)
+    col = row_text(buffer, 8).index("Status: OK")
+    assert buffer.get_cell(col, 8).fg_color == buffer.default_bg
+    assert buffer.get_cell(col, 8).bg_color == buffer.default_fg
+
+
+def test_detail_screen_status_bar_unlit_does_not_highlight():
+    """Regression guard: a deactivated component (lit=False) must show its
+    status text plainly, not with the same highlight as an active one."""
+    buffer = ScreenBuffer(40, 10)
+    manager = ScreenManager()
+    screen = DetailScreen(buffer, "CPU", ["line"], manager,
+                           status_fn=lambda: StatusBarInfo("Status: INACTIVE", lit=False))
+    manager.push(screen)
+    col = row_text(buffer, 8).index("Status: INACTIVE")
+    assert buffer.get_cell(col, 8).fg_color == buffer.default_fg
+    assert buffer.get_cell(col, 8).bg_color == buffer.default_bg
+
+
+def test_detail_screen_status_bar_blinking_alternates_each_tick():
+    buffer = ScreenBuffer(40, 10)
+    manager = ScreenManager()
+    with patch("pyglet.clock.schedule_interval"):
+        screen = DetailScreen(buffer, "CPU", ["line"], manager,
+                               status_fn=lambda: StatusBarInfo("Status: WARNING", blink=True))
+        manager.push(screen)
+    col = row_text(buffer, 8).index("Status: WARNING")
+    assert buffer.get_cell(col, 8).bg_color == buffer.default_fg  # lit on the first render
+
+    screen._tick(dt=0.0)
+    assert buffer.get_cell(col, 8).bg_color == buffer.default_bg  # blinked off
+
+    screen._tick(dt=0.0)
+    assert buffer.get_cell(col, 8).bg_color == buffer.default_fg  # back on
+
+
+def test_detail_screen_status_bar_does_not_move_regardless_of_how_many_lines_there_are():
+    buffer = ScreenBuffer(40, 10)
+    manager = ScreenManager()
+    screen = DetailScreen(buffer, "CPU", ["a"] * 20, manager, status_fn=lambda: StatusBarInfo("Status: OK"))
+    manager.push(screen)
+    assert "Status: OK" in row_text(buffer, 8)  # still pinned to the bottom, not pushed off past row 9
+
+
+def test_detail_screen_status_bar_updates_on_tick():
+    buffer = ScreenBuffer(40, 10)
+    manager = ScreenManager()
+    status = {"value": StatusBarInfo("Status: OK")}
+    with patch("pyglet.clock.schedule_interval"):
+        screen = DetailScreen(buffer, "CPU", ["line"], manager, status_fn=lambda: status["value"])
+        manager.push(screen)
+    status["value"] = StatusBarInfo("Status: CRITICAL")
+    screen._tick(dt=0.0)
+    assert "Status: CRITICAL" in row_text(buffer, 8)
+
+
+def test_detail_screen_status_bar_also_works_in_the_history_fn_three_region_layout():
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    screen = DetailScreen(buffer, "Cooling", ["line"], manager, history_fn=lambda: [1.0],
+                           status_fn=lambda: StatusBarInfo("Status: OK"))
+    manager.push(screen)
+    left_width = buffer.cols // 2
+    full_left_column = "".join(row_text(buffer, r)[:left_width] for r in range(20))
+    assert "Status: OK" in full_left_column
+    # the graph on the right must still render too -- the status bar shouldn't crowd it out
+    assert "Time" in "".join(row_text(buffer, r) for r in range(20))
+
+
+def test_detail_screen_status_bar_alone_schedules_a_tick():
+    buffer = ScreenBuffer(40, 10)
+    manager = ScreenManager()
+    with patch("pyglet.clock.schedule_interval") as mock_schedule:
+        screen = DetailScreen(buffer, "CPU", ["line"], manager, status_fn=lambda: StatusBarInfo("Status: OK"))
+        manager.push(screen)
+    mock_schedule.assert_called_once_with(screen._tick, screen._refresh_interval)
 
 
 # --- box_drawing.draw_line_graph ---

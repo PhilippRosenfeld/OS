@@ -67,8 +67,11 @@ class TemperatureCriticalEvent(Event):
     
 @dataclass(frozen=True)
 class TemperatureWarningEvent(Event):
-    """Published when the system's temperature exceeds the warning threshold
-    (see HardwareSpec._update_temperature_and_cooling). Subscribers can react
-    to this event by playing a sound, showing a warning, etc."""
+    """Published every tick of HardwareSpec.start_power_monitoring(), not
+    just when crossing the warning threshold -- mirrors PowerUsageCheckedEvent's
+    over_budget so subscribers always see current state instead of only
+    breach edges (e.g. so a status-bar light can auto-clear once the
+    temperature drops back down, not just latch forever)."""
     temperature: float
     critical_temperature: float
+    over_warning: bool

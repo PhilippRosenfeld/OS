@@ -253,21 +253,28 @@ class HardwareSpec:
         self.motherboard.cooling_system.update_temperature(self.temperature_celsius)
         
     def _check_temperature(self) -> None:
-        """If the system is running too hot, kill a random process to simulate
-        a thermal shutdown. This is called from the same clock tick as
-        _check_power_usage, so it runs at the same interval.
+        """Publishes a TemperatureWarningEvent every tick (not just while
+        over the warning threshold -- see the event's own docstring), then
+        kills a random process if the temperature is over the critical
+        threshold too, to simulate a thermal shutdown. This is called from
+        the same clock tick as _check_power_usage, so it runs at the same
+        interval.
 
         Once a thermal shutdown has actually fired, the system is already
         going down (CrashScreen is up, the window closes itself shortly --
         see register_temperature_reactions), so this stops checking
-        altogether: no more warnings, no more killed processes, nothing left
+        altogether: no more events, no more killed processes, nothing left
         to react to a system that's already crashing."""
         if self._thermal_shutdown_triggered:
             return
-        if self.temperature_celsius > self.warning_temperature:  # arbitrary threshold for "too hot"
-            self._events.publish(TemperatureWarningEvent(temperature=self.temperature_celsius, critical_temperature=self.critical_temperature))
-            if self.temperature_celsius > self.critical_temperature:  # critical threshold for thermal shutdown
-                self._handle_thermal_shutdown()
+        over_warning = self.temperature_celsius > self.warning_temperature
+        self._events.publish(TemperatureWarningEvent(
+            temperature=self.temperature_celsius,
+            critical_temperature=self.critical_temperature,
+            over_warning=over_warning,
+        ))
+        if over_warning and self.temperature_celsius > self.critical_temperature:  # critical threshold for thermal shutdown
+            self._handle_thermal_shutdown()
 
     def _handle_thermal_shutdown(self) -> None:
         """Simulate a thermal shutdown by killing a random process. In a real

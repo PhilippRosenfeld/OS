@@ -1592,6 +1592,39 @@ def test_sys_cooling_detail_screen_has_the_four_tunable_options():
     assert labels == ["Maximum cooling factor at", "Maximum power draw", "Warning temperature", "Status"]
 
 
+def test_sys_cooling_detail_screen_pins_status_to_its_own_bottom_bar():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, [])
+    _select(screens.active, col_moves=1, row_moves=1)
+    screens.active.handle_enter()
+    detail_screen = screens.active
+
+    assert detail_screen._status_fn is not None
+    assert detail_screen._status.text == "Status: OK"
+    assert detail_screen._status.lit is True
+    assert detail_screen._status.blink is False
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    assert "Status: OK" in full
+
+
+def test_sys_cooling_status_blinks_on_warning_and_stays_dark_when_inactive():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, [])
+    _select(screens.active, col_moves=1, row_moves=1)
+    screens.active.handle_enter()
+    detail_screen = screens.active
+
+    hardware.temperature_celsius = hardware.warning_temperature + 1
+    detail_screen._tick(dt=0.0)
+    assert detail_screen._status.text == "Status: WARNING"
+    assert detail_screen._status.blink is True
+
+    hardware.motherboard.cooling_system.active = False
+    detail_screen._tick(dt=0.0)
+    assert detail_screen._status.text == "Status: INACTIVE"
+    assert detail_screen._status.lit is False
+
+
 def test_sys_cooling_options_panel_edits_the_live_hardware_state():
     ctx, buffer, screens, table, hardware = make_sys_context()
     sys_command(ctx, [])

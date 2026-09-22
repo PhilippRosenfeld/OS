@@ -49,13 +49,18 @@ def register_temperature_reactions(bus: EventBus, screens, window, sounds, buffe
     Only TemperatureCriticalEvent takes the system down (CrashScreen, same
     kernel-panic-and-close-the-window treatment as a critical process kill --
     see register_system_reactions) -- TemperatureWarningEvent just plays a
-    sound. A warning firing every tick the system stays hot must not also
-    push a new CrashScreen every tick; that's what crashed (and closed) the
-    window on nothing worse than a warning-level temperature before."""
+    sound. TemperatureWarningEvent now fires every tick regardless of
+    over_warning (see its own docstring), so this tracks the edge itself --
+    otherwise it'd replay the sound on every tick spent over the warning
+    threshold instead of once when crossing into it."""
+    was_over_warning = False
 
     def _on_temperature_warning(event) -> None:
-        if sounds is not None:
-            sounds.play("system_error_notification")
+        nonlocal was_over_warning
+        if event.over_warning and not was_over_warning:
+            if sounds is not None:
+                sounds.play("greece-eas-alarm")
+        was_over_warning = event.over_warning
 
     def _on_temperature_critical(event) -> None:
         if sounds is not None:
@@ -87,8 +92,14 @@ def register_system_log(bus: EventBus, log: SystemLog) -> None:
             log.error(f"Critical process '{event.name}' (PID {event.pid}) "
                       f"was killed by {event.killed_by} -- system crashed")
             
+    was_over_warning = False
+
     def _on_temperature_warning(event: TemperatureWarningEvent) -> None:
-        log.warning(f"System temperature warning at {event.temperature:.1f}C. System is close to critical temperature {event.critical_temperature:.1f}C soon and will start to shut down processes to prevent overheating.")
+        nonlocal was_over_warning
+        if event.over_warning and not was_over_warning:
+            log.warning(f"System temperature warning at {event.temperature:.1f}C. System is close to critical temperature {event.critical_temperature:.1f}C soon and will start to shut down processes to prevent overheating.")
+        was_over_warning = event.over_warning  # tracks the edge, not just the first crossing --
+                                                # recovering and going over the warning threshold again logs again
 
     def _on_temperature_critical(event: TemperatureCriticalEvent) -> None:
         log.error(f"System temperature critical at {event.temperature:.1f}C")
@@ -101,17 +112,14 @@ def register_system_log(bus: EventBus, log: SystemLog) -> None:
 
 def register_status_bar(bus: EventBus, status_bar: StatusBar) -> None:
     """Drives the PWR/TEMP/SYS indicator lights on `status_bar` from the same
-    events that feed the SystemLog -- PWR auto-clears when usage drops back
-    under budget (it just mirrors the event's own current over_budget flag,
-    no edge-tracking needed here since it always reflects live state, unlike
+    events that feed the SystemLog -- PWR and TEMP both auto-clear (they just
+    mirror the event's own current over_budget/over_warning flag, no
+    edge-tracking needed here since both now always reflect live state, unlike
     the log which only wants the transition). SYS latches on a critical
     process kill; there's no meaningful 'recovered' event for that (the
     system crashes shortly after -- see register_system_reactions), so it
-    doesn't auto-clear. TEMP latches the same way on a temperature warning --
-    HardwareSpec._check_temperature simply stops publishing once the
-    temperature drops back down rather than announcing a recovery, so
-    there's nothing to clear it on either. Once lit, a light actually blinks
-    via StatusBar.start_blinking(), not anything done here. MSC still has no
+    doesn't auto-clear. Once lit, a light actually blinks via
+    StatusBar.start_blinking(), not anything done here. MSC still has no
     real trigger yet."""
 
     def _on_power_usage_checked(event: PowerUsageCheckedEvent) -> None:
@@ -122,7 +130,7 @@ def register_status_bar(bus: EventBus, status_bar: StatusBar) -> None:
             status_bar.set_lit("SYS", True)
 
     def _on_temperature_warning(event: TemperatureWarningEvent) -> None:
-        status_bar.set_lit("TEMP", True)
+        status_bar.set_lit("TEMP", event.over_warning)
 
     bus.subscribe(PowerUsageCheckedEvent, _on_power_usage_checked)
     bus.subscribe(ProcessKilledEvent, _on_process_killed)

@@ -2,7 +2,7 @@ from horus.hardware.spec import HardwareSpec
 from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
 from horus.kernel.registry import command
 from horus.processes.process_view import format_system_summary
-from horus.ui.screens.detail_screen import DetailScreen
+from horus.ui.screens.detail_screen import DetailScreen, StatusBarInfo
 from horus.ui.screens.hardware_screen import HardwareScreen, HardwareTile
 from horus.ui.screens.settings_screen import SettingOption
 
@@ -100,17 +100,21 @@ def _power_detail_lines(hardware) -> list[str]:
     return lines
 
 
+def _cooling_status(hardware) -> StatusBarInfo:
+    """Deactivated never lights up (nothing to warn about), a warning-level
+    temperature blinks to draw attention, and critical/OK stay lit steady."""
+    cooling_system = hardware.motherboard.cooling_system
+    if not cooling_system.active:
+        return StatusBarInfo("Status: INACTIVE", lit=False)
+    if hardware.temperature_celsius >= hardware.critical_temperature:
+        return StatusBarInfo("Status: CRITICAL")
+    if hardware.temperature_celsius >= hardware.warning_temperature:
+        return StatusBarInfo("Status: WARNING", blink=True)
+    return StatusBarInfo("Status: OK")
+
+
 def _cooling_detail_lines(hardware) -> list[str]:
     cooling_system = hardware.motherboard.cooling_system
-    status = "OK"
-    if not cooling_system.active:
-        status = "INACTIVE"
-    else:
-        if hardware.temperature_celsius >= hardware.critical_temperature:
-            status = "CRITICAL"
-        elif hardware.temperature_celsius >= hardware.warning_temperature:
-            status = "WARNING"
-
     lines = [
         cooling_system.name,
         f"Manufacturer: {cooling_system.manufacturer}",
@@ -123,8 +127,6 @@ def _cooling_detail_lines(hardware) -> list[str]:
         f"Maximum cooling factor at: {cooling_system.max_cooling_temperature_celsius:.1f} C",
         f"System temperature: {hardware.temperature_celsius:.1f} C",
         f"Cooling power: {cooling_system.calculate_cooling_power():.1f} ",
-        "---",
-        f"Status: {status}",
     ]
     return lines
 
@@ -189,18 +191,19 @@ def _network_detail_lines(hardware) -> list[str]:
 
 def _push_detail_screen(ctx, title: str, lines_fn, history_fn=None, history_title: str = "History",
                          history_y_label: str = "Value", history_markers_fn=None,
-                         options: list[SettingOption] | None = None) -> None:
+                         options: list[SettingOption] | None = None, status_fn=None) -> None:
     """Opens a live-refreshing DetailScreen for one component --
     `lines_fn` is called both now (initial render) and again on every
     refresh tick, so it must stay cheap and side-effect free. `history_fn`,
     if given, is the same idea for a MetricHistory.values()-shaped line
     graph (see DetailScreen) instead of a second text panel. `options`, if
     given, fills the graph's otherwise-empty top-right box with live-tunable
-    settings (see DetailScreen)."""
+    settings (see DetailScreen). `status_fn`, if given, is pinned to its own
+    bar at the bottom of the left panel instead of scrolling with `lines`."""
     ctx.screens.push(DetailScreen(ctx.screen, title, lines_fn(), ctx.screens, refresh=lines_fn,
                                    history_fn=history_fn, history_title=history_title,
                                    history_y_label=history_y_label, history_markers_fn=history_markers_fn,
-                                   options=options))
+                                   options=options, status_fn=status_fn))
 
 
 def _build_hardware_screen(ctx) -> tuple[HardwareScreen, dict[str, HardwareTile]]:
@@ -236,7 +239,7 @@ def _build_hardware_screen(ctx) -> tuple[HardwareScreen, dict[str, HardwareTile]
         history_title="Temperature History", history_y_label="Temp",
         history_markers_fn=lambda: [hardware.motherboard.cooling_system.env_temperature_celsius,
                                      hardware.warning_temperature, hardware.critical_temperature],
-        options=_cooling_options(hardware)))
+        options=_cooling_options(hardware), status_fn=lambda: _cooling_status(hardware)))
     network = HardwareTile("Network", on_select=lambda: _push_detail_screen(ctx, "Network", lambda: _network_detail_lines(hardware)))
 
     def refresh() -> None:

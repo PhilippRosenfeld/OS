@@ -522,7 +522,10 @@ def test_check_power_usage_updates_the_temperature():
     assert spec.temperature_celsius > before
 
 
-def test_check_temperature_does_nothing_below_the_warning_threshold():
+def test_check_temperature_publishes_with_over_warning_false_below_the_threshold():
+    """Regression guard: the event still fires every tick regardless of the
+    threshold (see its own docstring) -- what changes is only its
+    over_warning flag, e.g. so a status-bar light can auto-clear."""
     spec = make_spec()
     events = EventBus()
     spec._events = events
@@ -532,7 +535,8 @@ def test_check_temperature_does_nothing_below_the_warning_threshold():
     spec.temperature_celsius = 79.9
     spec._check_temperature()
 
-    assert received == []
+    assert len(received) == 1
+    assert received[0].over_warning is False
 
 
 def test_check_temperature_publishes_a_warning_above_the_threshold():
