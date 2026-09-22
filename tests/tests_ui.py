@@ -1827,7 +1827,7 @@ def test_logo_screen_plays_stinger_on_push():
     screen = LogoScreen(buffer, ["LOGO"], on_complete=lambda: None, sounds=sounds)
     screen.on_push()
     pyglet.clock.unschedule(screen._advance)
-    assert sounds.played == ["logo_stinger"]
+    assert sounds.played == ["logo"]
 
 
 def test_logo_screen_works_without_sounds():
@@ -1842,7 +1842,7 @@ def test_logo_screen_stops_the_stinger_when_skipped():
     sounds = FakeSounds()
     screen = LogoScreen(buffer, ["LOGO"], on_complete=lambda: None, sounds=sounds)
     screen.on_push()
-    player = sounds.play_players["logo_stinger"]
+    player = sounds.play_players["logo"]
     assert player.playing is True
 
     screen.handle_key(key.A, 0)  # skip
@@ -1855,7 +1855,7 @@ def test_logo_screen_enter_also_stops_the_stinger():
     sounds = FakeSounds()
     screen = LogoScreen(buffer, ["LOGO"], on_complete=lambda: None, sounds=sounds)
     screen.on_push()
-    player = sounds.play_players["logo_stinger"]
+    player = sounds.play_players["logo"]
 
     screen.handle_enter()  # skip
     assert player.paused_count == 1
@@ -1868,7 +1868,7 @@ def test_logo_screen_natural_finish_does_not_stop_the_stinger():
     sounds = FakeSounds()
     screen = LogoScreen(buffer, ["x"], on_complete=lambda: None, sounds=sounds)
     screen.on_push()
-    player = sounds.play_players["logo_stinger"]
+    player = sounds.play_players["logo"]
 
     screen._advance(0.0)  # writes the only line
     screen._advance(0.0)  # index >= len(lines) -> natural _finish()
