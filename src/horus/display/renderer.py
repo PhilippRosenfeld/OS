@@ -166,5 +166,6 @@ class Renderer:
                 self.status_bar.dirty = False
         self._update_quad_geometry(window_width, window_height, margin)
         self._program['resolution'].value = self._display_size
+        self._program['char_height'].value = self._display_size[1] / self._total_rows()
         self._texture.use()
         self._quad.render(moderngl.TRIANGLE_STRIP)

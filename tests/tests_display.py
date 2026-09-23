@@ -534,6 +534,33 @@ def test_renderer_quad_geometry_insets_by_margin():
     assert bottom > -1.0
 
 
+def test_renderer_sets_the_char_height_uniform_for_the_crt_shader():
+    """Scanlines in crt.frag scale off this uniform (on-screen character
+    height, not a fixed pixel width) so they stay proportional to the text
+    at any window size -- see the shader's own comment."""
+    renderer, buffer, atlas = make_renderer(cols=10, rows=5)
+    renderer.render(200, 100)
+
+    expected = renderer._display_size[1] / renderer._total_rows()
+    assert renderer._program["char_height"].value == pytest.approx(expected)
+
+
+def test_renderer_char_height_uniform_grows_with_the_window():
+    """Regression guard: the whole point is that this scales with window
+    size -- a bigger window (same grid) must report a bigger on-screen
+    character height, not a value pinned to the glyph atlas's own texel
+    size."""
+    renderer, buffer, atlas = make_renderer(cols=10, rows=5)
+
+    renderer.render(200, 100)
+    small = renderer._program["char_height"].value
+
+    renderer.render(400, 200)
+    large = renderer._program["char_height"].value
+
+    assert large > small
+
+
 # --- Renderer + status bar ---
 
 def test_renderer_without_a_status_bar_behaves_as_before():
