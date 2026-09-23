@@ -451,7 +451,7 @@ def make_table():
 
 
 def test_top_screen_renders_the_process_table_on_push():
-    buffer = ScreenBuffer(60, 10)
+    buffer = ScreenBuffer(80, 10)  # wide enough that a process row doesn't wrap past its name
     manager = ScreenManager()
     with patch("pyglet.clock.schedule_interval"):
         manager.push(TopScreen(buffer, make_table(), manager))
@@ -493,7 +493,7 @@ def test_top_screen_schedules_a_recurring_refresh():
 
 
 def test_top_screen_refresh_reflects_new_processes():
-    buffer = ScreenBuffer(60, 10)
+    buffer = ScreenBuffer(80, 10)  # wide enough that a process row doesn't wrap past its name
     manager = ScreenManager()
     table = make_table()
     with patch("pyglet.clock.schedule_interval") as mock_schedule:

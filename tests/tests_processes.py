@@ -146,13 +146,14 @@ def test_stop_fluctuating_unschedules_the_tick():
 
 
 def test_fluctuate_changes_cpu_and_mem_of_every_process():
-    """Each process makes two random.uniform() calls per tick, in order:
-    cpu delta, then mem delta."""
+    """Each process makes two random.gauss() calls per tick, in order: a
+    cpu draw, then a mem draw -- each one the process's *new absolute*
+    value (centered on its own baseline), not a delta added to the old one."""
     table = ProcessTable()
     p1 = table.add_process(Process(name="a", pid=0, cpu_mhz=10.0, mem_kb=1000))
     p2 = table.add_process(Process(name="b", pid=0, cpu_mhz=20.0, mem_kb=2000))
 
-    with patch("random.uniform", side_effect=[1.5, 48.0, -1.5, -48.0]):
+    with patch("random.gauss", side_effect=[11.5, 1048.0, 18.5, 1952.0]):
         table._fluctuate(0.0)
 
     assert p1.cpu_mhz == pytest.approx(11.5)
@@ -161,11 +162,31 @@ def test_fluctuate_changes_cpu_and_mem_of_every_process():
     assert p2.mem_kb == 1952
 
 
+def test_fluctuate_draws_around_the_process_s_own_baseline():
+    """Regression guard for the switch away from a random walk: the draw is
+    always centered on baseline_cpu_mhz, not on whatever cpu_mhz happened to
+    already be (e.g. left over from a previous tick or an adjust_load()
+    call) -- so a process can't drift away from its usual level over time."""
+    table = ProcessTable()
+    proc = table.add_process(Process(name="a", pid=0, cpu_mhz=10.0))
+    proc.cpu_mhz = 999.0  # simulate a stale/previous-tick value that isn't the baseline
+
+    captured_means = []
+    def fake_gauss(mean, stddev):
+        captured_means.append(mean)
+        return mean
+    with patch("random.gauss", side_effect=fake_gauss):
+        table._fluctuate(0.0)
+
+    assert captured_means[0] == pytest.approx(proc.baseline_cpu_mhz)
+    assert captured_means[0] == pytest.approx(10.0)
+
+
 def test_fluctuate_clamps_cpu_mhz_to_the_table_s_total_capacity():
     table = ProcessTable(total_cpu_mhz=100)
     high = table.add_process(Process(name="hot", pid=0, cpu_mhz=99.5))
 
-    with patch("random.uniform", return_value=10.0):
+    with patch("random.gauss", return_value=150.0):
         table._fluctuate(0.0)
     assert high.cpu_mhz == pytest.approx(100.0)
 
@@ -174,7 +195,7 @@ def test_fluctuate_clamps_cpu_mhz_to_the_lower_bound():
     table = ProcessTable()
     low = table.add_process(Process(name="idle", pid=0, cpu_mhz=0.2))
 
-    with patch("random.uniform", return_value=-10.0):
+    with patch("random.gauss", return_value=-10.0):
         table._fluctuate(0.0)
     assert low.cpu_mhz == pytest.approx(0.0)
 
@@ -183,7 +204,7 @@ def test_fluctuate_never_drops_memory_below_the_floor():
     table = ProcessTable()
     tiny = table.add_process(Process(name="tiny", pid=0, mem_kb=100))
 
-    with patch("random.uniform", return_value=-1000.0):
+    with patch("random.gauss", return_value=-1000.0):
         table._fluctuate(0.0)
 
     assert tiny.mem_kb == 128  # clamped to the floor, not negative
@@ -192,21 +213,23 @@ def test_fluctuate_never_drops_memory_below_the_floor():
 # --- per-process volatility ---
 
 def test_fluctuate_scales_cpu_step_by_volatility():
+    """volatility is the Gaussian's stddev scale now, not a uniform range's
+    half-width -- captures the second (stddev) argument to random.gauss()."""
     table = ProcessTable()
     table.add_process(Process(name="calm", pid=0, cpu_mhz=10.0, volatility=0.2))
     table.add_process(Process(name="jumpy", pid=0, cpu_mhz=10.0, volatility=2.0))
 
-    captured_ranges = []
-    def fake_uniform(low, high):
-        captured_ranges.append(high)
-        return 0.0
-    with patch("random.uniform", side_effect=fake_uniform):
+    captured_stddevs = []
+    def fake_gauss(mean, stddev):
+        captured_stddevs.append(stddev)
+        return mean
+    with patch("random.gauss", side_effect=fake_gauss):
         table._fluctuate(0.0)
 
-    cpu_range_calm, mem_range_calm, cpu_range_jumpy, mem_range_jumpy = captured_ranges
-    assert cpu_range_calm == pytest.approx(40 * 0.2)
-    assert cpu_range_jumpy == pytest.approx(40 * 2.0)
-    assert cpu_range_jumpy > cpu_range_calm
+    cpu_stddev_calm, mem_stddev_calm, cpu_stddev_jumpy, mem_stddev_jumpy = captured_stddevs
+    assert cpu_stddev_calm == pytest.approx(40 * 0.2)
+    assert cpu_stddev_jumpy == pytest.approx(40 * 2.0)
+    assert cpu_stddev_jumpy > cpu_stddev_calm
 
 
 def test_fluctuate_scales_mem_step_by_volatility():
@@ -214,23 +237,24 @@ def test_fluctuate_scales_mem_step_by_volatility():
     table.add_process(Process(name="calm", pid=0, mem_kb=1000, volatility=0.5))
     table.add_process(Process(name="jumpy", pid=0, mem_kb=1000, volatility=3.0))
 
-    captured_ranges = []
-    def fake_uniform(low, high):
-        captured_ranges.append(high)
-        return 0.0
-    with patch("random.uniform", side_effect=fake_uniform):
+    captured_stddevs = []
+    def fake_gauss(mean, stddev):
+        captured_stddevs.append(stddev)
+        return mean
+    with patch("random.gauss", side_effect=fake_gauss):
         table._fluctuate(0.0)
 
-    # calls per process are (cpu, mem) in order -- index 1 and 3 are the mem ranges
-    mem_range_calm, mem_range_jumpy = captured_ranges[1], captured_ranges[3]
-    assert mem_range_calm == pytest.approx(48 * 0.5)
-    assert mem_range_jumpy == pytest.approx(48 * 3.0)
-    assert mem_range_jumpy > mem_range_calm
+    # calls per process are (cpu, mem) in order -- index 1 and 3 are the mem stddevs
+    mem_stddev_calm, mem_stddev_jumpy = captured_stddevs[1], captured_stddevs[3]
+    assert mem_stddev_calm == pytest.approx(48 * 0.5)
+    assert mem_stddev_jumpy == pytest.approx(48 * 3.0)
+    assert mem_stddev_jumpy > mem_stddev_calm
 
 
 def test_zero_volatility_never_moves_the_process():
-    """volatility=0.0 collapses the random range to (0, 0), so even without
-    mocking random at all, real random.uniform(0, 0) always returns 0."""
+    """volatility=0.0 collapses the Gaussian's stddev to 0, so even without
+    mocking random at all, real random.gauss(mu, 0) always returns mu
+    exactly."""
     table = ProcessTable()
     frozen = table.add_process(Process(name="frozen", pid=0, cpu_mhz=42.0, mem_kb=2048, volatility=0.0))
 
@@ -346,7 +370,7 @@ def test_fluctuate_keeps_total_cpu_within_budget_even_after_many_ticks():
     for i in range(10):
         table.add_process(Process(name=f"p{i}", pid=0, cpu_mhz=5.0, volatility=5.0))
 
-    with patch("random.uniform", return_value=50.0):  # every process wants to spike hard
+    with patch("random.gauss", return_value=50.0):  # every process wants to spike hard
         table._fluctuate(0.0)
 
     assert table.used_cpu_mhz() <= 100.0 + 1e-6

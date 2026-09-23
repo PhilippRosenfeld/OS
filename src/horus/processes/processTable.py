@@ -117,23 +117,35 @@ class ProcessTable:
         pyglet.clock.unschedule(self._fluctuate)
 
     def _fluctuate(self, dt: float) -> None:
+        """Redraws each process's cpu_mhz/mem_kb from a Gaussian centered on
+        its own baseline_cpu_mhz/baseline_mem_kb (not a random walk off the
+        previous tick's value, which could drift arbitrarily far over a long
+        session) -- volatility is that Gaussian's stddev, so it controls how
+        far a single tick can plausibly swing from the baseline, not how
+        much the value creeps per tick."""
         for proc in self.processes.values():
-            cpu_range = _CPU_STEP_MHZ * proc.volatility
-            mem_range = _MEM_STEP * proc.volatility
-            proc.cpu_mhz = max(0.0, min(self.total_cpu_mhz, proc.cpu_mhz + random.uniform(-cpu_range, cpu_range)))
-            proc.mem_kb = max(_MIN_MEM_KB, proc.mem_kb + round(random.uniform(-mem_range, mem_range)))
+            cpu_stddev = _CPU_STEP_MHZ * proc.volatility
+            mem_stddev = _MEM_STEP * proc.volatility
+            proc.cpu_mhz = max(0.0, min(self.total_cpu_mhz, random.gauss(proc.baseline_cpu_mhz, cpu_stddev)))
+            proc.mem_kb = max(_MIN_MEM_KB, round(random.gauss(proc.baseline_mem_kb, mem_stddev)))
         self._enforce_resource_caps()
 
     def adjust_load(self, pid: int, cpu_delta: float = 0.0, mem_delta: int = 0) -> None:
-        """Nudges one process's cpu_mhz/mem_kb by a fixed amount, clamped
-        the same way organic fluctuation is. Not called from anywhere yet --
-        this is the hook for later work where something other than random
-        drift should move the numbers (e.g. an event that spikes a process's
-        load when it activates); a positive delta raises usage, negative
-        lowers it. No-op if `pid` isn't a currently-tracked process."""
+        """Nudges one process's *baseline* cpu_mhz/mem_kb by a fixed amount
+        (plus its current live value, so the change is visible immediately
+        instead of waiting for the next fluctuation tick) -- since
+        _fluctuate() now redraws around the baseline every tick, moving only
+        the live value would just get overwritten by the next tick. Not
+        called from anywhere yet -- this is the hook for later work where
+        something other than random drift should move the numbers (e.g. an
+        event that spikes a process's typical load when it activates); a
+        positive delta raises usage, negative lowers it. No-op if `pid`
+        isn't a currently-tracked process."""
         proc = self.processes.get(pid)
         if proc is None:
             return
+        proc.baseline_cpu_mhz = max(0.0, min(self.total_cpu_mhz, proc.baseline_cpu_mhz + cpu_delta))
+        proc.baseline_mem_kb = max(_MIN_MEM_KB, proc.baseline_mem_kb + mem_delta)
         proc.cpu_mhz = max(0.0, min(self.total_cpu_mhz, proc.cpu_mhz + cpu_delta))
         proc.mem_kb = max(_MIN_MEM_KB, proc.mem_kb + mem_delta)
         self._enforce_resource_caps()
