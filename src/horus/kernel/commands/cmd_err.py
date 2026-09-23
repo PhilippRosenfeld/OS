@@ -14,7 +14,7 @@ def _log_lines(ctx) -> list[str]:
     return [f"[{entry.severity.value}] {entry.timestamp:%H:%M:%S}  {entry.message}" for entry in entries]
 
 
-@command("err", help_text="Show system warnings and errors")
+@command("err", help_text="Show system warnings and errors", category="system")
 def err(ctx, argv: list[str]) -> None:
     ctx.screens.push(DetailScreen(ctx.screen, "Warnings & Errors", _log_lines(ctx), ctx.screens,
                                    refresh=lambda: _log_lines(ctx)))

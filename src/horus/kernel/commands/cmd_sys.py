@@ -351,7 +351,7 @@ def _build_hardware_screen(ctx) -> tuple[HardwareScreen, dict[str, HardwareTile]
     return screen, tiles
 
 
-@command("sys", help_text="Show a hardware overview")
+@command("sys", help_text="Show a hardware overview", category="system")
 def sys(ctx, argv: list[str]) -> None:
     try:
         args = _sys_parser.parse_args(argv)

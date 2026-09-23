@@ -46,7 +46,7 @@ _top_parser = _build_top_parser()
 _ps_parser = _build_ps_parser()
 _kill_parser = _build_kill_parser()
 
-@command("top", help_text="Display system processes")
+@command("top", help_text="Display system processes", category="system")
 def top(ctx, argv: list[str]) -> None:
     try:
         args = _top_parser.parse_args(argv)
@@ -60,7 +60,7 @@ def top(ctx, argv: list[str]) -> None:
 
     ctx.screens.push(TopScreen(ctx.screen, ctx.process_table, ctx.screens, sort_by=args.sort, hardware=ctx.hardware))
     
-@command("ps", help_text="Display system processes snapshot")
+@command("ps", help_text="Display system processes snapshot", category="system")
 def ps(ctx, argv: list[str]) -> None:
     try:
         _ps_parser.parse_args(argv)
@@ -70,7 +70,7 @@ def ps(ctx, argv: list[str]) -> None:
 
     _render_top(ctx)
     
-@command("kill", help_text="Kill a process")
+@command("kill", help_text="Kill a process", category="system")
 def kill(ctx, argv: list[str]) -> None:
     try:
         args = _kill_parser.parse_args(argv)

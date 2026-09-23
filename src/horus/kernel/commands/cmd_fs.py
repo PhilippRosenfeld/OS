@@ -241,7 +241,7 @@ def _list_directory(ctx, path: str, args) -> None:
                 _list_directory(ctx, path.rstrip("/") + "/" + node.name, args)
 
 
-@command("ls", help_text="List current directory content")
+@command("ls", help_text="List current directory content", category="filesystem")
 def ls(ctx, argv: list[str]) -> None:
     try:
         args = _ls_parser.parse_args(argv)
@@ -261,7 +261,7 @@ def ls(ctx, argv: list[str]) -> None:
         ctx.write_line(f"ls: Path does not lead to a directory: {e}")
         return
 
-@command("cd", help_text="Change current directory")
+@command("cd", help_text="Change current directory", category="filesystem")
 def cd(ctx, argv: list[str]) -> None:
     try:
         args = _cd_parser.parse_args(argv)
@@ -275,7 +275,7 @@ def cd(ctx, argv: list[str]) -> None:
         ctx.write_line(f"cd: No such file or directory: {'/'.join(args.path)}")
         
         
-@command("mkdir", help_text="Create a new directory")
+@command("mkdir", help_text="Create a new directory", category="filesystem")
 def mkdir(ctx, argv: list[str]) -> None:
     try:
         args = _mkdir_parser.parse_args(argv)
@@ -297,7 +297,7 @@ def mkdir(ctx, argv: list[str]) -> None:
         ctx.write_line(f"mkdir: error creating directory '{args.path}': {e}")
         
         
-@command("rm", help_text="Remove a file or directory")
+@command("rm", help_text="Remove a file or directory", category="filesystem")
 def rm(ctx, argv: list[str]) -> None:
     try:
         args = _rm_parser.parse_args(argv)
@@ -318,7 +318,7 @@ def rm(ctx, argv: list[str]) -> None:
         ctx.write_line(f"rm: cannot remove '{args.path[0]}': Permission denied")
 
 
-@command("chmod", help_text="Change file/directory permissions")
+@command("chmod", help_text="Change file/directory permissions", category="filesystem")
 def chmod(ctx, argv: list[str]) -> None:
     try:
         args = _chmod_parser.parse_args(argv)
@@ -337,7 +337,7 @@ def chmod(ctx, argv: list[str]) -> None:
     except AccessDeniedError:
         ctx.write_line(f"chmod: changing permissions of '{args.path}': Operation not permitted")
 
-@command("chattr", help_text="Toggle protected/hidden/immutable flags")
+@command("chattr", help_text="Toggle protected/hidden/immutable flags", category="filesystem")
 def chattr(ctx, argv: list[str]) -> None:
     if not argv or argv[0] in ("-h", "--help"):
         ctx.write_line(_CHATTR_HELP)
@@ -368,7 +368,7 @@ def chattr(ctx, argv: list[str]) -> None:
         ctx.write_line(f"chattr: changing attributes of '{raw_path}': Operation not permitted")
 
 
-@command("cat", help_text="Print a file's contents")
+@command("cat", help_text="Print a file's contents", category="filesystem")
 def cat(ctx, argv: list[str]) -> None:
     try:
         args = _cat_parser.parse_args(argv)
@@ -403,7 +403,7 @@ def cat(ctx, argv: list[str]) -> None:
 
     ctx.write_line(content)
 
-@command("encrypt", help_text="Encrypt a file")
+@command("encrypt", help_text="Encrypt a file", category="filesystem")
 def encrypt(ctx, argv: list[str]) -> None:
     try:
         args = _encrypt_parser.parse_args(argv)
@@ -442,7 +442,7 @@ def encrypt(ctx, argv: list[str]) -> None:
     _run_with_progress_bar(ctx, "crypt", _reveal_encrypt_result, 0.15)
 
 
-@command("decrypt", help_text="Decrypt a file")
+@command("decrypt", help_text="Decrypt a file", category="filesystem")
 def decrypt(ctx, argv: list[str]) -> None:
     try:
         args = _decrypt_parser.parse_args(argv)

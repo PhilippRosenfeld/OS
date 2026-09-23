@@ -19,7 +19,7 @@ def _build_su_parser() -> CommandArgumentParser:
 _color_parser = _build_color_parser()
 _su_parser = _build_su_parser()
 
-@command("color", help_text="Set terminal colors")
+@command("color", help_text="Set terminal colors", category="user")
 def color(ctx, argv: list[str]) -> None:
     try:
         args = _color_parser.parse_args(argv)
@@ -46,7 +46,7 @@ def color(ctx, argv: list[str]) -> None:
     if args.omnia:
         ctx.screen.recolor_all(fg, bg)
 
-@command("su", help_text="Change yourself")
+@command("su", help_text="Change yourself", category="user")
 def su(ctx, argv: list[str]) -> None:
     try:
         args = _su_parser.parse_args(argv)

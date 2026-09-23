@@ -16,7 +16,7 @@ from horus.kernel.commands.cmd_menu import horus_menu, open_settings_menu
 from horus.kernel.commands.cmd_misc import color, su
 from horus.kernel.commands.cmd_proc import kill, ps, top
 from horus.kernel.commands.cmd_sys import sys as sys_command
-from horus.kernel.commands.cmd_text import cls, echo
+from horus.kernel.commands.cmd_text import cls, echo, man
 from horus.kernel.kernel import Kernel
 from horus.kernel.registry import Registry
 from horus.processes.process import process as Process
@@ -60,6 +60,30 @@ def test_registry_register_and_lookup():
     assert reg.lookup("foo") is handler
     assert reg.names() == ["foo"]
     assert reg.help_text("foo") == "does foo"
+
+
+def test_registry_register_stores_category():
+    reg = Registry()
+    reg.register("foo", lambda ctx, argv: None, category="filesystem")
+    assert reg.category("foo") == "filesystem"
+
+
+def test_registry_register_without_category_defaults_to_none():
+    reg = Registry()
+    reg.register("foo", lambda ctx, argv: None)
+    assert reg.category("foo") is None
+
+
+def test_registry_category_unknown_command_returns_none():
+    reg = Registry()
+    assert reg.category("missing") is None
+
+
+def test_registry_unregister_clears_category_too():
+    reg = Registry()
+    reg.register("foo", lambda ctx, argv: None, category="system")
+    reg.unregister("foo")
+    assert reg.category("foo") is None
 
 
 def test_registry_lookup_unknown_returns_none():
@@ -227,6 +251,81 @@ def test_cls_help_flag_reports_parse_error_without_raising():
 def test_cls_with_no_arguments_does_not_raise():
     ctx, buffer = make_context()
     cls(ctx, [])  # should not raise even on an already-blank screen
+
+
+# --- man command ---
+
+def test_man_with_no_arguments_lists_every_command():
+    ctx, buffer = make_context(cols=60, rows=40)
+    man(ctx, [])
+    full = full_text(buffer)
+    assert "ls: List current directory content" in full
+    assert "top: Display system processes" in full
+    assert "su: Change yourself" in full
+
+
+def test_man_command_shows_that_commands_full_help():
+    """Reuses the command's own --help output (see CommandArgumentParser),
+    so it can never drift out of sync with the command's real arguments."""
+    ctx, buffer = make_context(cols=60, rows=40)
+    man(ctx, ["ls"])
+    full = full_text(buffer)
+    assert "usage: ls" in full
+    assert "List current directory content" in full
+
+
+def test_man_unknown_command_writes_an_error():
+    ctx, buffer = make_context(cols=60, rows=40)
+    man(ctx, ["bogus"])
+    assert "no manual entry for 'bogus'" in full_text(buffer)
+
+
+def test_man_dash_f_lists_only_filesystem_commands():
+    ctx, buffer = make_context(cols=60, rows=40)
+    man(ctx, ["-f"])
+    full = full_text(buffer)
+    assert "ls:" in full
+    assert "top:" not in full
+    assert "su:" not in full
+
+
+def test_man_dash_s_lists_only_system_commands():
+    ctx, buffer = make_context(cols=60, rows=40)
+    man(ctx, ["-s"])
+    full = full_text(buffer)
+    assert "top:" in full
+    assert "ls:" not in full
+
+
+def test_man_dash_u_lists_only_user_commands():
+    ctx, buffer = make_context(cols=60, rows=40)
+    man(ctx, ["-u"])
+    full = full_text(buffer)
+    assert "su:" in full
+    assert "ls:" not in full
+
+
+def test_man_combining_category_flags_is_a_union():
+    ctx, buffer = make_context(cols=60, rows=40)
+    man(ctx, ["-f", "-s"])
+    full = full_text(buffer)
+    assert "ls:" in full
+    assert "top:" in full
+    assert "su:" not in full
+
+
+def test_man_command_argument_takes_priority_over_category_flags():
+    ctx, buffer = make_context(cols=60, rows=40)
+    man(ctx, ["ls", "-f"])
+    full = full_text(buffer)
+    assert "usage: ls" in full
+    assert "mkdir:" not in full  # not the filtered listing
+
+
+def test_man_help_flag_reports_parse_error_without_raising():
+    ctx, buffer = make_context()
+    man(ctx, ["--help"])  # should not raise, writes usage/help instead
+    assert row_text(buffer, 0).strip() != ""
 
 
 # --- color command ---
