@@ -49,18 +49,16 @@ def register_temperature_reactions(bus: EventBus, screens, window, sounds, buffe
     Only TemperatureCriticalEvent takes the system down (CrashScreen, same
     kernel-panic-and-close-the-window treatment as a critical process kill --
     see register_system_reactions) -- TemperatureWarningEvent just plays a
-    sound. TemperatureWarningEvent now fires every tick regardless of
-    over_warning (see its own docstring), so this tracks the edge itself --
-    otherwise it'd replay the sound on every tick spent over the warning
-    threshold instead of once when crossing into it."""
-    was_over_warning = False
+    sound. Unlike the SystemLog/status-bar reactions to the same event
+    (which only want the edge, so as not to spam a log or leave a light
+    stuck blinking), the sound deliberately keeps playing every tick spent
+    over the warning threshold -- an ongoing overheat is worth an ongoing
+    nag, not a single notification that goes quiet the moment you've
+    acknowledged it once (e.g. by checking 'err')."""
 
     def _on_temperature_warning(event) -> None:
-        nonlocal was_over_warning
-        if event.over_warning and not was_over_warning:
-            if sounds is not None:
-                sounds.play("greece-eas-alarm")
-        was_over_warning = event.over_warning
+        if event.over_warning and sounds is not None:
+            sounds.play("greece-eas-alarm")
 
     def _on_temperature_critical(event) -> None:
         if sounds is not None:

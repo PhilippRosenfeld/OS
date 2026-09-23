@@ -313,16 +313,18 @@ def _build_hardware_screen(ctx) -> tuple[HardwareScreen, dict[str, HardwareTile]
         psu_unit = hardware.power_supply_unit
         power.lines = [
             psu_unit.name,
-            f"Output: {psu_unit.power_output_watts} W",
-            f"Draw: {hardware.calculate_total_power_usage():.0f} W",
+            f"Output: {hardware.calculate_total_power_usage():.0f}/{psu_unit.power_output_watts} W",
+            f"Headroom: {psu_unit.power_output_watts - hardware.calculate_total_power_usage():.0f} W",
         ]
 
         cooling_system = hardware.motherboard.cooling_system
         cooling.lines = [
             cooling_system.name,
             f"{cooling_system.coolant_type.value}: {cooling_system.coolant_amount}%",
+            f"Temp: {hardware.temperature_celsius:.1f}/{hardware.critical_temperature:.1f} C",
             f"Cooling power: {cooling_system.calculate_cooling_power():.0f}",
             f"Draw: {cooling_system.calc_current_power_usage():.0f}/{cooling_system.power_usage_watts_max} W",
+            
         ]
 
         interfaces = hardware.motherboard.network_interfaces

@@ -154,11 +154,12 @@ def test_temperature_warning_plays_a_sound():
     assert sounds.played == ["greece-eas-alarm"]
 
 
-def test_temperature_warning_sound_does_not_replay_while_continuously_over_warning():
-    """Regression guard: TemperatureWarningEvent fires every tick (see its
-    own docstring), not just on crossing the threshold -- the sound must
-    only play on the edge, not every tick spent over the warning
-    threshold."""
+def test_temperature_warning_sound_keeps_playing_while_continuously_over_warning():
+    """Unlike the SystemLog/status-bar reactions to the same event (which
+    only want the edge), the sound is a deliberate ongoing nag -- it must
+    keep playing every tick spent over the warning threshold, not go quiet
+    after the first time (e.g. once the player has opened 'err' and seen
+    the log entry -- the room is still overheating either way)."""
     bus = EventBus()
     screens = ScreenManager()
     buffer = ScreenBuffer(60, 10)
@@ -168,7 +169,7 @@ def test_temperature_warning_sound_does_not_replay_while_continuously_over_warni
     for _ in range(5):
         bus.publish(TemperatureWarningEvent(temperature=85.0, critical_temperature=90.0, over_warning=True))
 
-    assert sounds.played == ["greece-eas-alarm"]
+    assert sounds.played == ["greece-eas-alarm"] * 5
 
 
 def test_temperature_warning_sound_replays_after_dropping_back_under_and_over_again():

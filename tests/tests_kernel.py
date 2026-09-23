@@ -1415,6 +1415,18 @@ def test_sys_overview_tile_reports_the_combined_system_summary():
     assert hardware.cpu_name in full
 
 
+def test_sys_power_overview_tile_shows_headroom():
+    """Unlike the detail screen (which shows it in the pinned status bar via
+    OVER BUDGET/OK), the overview tile shows headroom as a plain number so
+    it's visible without drilling into the Power detail screen."""
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    sys_command(ctx, [])
+    full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
+    psu_unit = hardware.power_supply_unit
+    expected_headroom = psu_unit.power_output_watts - hardware.calculate_total_power_usage()
+    assert f"Headroom: {expected_headroom:.0f} W" in full
+
+
 def test_sys_overview_tile_updates_live_like_top():
     """The Overview line -- and the CPU/RAM/Power tiles derived from the
     same live data -- must reflect the ProcessTable's current state on every
@@ -1507,13 +1519,15 @@ def test_sys_enter_on_power_opens_its_detail_screen():
     assert "Rated output:" in full
 
 
-def test_sys_cooling_tile_shows_cooling_power_without_entering_the_detail_screen():
-    """Cooling power (not just the electrical draw) must be visible on the
-    overview tile itself, before Enter opens the detail screen."""
+def test_sys_cooling_tile_shows_the_current_temperature_without_entering_the_detail_screen():
+    """Only ~3 content rows actually fit in this tile -- name, coolant, and
+    the live current/critical temperature are what's worth that limited
+    space; cooling power/draw are still one Enter away in the detail
+    screen."""
     ctx, buffer, screens, table, hardware = make_sys_context()
     sys_command(ctx, [])
     full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
-    assert "Cooling power:" in full
+    assert f"Temp: {hardware.temperature_celsius:.1f}/{hardware.critical_temperature:.1f} C" in full
 
 
 def test_sys_enter_on_cooling_opens_its_detail_screen():
