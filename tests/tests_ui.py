@@ -8,7 +8,7 @@ from horus.processes.process import process as Process
 from horus.processes.processTable import ProcessTable
 from horus.session.history import CommandHistory
 from horus.shell.input_handler import InputHandler
-from horus.ui.box_drawing import draw_line_graph
+from horus.ui.box_drawing import draw_bar_chart, draw_line_graph
 from horus.ui.screen import Screen
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.screens.boot_screen import BootFrame, BootScreen
@@ -1754,6 +1754,54 @@ def test_detail_screen_without_breakdown_fn_keeps_the_left_column_full_height():
     assert row_text(buffer, 19).startswith("+---")  # left box's own bottom border reaches the last row
 
 
+def test_detail_screen_without_breakdown_chart_fn_breakdown_text_spans_full_width():
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    screen = DetailScreen(buffer, "Power", ["line"], manager, history_fn=lambda: [1.0],
+                           breakdown_fn=lambda: ["CPU:  45 W"], breakdown_title="Power Draw Breakdown")
+    manager.push(screen)
+    top_height = buffer.rows // 2
+    assert "CPU:  45 W" in row_text(buffer, top_height + 2)
+    assert row_text(buffer, top_height + 2).rstrip().endswith("|")  # reaches the box's own full-width right border
+
+
+def test_detail_screen_breakdown_chart_fn_draws_bars_on_the_right_half():
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    screen = DetailScreen(buffer, "Power", ["line"], manager, history_fn=lambda: [1.0],
+                           breakdown_fn=lambda: ["CPU:  45 W"], breakdown_title="Power Draw Breakdown",
+                           breakdown_chart_fn=lambda: [("A", 10.0), ("B", 100.0)])
+    manager.push(screen)
+    top_height = buffer.rows // 2
+    full = "".join(row_text(buffer, r) for r in range(top_height, buffer.rows))
+    assert "#" in full  # the chart actually drew a bar somewhere in the bottom box
+
+
+def test_detail_screen_breakdown_chart_fn_does_not_overwrite_the_breakdown_text():
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    screen = DetailScreen(buffer, "Power", ["line"], manager, history_fn=lambda: [1.0],
+                           breakdown_fn=lambda: ["CPU:  45 W"], breakdown_title="Power Draw Breakdown",
+                           breakdown_chart_fn=lambda: [("A", 10.0), ("B", 100.0)])
+    manager.push(screen)
+    top_height = buffer.rows // 2
+    assert "CPU:  45 W" in row_text(buffer, top_height + 2)
+
+
+def test_detail_screen_breakdown_chart_fn_updates_on_tick():
+    buffer = ScreenBuffer(60, 20)
+    manager = ScreenManager()
+    chart = {"value": [("A", 1.0)]}
+    with patch("pyglet.clock.schedule_interval"):
+        screen = DetailScreen(buffer, "Power", ["line"], manager, history_fn=lambda: [1.0],
+                               breakdown_fn=lambda: ["line"], breakdown_chart_fn=lambda: chart["value"])
+        manager.push(screen)
+    assert screen._breakdown_chart == [("A", 1.0)]
+    chart["value"] = [("A", 1.0), ("B", 2.0)]
+    screen._tick(dt=0.0)
+    assert screen._breakdown_chart == [("A", 1.0), ("B", 2.0)]
+
+
 # --- box_drawing.draw_line_graph ---
 
 def test_draw_line_graph_plots_within_a_bordered_box():
@@ -1894,6 +1942,53 @@ def test_draw_line_graph_markers_extend_the_scale_beyond_the_data():
     draw_line_graph(buffer, 0, 0, 30, 10, "History", [25.0, 25.0, 25.0], markers=[0.0, 90.0])
     assert buffer.get_cell(4, 2).char == "9"  # the "90" marker line sits at the very top plot row
     assert buffer.get_cell(26, 6).char == "*"  # the flat 25.0 data sits well below it, not at the top
+
+
+# --- box_drawing.draw_bar_chart ---
+
+def test_draw_bar_chart_taller_bar_for_a_larger_value():
+    buffer = ScreenBuffer(20, 10)
+    draw_bar_chart(buffer, 0, 0, 20, 10, [("A", 10.0), ("B", 100.0)])
+    col_width = 20 // 2
+    a_col, b_col = 0, col_width
+    a_height = sum(1 for row in range(9) if buffer.get_cell(a_col, row).char == "#")
+    b_height = sum(1 for row in range(9) if buffer.get_cell(b_col, row).char == "#")
+    assert b_height > a_height
+
+
+def test_draw_bar_chart_full_value_reaches_the_top_plot_row():
+    buffer = ScreenBuffer(20, 10)
+    draw_bar_chart(buffer, 0, 0, 20, 10, [("A", 10.0), ("B", 100.0)])
+    col_width = 20 // 2
+    assert buffer.get_cell(col_width, 0).char == "#"  # the largest value's bar reaches the very top
+
+
+def test_draw_bar_chart_labels_sit_on_the_bottom_row():
+    buffer = ScreenBuffer(20, 10)
+    draw_bar_chart(buffer, 0, 0, 20, 10, [("A", 10.0), ("B", 100.0)])
+    bottom_row = "".join(buffer.get_cell(c, 9).char for c in range(20))
+    assert "A" in bottom_row
+    assert "B" in bottom_row
+
+
+def test_draw_bar_chart_all_zero_values_draw_no_bars():
+    """An all-zero chart must not be misread as every bar being maxed out
+    -- max_value being 0 has to floor every fraction at 0, not divide by
+    zero into a full-height bar."""
+    buffer = ScreenBuffer(20, 10)
+    draw_bar_chart(buffer, 0, 0, 20, 10, [("A", 0.0), ("B", 0.0)])
+    marks = sum(1 for row in range(9) for col in range(20) if buffer.get_cell(col, row).char == "#")
+    assert marks == 0
+
+
+def test_draw_bar_chart_with_no_bars_does_not_raise():
+    buffer = ScreenBuffer(20, 10)
+    draw_bar_chart(buffer, 0, 0, 20, 10, [])  # should not raise
+
+
+def test_draw_bar_chart_too_small_does_not_raise():
+    buffer = ScreenBuffer(20, 10)
+    draw_bar_chart(buffer, 0, 0, 1, 1, [("A", 5.0), ("B", 10.0)])  # should not raise
 
 
 # --- BootScreen / LogoScreen sound hooks ---

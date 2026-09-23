@@ -108,27 +108,37 @@ def _power_status(hardware) -> StatusBarInfo:
     return StatusBarInfo("Status: OK")
 
 
-def _power_breakdown_lines(hardware) -> list[str]:
-    """Who draws how much, shown along the full width under the power
-    history graph (see DetailScreen's `breakdown_fn`) -- one line per
-    component category, matching what calculate_total_power_usage() sums."""
+def _power_draws(hardware) -> dict[str, float]:
+    """Current draw per component category, shared by the Power detail
+    screen's text breakdown and its bar chart (see _power_breakdown_lines/
+    _power_breakdown_chart below) so the two can never drift apart --
+    matches what calculate_total_power_usage() sums."""
     motherboard = hardware.motherboard
-    cpu_draw = sum(cpu.calc_current_power_usage() for cpu in hardware.installed_cpus())
-    ram_draw = sum(ram.calc_current_power_usage() for ram in hardware.installed_ram())
-    storage_draw = sum(drive.power_usage_watts for drive in hardware.installed_storage())
-    network_draw = sum(iface.power_usage_watts for iface in motherboard.network_interfaces)
-    cooling_draw = motherboard.cooling_system.calc_current_power_usage()
-    board_draw = motherboard.power_usage_watts
-    return [
-        f"CPU:       {cpu_draw:.0f} W",
-        f"RAM:       {ram_draw:.0f} W",
-        f"Storage:   {storage_draw:.0f} W",
-        f"Network:   {network_draw:.0f} W",
-        f"Cooling:   {cooling_draw:.0f} W",
-        f"Board:     {board_draw:.0f} W",
-        "---",
-        f"Total:     {hardware.calculate_total_power_usage():.0f} W",
-    ]
+    return {
+        "CPU": sum(cpu.calc_current_power_usage() for cpu in hardware.installed_cpus()),
+        "RAM": sum(ram.calc_current_power_usage() for ram in hardware.installed_ram()),
+        "Storage": sum(drive.power_usage_watts for drive in hardware.installed_storage()),
+        "Network": sum(iface.power_usage_watts for iface in motherboard.network_interfaces),
+        "Cooling": motherboard.cooling_system.calc_current_power_usage(),
+        "Board": motherboard.power_usage_watts,
+    }
+
+
+def _power_breakdown_lines(hardware) -> list[str]:
+    """Who draws how much, shown along the left half of the box under the
+    power history graph (see DetailScreen's `breakdown_fn`) -- one line per
+    component category."""
+    lines = [f"{label + ':':<11}{draw:.0f} W" for label, draw in _power_draws(hardware).items()]
+    lines.append("---")
+    lines.append(f"{'Total:':<11}{hardware.calculate_total_power_usage():.0f} W")
+    return lines
+
+
+def _power_breakdown_chart(hardware) -> list[tuple[str, float]]:
+    """Same draws as _power_breakdown_lines, visualized as bars on the
+    breakdown box's right half (see DetailScreen's `breakdown_chart_fn`) --
+    labels trimmed to fit the narrow per-bar columns that leaves."""
+    return [(label[:3], draw) for label, draw in _power_draws(hardware).items()]
 
 
 def _cooling_status(hardware) -> StatusBarInfo:
@@ -224,7 +234,7 @@ def _network_detail_lines(hardware) -> list[str]:
 def _push_detail_screen(ctx, title: str, lines_fn, history_fn=None, history_title: str = "History",
                          history_y_label: str = "Value", history_unit: str = "", history_markers_fn=None,
                          options: list[SettingOption] | None = None, status_fn=None,
-                         breakdown_fn=None, breakdown_title: str = "Breakdown") -> None:
+                         breakdown_fn=None, breakdown_title: str = "Breakdown", breakdown_chart_fn=None) -> None:
     """Opens a live-refreshing DetailScreen for one component --
     `lines_fn` is called both now (initial render) and again on every
     refresh tick, so it must stay cheap and side-effect free. `history_fn`,
@@ -235,13 +245,15 @@ def _push_detail_screen(ctx, title: str, lines_fn, history_fn=None, history_titl
     bar at the bottom of the left panel instead of scrolling with `lines`.
     `breakdown_fn`, if given, switches to the full-width-bottom layout
     instead (see DetailScreen) -- not meant to be combined with options/
-    status_fn, no panel needs both yet."""
+    status_fn, no panel needs both yet. `breakdown_chart_fn`, if given
+    alongside it, adds a bar chart of the same data next to the text."""
     ctx.screens.push(DetailScreen(ctx.screen, title, lines_fn(), ctx.screens, refresh=lines_fn,
                                    history_fn=history_fn, history_title=history_title,
                                    history_y_label=history_y_label, history_unit=history_unit,
                                    history_markers_fn=history_markers_fn,
                                    options=options, status_fn=status_fn,
-                                   breakdown_fn=breakdown_fn, breakdown_title=breakdown_title))
+                                   breakdown_fn=breakdown_fn, breakdown_title=breakdown_title,
+                                   breakdown_chart_fn=breakdown_chart_fn))
 
 
 def _build_hardware_screen(ctx) -> tuple[HardwareScreen, dict[str, HardwareTile]]:
@@ -276,6 +288,7 @@ def _build_hardware_screen(ctx) -> tuple[HardwareScreen, dict[str, HardwareTile]
         history_title="Power Draw History", history_y_label="Watts", history_unit="W",
         history_markers_fn=lambda: [0.0, hardware.power_supply_unit.power_output_watts],
         breakdown_fn=lambda: _power_breakdown_lines(hardware), breakdown_title="Power Draw Breakdown",
+        breakdown_chart_fn=lambda: _power_breakdown_chart(hardware),
         status_fn=lambda: _power_status(hardware)))
     cooling = HardwareTile("Cooling", on_select=lambda: _push_detail_screen(
         ctx, "Cooling", lambda: _cooling_detail_lines(hardware),

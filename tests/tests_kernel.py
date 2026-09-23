@@ -1601,6 +1601,11 @@ def test_sys_power_detail_screen_shows_a_history_graph_and_breakdown():
     assert detail_screen._status.blink is False
     assert "Status: OK" in full
 
+    assert detail_screen._breakdown_chart_fn is not None
+    labels = [label for label, _ in detail_screen._breakdown_chart]
+    assert labels == ["CPU", "RAM", "Sto", "Net", "Coo", "Boa"]
+    assert "#" in full  # the bar chart actually drew something
+
 
 def test_sys_power_status_blinks_when_over_budget():
     ctx, buffer, screens, table, hardware = make_sys_context()

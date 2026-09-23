@@ -4,7 +4,7 @@ from typing import Callable
 import pyglet
 
 from horus.display.screen_buffer import ScreenBuffer
-from horus.ui.box_drawing import draw_box, draw_line_graph
+from horus.ui.box_drawing import draw_bar_chart, draw_box, draw_line_graph
 from horus.ui.screen import Screen
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.screens.settings_screen import SettingOption
@@ -76,7 +76,14 @@ class DetailScreen(Screen):
     breakdown_fn returns -- e.g. a per-component power draw breakdown,
     where the full width actually helps fit every component on its own
     line. Only meaningful together with history_fn; options/status_fn are
-    not supported in this layout since no panel has needed them here yet."""
+    not supported in this layout since no panel has needed them here yet.
+
+    `breakdown_chart_fn`, if given alongside breakdown_fn, splits that
+    bottom box further: `breakdown_fn`'s text stays on its left half, and
+    a bar chart of whatever breakdown_chart_fn returns -- a list of
+    (label, value) pairs, e.g. the same per-component draws as the text,
+    just visualized -- fills the right half (see draw_bar_chart). Leaving
+    it unset keeps the breakdown box as plain full-width text."""
 
     def __init__(self, buffer: ScreenBuffer, title: str, lines: list[str], screens: ScreenManager,
                  refresh: Callable[[], list[str]] | None = None, refresh_interval: float = 1.0,
@@ -85,7 +92,8 @@ class DetailScreen(Screen):
                  history_markers_fn: Callable[[], list[float]] | None = None,
                  options: list[SettingOption] | None = None,
                  status_fn: Callable[[], StatusBarInfo] | None = None,
-                 breakdown_fn: Callable[[], list[str]] | None = None, breakdown_title: str = "Breakdown") -> None:
+                 breakdown_fn: Callable[[], list[str]] | None = None, breakdown_title: str = "Breakdown",
+                 breakdown_chart_fn: Callable[[], list[tuple[str, float]]] | None = None) -> None:
         self._buffer = buffer
         self._title = title
         self._lines = lines
@@ -107,6 +115,8 @@ class DetailScreen(Screen):
         self._breakdown_fn = breakdown_fn
         self._breakdown_title = breakdown_title
         self._breakdown = breakdown_fn() if breakdown_fn is not None else []
+        self._breakdown_chart_fn = breakdown_chart_fn
+        self._breakdown_chart = breakdown_chart_fn() if breakdown_chart_fn is not None else []
         self._saved_screen: dict | None = None
 
     def on_push(self) -> None:
@@ -115,7 +125,8 @@ class DetailScreen(Screen):
         self._buffer.clear()
         self._render()
         if (self._refresh is not None or self._history_fn is not None or self._history_markers_fn is not None
-                or self._status_fn is not None or self._breakdown_fn is not None):
+                or self._status_fn is not None or self._breakdown_fn is not None
+                or self._breakdown_chart_fn is not None):
             pyglet.clock.schedule_interval(self._tick, self._refresh_interval)
 
     def on_pop(self) -> None:
@@ -123,7 +134,8 @@ class DetailScreen(Screen):
         correctly leaves the cursor disabled when popping back into another menu
         instead of always re-enabling it as if the shell was always underneath."""
         if (self._refresh is not None or self._history_fn is not None or self._history_markers_fn is not None
-                or self._status_fn is not None or self._breakdown_fn is not None):
+                or self._status_fn is not None or self._breakdown_fn is not None
+                or self._breakdown_chart_fn is not None):
             pyglet.clock.unschedule(self._tick)
         self._buffer.restore(self._saved_screen)
 
@@ -145,6 +157,8 @@ class DetailScreen(Screen):
             self._status_blink_on = not self._status_blink_on
         if self._breakdown_fn is not None:
             self._breakdown = self._breakdown_fn()
+        if self._breakdown_chart_fn is not None:
+            self._breakdown_chart = self._breakdown_chart_fn()
         self._render()
 
     def _render(self) -> None:
@@ -169,7 +183,7 @@ class DetailScreen(Screen):
             draw_line_graph(self._buffer, left_width, 0, right_width, top_height,
                              self._history_title, self._history_values, y_label=self._history_y_label,
                              unit=self._history_unit, markers=self._history_markers)
-            draw_box(self._buffer, 0, top_height, cols, bottom_height, self._breakdown_title, self._breakdown)
+            self._render_breakdown(0, top_height, cols, bottom_height)
             return
 
         draw_box(self._buffer, 0, 0, left_width, rows, self._title, self._lines)
@@ -201,6 +215,31 @@ class DetailScreen(Screen):
             self._buffer.write_string(x + 2, status_row, text, fg=self._buffer.default_bg, bg=self._buffer.default_fg)
         else:
             self._buffer.write_string(x + 2, status_row, text)
+
+    def _render_breakdown(self, x: int, y: int, width: int, height: int) -> None:
+        """Draws the breakdown box's border via draw_box, then writes
+        `self._breakdown`'s text by hand (same clipping rules draw_box's
+        own `lines` handling would have used) -- confined to the left half
+        instead of the full interior when breakdown_chart_fn is given, to
+        leave room for the bar chart on the right half."""
+        draw_box(self._buffer, x, y, width, height, self._breakdown_title)
+        if self._breakdown_chart_fn is None:
+            interior_width = max(0, width - 4)
+            for i, line in enumerate(self._breakdown):
+                row = y + 2 + i
+                if row >= y + height - 1:
+                    break
+                self._buffer.write_string(x + 2, row, line[:interior_width])
+            return
+
+        text_width = width // 2
+        interior_width = max(0, text_width - 3)  # usual 2-col left pad, 1-col gap before the chart half
+        for i, line in enumerate(self._breakdown):
+            row = y + 2 + i
+            if row >= y + height - 1:
+                break
+            self._buffer.write_string(x + 2, row, line[:interior_width])
+        draw_bar_chart(self._buffer, x + text_width, y + 1, width - text_width - 1, height - 2, self._breakdown_chart)
 
     def _render_options(self, x: int, y: int, width: int, height: int) -> None:
         """Draws the border itself via draw_box, then writes each option's

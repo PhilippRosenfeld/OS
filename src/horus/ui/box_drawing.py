@@ -119,3 +119,31 @@ def draw_line_graph(buffer: ScreenBuffer, x: int, y: int, width: int, height: in
                                        # ends up at column plot_width - 1, the rightmost one
     for i, value in enumerate(shown):
         buffer.write_string(plot_x + offset + i, plot_y + _row_for(value), "*")
+
+
+def draw_bar_chart(buffer: ScreenBuffer, x: int, y: int, width: int, height: int,
+                    bars: list[tuple[str, float]]) -> None:
+    """Draws a simple ASCII vertical bar chart filling the given rectangle --
+    no border of its own, unlike draw_line_graph; meant to sit inside a
+    region the caller already bordered (e.g. one half of a draw_box'd
+    panel). One column-group per (label, value) pair in `bars`, its height
+    proportional to its value relative to the largest one shown (an
+    all-zero chart draws no bars, not a row of full-height ones); the
+    bottom row holds each bar's own label, truncated/centered to its
+    column's width."""
+    if not bars or width < len(bars) or height < 2:
+        return
+    col_width = max(1, width // len(bars))
+    plot_height = height - 1  # bottom row reserved for labels
+    if plot_height < 1:
+        return
+    max_value = max(value for _, value in bars)
+    for i, (label, value) in enumerate(bars):
+        bar_x = x + i * col_width
+        bar_width = max(1, col_width - 1)  # 1-column gap between bars
+        frac = (value / max_value) if max_value > 0 else 0.0
+        bar_height = round(frac * plot_height)
+        for row_offset in range(bar_height):
+            row = y + plot_height - 1 - row_offset
+            buffer.write_string(bar_x, row, "#" * bar_width)
+        buffer.write_string(bar_x, y + height - 1, label[:bar_width].center(bar_width))
