@@ -5,6 +5,7 @@ import numpy as np
 
 from .font_atlas import FontAtlas
 from .screen_buffer import ScreenBuffer
+from .sprite_atlas import SpriteAtlas
 
 SHADER_DIR = Path(__file__).parent / "shaders"
 
@@ -16,15 +17,19 @@ class Renderer:
     PLACEHOLDER_CHAR = "?"
 
     def __init__(self, screen_buffer: ScreenBuffer, font_atlas: FontAtlas, ctx: moderngl.Context,
-                 status_bar: ScreenBuffer | None = None) -> None:
+                 status_bar: ScreenBuffer | None = None, sprite_atlas: SpriteAtlas | None = None) -> None:
         """`status_bar`, if given, is a second (normally one-row) ScreenBuffer
         rendered directly below `screen_buffer`'s rows on every frame --
         outside the Screen stack entirely, so it stays on screen no matter
-        which Screen is active. See display.status_bar.StatusBar."""
+        which Screen is active. See display.status_bar.StatusBar.
+        `sprite_atlas`, if given, resolves the names placed via
+        screen_buffer.place_sprite() into pixel art composited on top of the
+        glyph grid -- see _composite_sprites()."""
         self.screen_buffer = screen_buffer
         self.font_atlas = font_atlas
         self.ctx = ctx
         self.status_bar = status_bar
+        self.sprite_atlas = sprite_atlas
         pixel_width = screen_buffer.cols * font_atlas.char_width
         pixel_height = self._total_rows() * font_atlas.char_height
         self._pixel_buffer = np.zeros((pixel_height, pixel_width, 3), dtype=np.uint8)
@@ -152,6 +157,37 @@ class Renderer:
                     block = self._get_block(cell.char, cell.fg_color, cell.bg_color)
                     x0 = col * char_width
                     self._pixel_buffer[y0:y0 + char_height, x0:x0 + char_width] = block
+
+        self._composite_sprites()
+
+    def _composite_sprites(self) -> None:
+        """Alpha-blends every sprite placed via screen_buffer.place_sprite()
+        on top of the glyph grid just built. Unlike a glyph block, a sprite
+        keeps its own authored colors -- only its alpha channel drives the
+        blend, so it isn't tinted by any cell's fg/bg. Drawn at native pixel
+        size (see SpriteAtlas), clipped to whatever of its footprint still
+        fits inside the pixel buffer; a sprite anchored (partially) outside
+        the grid, or not resolvable by the atlas, is simply skipped rather
+        than raising."""
+        if self.sprite_atlas is None:
+            return
+        char_width = self.font_atlas.char_width
+        char_height = self.font_atlas.char_height
+        buffer_height, buffer_width = self._pixel_buffer.shape[:2]
+        for (col, row), name in self.screen_buffer.sprites.items():
+            if col < 0 or row < 0 or not self.sprite_atlas.exists(name):
+                continue
+            sprite = self.sprite_atlas.get(name)
+            x0, y0 = col * char_width, row * char_height
+            if x0 >= buffer_width or y0 >= buffer_height:
+                continue
+            x1 = min(buffer_width, x0 + sprite.shape[1])
+            y1 = min(buffer_height, y0 + sprite.shape[0])
+            region = sprite[:y1 - y0, :x1 - x0]
+            alpha = region[:, :, 3:4].astype(np.float32) / 255.0
+            rgb = region[:, :, :3].astype(np.float32)
+            dest = self._pixel_buffer[y0:y1, x0:x1].astype(np.float32)
+            self._pixel_buffer[y0:y1, x0:x1] = (alpha * rgb + (1.0 - alpha) * dest).astype(np.uint8)
 
     def render(self, window_width: int, window_height: int, margin: int = 0) -> None:
         """Full frame: rebuild pixel buffer and upload as texture only if the content or size changed,

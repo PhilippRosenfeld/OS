@@ -24,6 +24,10 @@ class ScreenBuffer:
         self.cursor_enabled = True  # False: cursor never renders, regardless of the blink state above
         self.cursor_block = True  # True: solid block cursor. False: thin bar cursor.
         self._scrollback: list[list[Cell]] = []
+        self._sprites: dict[tuple[int, int], str] = {}  # (col, row) anchor (top-left) -> sprite name --
+                                                          # see display.sprite_atlas.SpriteAtlas and
+                                                          # Renderer._composite_sprites() for how these
+                                                          # get drawn
         self.view_offset = 0  # rows of scrollback shown at the top of the view instead of live content
         self.default_fg: tuple[int, int, int] = NAMED_COLORS.get("green")
         self.default_bg: tuple[int, int, int] = NAMED_COLORS.get("black")
@@ -65,6 +69,25 @@ class ScreenBuffer:
         end_row = min(row, self.rows - 1)
         return end_row - start_row + 1
 
+    def place_sprite(self, col: int, row: int, name: str) -> None:
+        """Anchors a named sprite (see display.sprite_atlas.SpriteAtlas) with
+        its top-left corner at (col, row) in character-cell units. The
+        sprite typically spans several cells -- how many depends on its
+        native pixel size and the current char size (see
+        SpriteAtlas.cell_span) -- but only the anchor is tracked here; the
+        Renderer looks up the actual footprint at draw time."""
+        self._sprites[(col, row)] = name
+        self.dirty = True
+
+    def clear_sprite(self, col: int, row: int) -> None:
+        """Removes a sprite anchored at (col, row). No-op if there wasn't one."""
+        if self._sprites.pop((col, row), None) is not None:
+            self.dirty = True
+
+    @property
+    def sprites(self) -> dict[tuple[int, int], str]:
+        return self._sprites
+
     def scroll(self, direction: str, lines: int) -> None:
         """Scroll the screen buffer in the specified direction ('u', 'd', 'l', 'r') for a given number of lines.
         Rows pushed off the top ('u') are kept in a scrollback history instead of being discarded --
@@ -98,6 +121,10 @@ class ScreenBuffer:
         self.rows = rows
         self._cells = [[self._blank_cell() for _ in range(cols)] for _ in range(rows)]
         self._scrollback = []  # old scrollback rows have the wrong width for the new self.cols
+        # _sprites is deliberately left alone -- unlike text it doesn't need
+        # reflowing, and the Renderer already clips a sprite's footprint to
+        # whatever now fits, so an anchor briefly outside the new bounds is
+        # harmless rather than something that needs discarding
         writes, self._writes = self._writes, []
         for col, row, string, fg, bg in writes:
             self.write_string(col, row, string, fg, bg)
@@ -108,6 +135,7 @@ class ScreenBuffer:
         self._cells = [[self._blank_cell() for _ in range(self.cols)] for _ in range(self.rows)]
         self._writes = []
         self._scrollback = []
+        self._sprites = {}
         self.view_offset = 0
         self.dirty = True
 
@@ -166,6 +194,7 @@ class ScreenBuffer:
             "rows": self.rows,
             "cells": [[Cell(c.char, c.fg_color, c.bg_color) for c in row] for row in self._cells],
             "writes": list(self._writes),
+            "sprites": dict(self._sprites),
             "cursor_col": self.cursor_col,
             "cursor_row": self.cursor_row,
             "cursor_enabled": self.cursor_enabled,
@@ -189,6 +218,7 @@ class ScreenBuffer:
             ]
         self._cells = cells
         self._writes = list(snapshot["writes"])
+        self._sprites = dict(snapshot.get("sprites", {}))
         self.cursor_col = min(snapshot["cursor_col"], self.cols - 1)
         self.cursor_row = min(snapshot["cursor_row"], self.rows - 1)
         self.cursor_enabled = snapshot["cursor_enabled"]

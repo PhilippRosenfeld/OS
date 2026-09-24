@@ -4,6 +4,7 @@ import pyglet
 from .font_atlas import FontAtlas
 from .renderer import Renderer
 from .screen_buffer import ScreenBuffer
+from .sprite_atlas import SpriteAtlas
 from .status_bar import StatusBar
 
 
@@ -30,7 +31,8 @@ class DisplayWindow:
         self.status_bar = StatusBar(cols, source_buffer=self.buffer)
         self._ctx: moderngl.Context = moderngl.create_context()
         font_atlas = FontAtlas(font_path, char_width, char_height)
-        self._renderer: Renderer = Renderer(self.buffer, font_atlas, self._ctx, status_bar=self.status_bar.buffer)
+        self.sprite_atlas = SpriteAtlas()
+        self._renderer: Renderer = Renderer(self.buffer, font_atlas, self._ctx, status_bar=self.status_bar.buffer, sprite_atlas=self.sprite_atlas)
         self._on_key_callback = None
         self._on_text_callback = None
         self._on_motion_callback = None

@@ -2,12 +2,15 @@ import struct
 from unittest.mock import patch
 
 import moderngl
+import numpy as np
 import pytest
+from PIL import Image
 
 from horus.display.colors import NAMED_COLORS
 from horus.display.font_atlas import FontAtlas, FontRegistry
 from horus.display.renderer import Renderer
 from horus.display.screen_buffer import Cell, ScreenBuffer
+from horus.display.sprite_atlas import SpriteAtlas
 from horus.display.status_bar import LABELS, StatusBar
 from horus.display.window import DisplayWindow
 
@@ -18,11 +21,17 @@ def make_atlas(char_width=8, char_height=16):
     return FontAtlas(FONT, char_width, char_height)
 
 
-def make_renderer(cols=10, rows=5, char_width=8, char_height=16, status_bar=None):
+def make_renderer(cols=10, rows=5, char_width=8, char_height=16, status_bar=None, sprite_atlas=None):
     buffer = ScreenBuffer(cols, rows)
     atlas = make_atlas(char_width, char_height)
     ctx = moderngl.create_context(standalone=True)
-    return Renderer(buffer, atlas, ctx, status_bar=status_bar), buffer, atlas
+    return Renderer(buffer, atlas, ctx, status_bar=status_bar, sprite_atlas=sprite_atlas), buffer, atlas
+
+
+def make_sprite_png(dir_path, name="icon", width=4, height=2, rgba=(200, 50, 50, 255)) -> None:
+    """Writes a small solid-color RGBA PNG into dir_path, for tests that need
+    a real sprite file without depending on the project's own art assets."""
+    Image.new("RGBA", (width, height), rgba).save(dir_path / f"{name}.png")
 
 
 def test_display_window_initialization():
@@ -61,6 +70,15 @@ def test_on_resize_keeps_the_grid_size_fixed_and_scales_the_glyph_size():
         assert window.char_height == 160 // 25
         assert window._renderer.font_atlas.char_width == window.char_width
         assert window._renderer.font_atlas.char_height == window.char_height
+    finally:
+        window._window.close()
+
+
+def test_display_window_wires_a_sprite_atlas_into_the_renderer():
+    window = DisplayWindow(font_path=FONT, cols=80, rows=25, char_width=8, char_height=16, width=640, height=400)
+    try:
+        assert window._renderer.sprite_atlas is window.sprite_atlas
+        assert window.sprite_atlas.exists("disk") is True
     finally:
         window._window.close()
 
@@ -403,6 +421,58 @@ def test_recolor_all_updates_live_and_scrollback_cells():
     assert buffer.get_cell(0, 0).fg_color == (1, 1, 1)
 
 
+# --- ScreenBuffer: sprites ---
+
+def test_place_sprite_stores_it_and_marks_dirty():
+    buffer = ScreenBuffer(5, 2)
+    buffer.dirty = False
+    buffer.place_sprite(1, 0, "disk")
+    assert buffer.sprites == {(1, 0): "disk"}
+    assert buffer.dirty is True
+
+
+def test_clear_sprite_removes_it_and_marks_dirty():
+    buffer = ScreenBuffer(5, 2)
+    buffer.place_sprite(1, 0, "disk")
+    buffer.dirty = False
+    buffer.clear_sprite(1, 0)
+    assert buffer.sprites == {}
+    assert buffer.dirty is True
+
+
+def test_clear_sprite_on_an_empty_anchor_is_a_noop():
+    buffer = ScreenBuffer(5, 2)
+    buffer.dirty = False
+    buffer.clear_sprite(1, 0)
+    assert buffer.dirty is False
+
+
+def test_clear_also_removes_placed_sprites():
+    buffer = ScreenBuffer(5, 2)
+    buffer.place_sprite(1, 0, "disk")
+    buffer.clear()
+    assert buffer.sprites == {}
+
+
+def test_resize_preserves_placed_sprites():
+    """Unlike scrollback, sprites aren't reflowable text -- resize() (e.g.
+    from a window resize that keeps cols/rows fixed, see DisplayWindow's
+    _on_resize) must not silently drop them."""
+    buffer = ScreenBuffer(5, 2)
+    buffer.place_sprite(1, 0, "disk")
+    buffer.resize(5, 2)
+    assert buffer.sprites == {(1, 0): "disk"}
+
+
+def test_snapshot_restore_round_trips_sprites():
+    buffer = ScreenBuffer(5, 2)
+    buffer.place_sprite(1, 0, "disk")
+    snap = buffer.snapshot()
+    buffer.clear()
+    buffer.restore(snap)
+    assert buffer.sprites == {(1, 0): "disk"}
+
+
 # --- FontAtlas / FontRegistry ---
 
 def test_font_atlas_rasterizes_printable_ascii():
@@ -463,6 +533,44 @@ def test_font_registry_active_without_registration_raises():
     registry = FontRegistry()
     with pytest.raises(ValueError):
         registry.active()
+
+
+# --- SpriteAtlas ---
+
+def test_sprite_atlas_loads_and_caches_a_sprite(tmp_path):
+    make_sprite_png(tmp_path, "disk", width=4, height=2, rgba=(200, 50, 50, 255))
+    atlas = SpriteAtlas(tmp_path)
+    block = atlas.get("disk")
+    assert block.shape == (2, 4, 4)
+    assert tuple(block[0, 0]) == (200, 50, 50, 255)
+    assert atlas.get("disk") is block  # cached, not reloaded
+
+
+def test_sprite_atlas_resolves_bare_name_against_sprites_dir(tmp_path):
+    make_sprite_png(tmp_path, "disk")
+    atlas = SpriteAtlas(tmp_path)
+    assert atlas.exists("disk") is True
+    assert atlas.exists("missing") is False
+
+
+def test_sprite_atlas_missing_sprite_raises(tmp_path):
+    atlas = SpriteAtlas(tmp_path)
+    with pytest.raises(FileNotFoundError):
+        atlas.get("does-not-exist")
+
+
+def test_sprite_atlas_cell_span_rounds_up_to_whole_cells(tmp_path):
+    make_sprite_png(tmp_path, "disk", width=20, height=17)
+    atlas = SpriteAtlas(tmp_path)
+    assert atlas.cell_span("disk", char_width=8, char_height=16) == (3, 2)  # ceil(20/8), ceil(17/16)
+
+
+def test_project_ships_a_disk_sprite():
+    """Regression guard for the actual asset shipped in assets/sprites --
+    catches it being renamed/removed without updating any code that
+    references it by name."""
+    atlas = SpriteAtlas()
+    assert atlas.exists("disk") is True
 
 
 # --- Renderer ---
@@ -612,6 +720,73 @@ def test_renderer_set_font_atlas_also_marks_the_status_bar_dirty():
 
     renderer.set_font_atlas(make_atlas(char_width=16, char_height=32))
     assert status_bar.dirty is True
+
+
+# --- Renderer + sprites ---
+
+def test_renderer_without_sprite_atlas_ignores_placed_sprites():
+    """No sprite_atlas passed in (the default) -- renderer must behave
+    exactly as it did before sprites existed, not raise on a placement it
+    has no way to resolve."""
+    renderer, buffer, atlas = make_renderer(cols=10, rows=5)
+    buffer.place_sprite(0, 0, "disk")
+    renderer.render(200, 100)  # should not raise
+
+
+def test_renderer_composites_an_opaque_sprite_onto_the_pixel_buffer(tmp_path):
+    make_sprite_png(tmp_path, "disk", width=2, height=2, rgba=(255, 0, 0, 255))
+    sprite_atlas = SpriteAtlas(tmp_path)
+    renderer, buffer, atlas = make_renderer(cols=10, rows=5, sprite_atlas=sprite_atlas)
+    buffer.cursor_enabled = False  # the default cursor sits on (0,0) too -- keep it out of the way
+    buffer.place_sprite(0, 0, "disk")
+    renderer.render(200, 100)
+
+    assert tuple(renderer._pixel_buffer[0, 0]) == (255, 0, 0)
+    assert tuple(renderer._pixel_buffer[1, 1]) == (255, 0, 0)
+    # outside the 2x2 sprite but still inside the same char cell -- untouched background
+    assert tuple(renderer._pixel_buffer[0, 3]) == buffer.default_bg
+
+
+def test_renderer_alpha_blends_a_semi_transparent_sprite(tmp_path):
+    make_sprite_png(tmp_path, "disk", width=1, height=1, rgba=(255, 0, 0, 128))
+    sprite_atlas = SpriteAtlas(tmp_path)
+    renderer, buffer, atlas = make_renderer(cols=10, rows=5, sprite_atlas=sprite_atlas)
+    buffer.cursor_enabled = False  # the default cursor sits on (0,0) too -- keep it out of the way
+    buffer.place_sprite(0, 0, "disk")
+    renderer.render(200, 100)
+
+    bg = np.array(buffer.default_bg, dtype=np.float32)
+    fg = np.array((255, 0, 0), dtype=np.float32)
+    alpha = 128 / 255.0
+    expected = (alpha * fg + (1.0 - alpha) * bg).astype(np.uint8)
+    assert tuple(renderer._pixel_buffer[0, 0]) == tuple(expected)
+
+
+def test_renderer_skips_an_unknown_sprite_name_without_raising(tmp_path):
+    sprite_atlas = SpriteAtlas(tmp_path)  # no sprites written -- "disk" isn't resolvable
+    renderer, buffer, atlas = make_renderer(cols=10, rows=5, sprite_atlas=sprite_atlas)
+    buffer.cursor_enabled = False  # the default cursor sits on (0,0) too -- keep it out of the way
+    buffer.place_sprite(0, 0, "disk")
+    renderer.render(200, 100)  # should not raise
+    assert tuple(renderer._pixel_buffer[0, 0]) == buffer.default_bg
+
+
+def test_renderer_clips_a_sprite_that_overflows_the_buffer(tmp_path):
+    make_sprite_png(tmp_path, "disk", width=6, height=6, rgba=(255, 0, 0, 255))
+    sprite_atlas = SpriteAtlas(tmp_path)
+    renderer, buffer, atlas = make_renderer(cols=1, rows=1, char_width=4, char_height=4, sprite_atlas=sprite_atlas)
+    buffer.place_sprite(0, 0, "disk")
+    renderer.render(20, 20)  # should not raise despite the 6x6 sprite exceeding the 4x4 buffer
+    assert renderer._pixel_buffer.shape == (4, 4, 3)
+    assert tuple(renderer._pixel_buffer[0, 0]) == (255, 0, 0)
+
+
+def test_renderer_skips_a_sprite_anchored_entirely_outside_the_buffer(tmp_path):
+    make_sprite_png(tmp_path, "disk")
+    sprite_atlas = SpriteAtlas(tmp_path)
+    renderer, buffer, atlas = make_renderer(cols=10, rows=5, sprite_atlas=sprite_atlas)
+    buffer.place_sprite(100, 100, "disk")
+    renderer.render(200, 100)  # should not raise
 
 
 # --- StatusBar ---

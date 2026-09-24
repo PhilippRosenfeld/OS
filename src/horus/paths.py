@@ -3,6 +3,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ASSETS_DIR = PROJECT_ROOT / "assets"
 FONTS_DIR = ASSETS_DIR / "fonts"
+SPRITES_DIR = ASSETS_DIR / "sprites"
 SHADERS_DIR = ASSETS_DIR / "shaders"
 SOUNDS_DIR = ASSETS_DIR / "sounds"
 BOOT_SOUNDS_DIR = SOUNDS_DIR / "hardware" / "booting"
