@@ -222,6 +222,7 @@ def main() -> None:
     
     # ---- BOOT SEQUENCE -----
     boot_progress = BootProgress.load(BOOT_PROGRESS_PATH)
+    context.boot_progress = boot_progress
     latest_disk = boot_progress.latest_ok_disk()
     boot_disk_name = f"Disk {latest_disk}" if latest_disk is not None else "Disk 0 (recovery mode)"
     disk_context = {

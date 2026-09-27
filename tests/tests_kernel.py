@@ -1608,6 +1608,75 @@ def test_sys_storage_shows_a_placeholder_when_no_drives_are_installed():
     assert "No drives detected." in full
 
 
+def test_sys_storage_shows_drive_usage_with_a_disk_sprite():
+    ctx, buffer, screens, table, hardware = make_sys_context()
+    ctx.fs = InMemoryVFS()
+    ctx.fs.write_file("/big.txt", "x" * 2048, user="root")
+
+    sys_command(ctx, ["-s"])
+
+    drive = hardware.installed_storage()[0]
+    full = full_text(buffer)
+    assert f"{drive.name}  2/{drive.size} KB" in full
+    assert "[#" in full or "[." in full
+    assert "disk" in buffer.sprites.values()
+
+
+def test_sys_storage_shows_read_write_throughput_and_draw_under_each_bar():
+    ctx, buffer, screens, table, hardware = make_sys_context(cols=160, rows=40)
+    drive = hardware.installed_storage()[0]
+    drive.read_load, drive.write_load = 0.5, 0.25
+
+    sys_command(ctx, ["-s"])
+
+    bar_row = next(r for r in range(buffer.rows) if "[" in row_text(buffer, r) and "]" in row_text(buffer, r))
+    details = row_text(buffer, bar_row + 1)
+    assert f"Read:  {drive.read_speed_kbps // 2}/{drive.read_speed_kbps} KB/s" in details
+    assert f"Write:  {drive.write_speed_kbps // 4}/{drive.write_speed_kbps} KB/s" in details
+    assert "%" not in details
+    assert f"Draw: {drive.calc_current_power_usage()}/{drive.power_usage_watts} W" in details
+
+
+def test_sys_storage_overview_takes_a_third_of_the_width():
+    ctx, buffer, screens, table, hardware = make_sys_context(cols=90, rows=40)
+    sys_command(ctx, ["-s"])
+    assert row_text(buffer, 0)[30:].startswith("+ Drives ")
+
+
+def test_sys_storage_overview_shows_current_and_max_draw_summed_over_all_drives():
+    from horus.hardware.motherboard import StorageSlots
+    from horus.hardware.storage import Storage
+    ctx, buffer, screens, table, hardware = make_sys_context(cols=120, rows=40)
+    first = Storage("Disk A", 1024, "Test Inc.", power_usage_watts=6, power_usage_watts_idle=2)
+    second = Storage("Disk B", 1024, "Test Inc.", power_usage_watts=4, power_usage_watts_idle=1)
+    first.read_load, second.write_load = 0.5, 1.0   # 4 W + 4 W
+    hardware.motherboard.storage_slots = [StorageSlots("Slot", [first, second])]   # exactly these two, nothing from the defaults
+
+    sys_command(ctx, ["-s"])
+
+    full = full_text(buffer)
+    assert "Draw: 8/10 W" in full
+    assert "Power range" not in full
+
+
+def test_sys_storage_lists_boot_devices_with_their_status():
+    from horus.story.progress import BootProgress
+    ctx, buffer, screens, table, hardware = make_sys_context(cols=120, rows=40)
+    ctx.boot_progress = BootProgress(disks={"disk1_1": True, "disk1_2": True, "disk1_3": True})
+
+    sys_command(ctx, ["-s"])
+
+    full = full_text(buffer)
+    assert "External:" in full
+    # the three disks sit side by side in one row, each with its partitions below
+    header_row = next(r for r in range(buffer.rows) if "Primary Disk (boot)" in row_text(buffer, r))
+    assert "Secondary Disk" in row_text(buffer, header_row)
+    assert "Tertiary Disk" in row_text(buffer, header_row)
+    first_partitions = row_text(buffer, header_row + 1)
+    assert "Zero" in first_partitions and "SUCCESSFUL" in first_partitions
+    assert "Zil" in first_partitions and "Danae" in first_partitions and "FAILED" in first_partitions
+
+
 def test_sys_enter_on_power_opens_its_detail_screen():
     ctx, buffer, screens, table, hardware = make_sys_context()
     sys_command(ctx, [])

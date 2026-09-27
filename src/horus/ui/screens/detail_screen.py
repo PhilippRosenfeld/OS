@@ -25,6 +25,28 @@ class StatusBarInfo:
     blink: bool = False
 
 
+@dataclass(frozen=True)
+class UsageBar:
+    """One row of DetailScreen's usage panel (see `usage_fn`): a device
+    labeled `label`, `used` out of `total` (in `unit`) shown as a fill bar,
+    with an optional sprite (see display.sprite_atlas.SpriteAtlas) drawn
+    as its icon to the left, and `details` -- extra text lines (e.g. live
+    load or power draw) written right under the bar."""
+    label: str
+    used: float
+    total: float
+    unit: str = "KB"
+    sprite: str | None = None
+    details: tuple[str, ...] | list[str] = ()
+
+
+# Grid space reserved for a UsageBar's sprite icon -- sized for disk.png
+# (64x48 px) at the default 8x16 glyph size; a larger glyph size just
+# leaves some slack around it.
+_USAGE_ICON_COLS = 9  # 8 cols for the sprite + a 1-col gap before the text
+_USAGE_ICON_ROWS = 3
+
+
 class DetailScreen(Screen):
     """Generic full-panel detail view: one bordered box spanning the whole
     buffer, with a title and a list of lines. Escape pops back. Used both
@@ -83,7 +105,16 @@ class DetailScreen(Screen):
     a bar chart of whatever breakdown_chart_fn returns -- a list of
     (label, value) pairs, e.g. the same per-component draws as the text,
     just visualized -- fills the right half (see draw_bar_chart). Leaving
-    it unset keeps the breakdown box as plain full-width text."""
+    it unset keeps the breakdown box as plain full-width text.
+
+    `usage_fn`, if given (instead of history_fn), switches to a third
+    three-region layout: `lines` top left (only a third of the width), a
+    `usage_title`-labeled box top right listing whatever usage_fn returns -- one UsageBar per device, its
+    sprite icon on the left and a fill bar of used/total to its right --
+    and a `devices_title`-labeled box spanning the full width along the
+    bottom with the plain text lines `devices_fn` returns (e.g. other
+    attached devices and their status). Both are live callables on the
+    same refresh tick as `refresh`."""
 
     def __init__(self, buffer: ScreenBuffer, title: str, lines: list[str], screens: ScreenManager,
                  refresh: Callable[[], list[str]] | None = None, refresh_interval: float = 1.0,
@@ -93,7 +124,9 @@ class DetailScreen(Screen):
                  options: list[SettingOption] | None = None,
                  status_fn: Callable[[], StatusBarInfo] | None = None,
                  breakdown_fn: Callable[[], list[str]] | None = None, breakdown_title: str = "Breakdown",
-                 breakdown_chart_fn: Callable[[], list[tuple[str, float]]] | None = None) -> None:
+                 breakdown_chart_fn: Callable[[], list[tuple[str, float]]] | None = None,
+                 usage_fn: Callable[[], list[UsageBar]] | None = None, usage_title: str = "Usage",
+                 devices_fn: Callable[[], list[str]] | None = None, devices_title: str = "Devices") -> None:
         self._buffer = buffer
         self._title = title
         self._lines = lines
@@ -117,25 +150,34 @@ class DetailScreen(Screen):
         self._breakdown = breakdown_fn() if breakdown_fn is not None else []
         self._breakdown_chart_fn = breakdown_chart_fn
         self._breakdown_chart = breakdown_chart_fn() if breakdown_chart_fn is not None else []
+        self._usage_fn = usage_fn
+        self._usage_title = usage_title
+        self._usage = usage_fn() if usage_fn is not None else []
+        self._devices_fn = devices_fn
+        self._devices_title = devices_title
+        self._devices = devices_fn() if devices_fn is not None else []
         self._saved_screen: dict | None = None
+
+    @property
+    def _is_live(self) -> bool:
+        """Whether anything shown here needs the periodic _tick at all."""
+        return any(fn is not None for fn in (
+            self._refresh, self._history_fn, self._history_markers_fn, self._status_fn,
+            self._breakdown_fn, self._breakdown_chart_fn, self._usage_fn, self._devices_fn))
 
     def on_push(self) -> None:
         self._saved_screen = self._buffer.snapshot()
         self._buffer.cursor_enabled = False
         self._buffer.clear()
         self._render()
-        if (self._refresh is not None or self._history_fn is not None or self._history_markers_fn is not None
-                or self._status_fn is not None or self._breakdown_fn is not None
-                or self._breakdown_chart_fn is not None):
+        if self._is_live:
             pyglet.clock.schedule_interval(self._tick, self._refresh_interval)
 
     def on_pop(self) -> None:
         """restore() also brings back cursor_enabled from the snapshot, so this
         correctly leaves the cursor disabled when popping back into another menu
         instead of always re-enabling it as if the shell was always underneath."""
-        if (self._refresh is not None or self._history_fn is not None or self._history_markers_fn is not None
-                or self._status_fn is not None or self._breakdown_fn is not None
-                or self._breakdown_chart_fn is not None):
+        if self._is_live:
             pyglet.clock.unschedule(self._tick)
         self._buffer.restore(self._saved_screen)
 
@@ -159,14 +201,28 @@ class DetailScreen(Screen):
             self._breakdown = self._breakdown_fn()
         if self._breakdown_chart_fn is not None:
             self._breakdown_chart = self._breakdown_chart_fn()
+        if self._usage_fn is not None:
+            self._usage = self._usage_fn()
+        if self._devices_fn is not None:
+            self._devices = self._devices_fn()
         self._render()
 
     def _render(self) -> None:
         # clear() also resets _writes -- see SettingScreen._render() for why
         # that matters once a resize (e.g. font size change) can happen while
-        # this screen is showing.
+        # this screen is showing. It drops placed sprites too, so the usage
+        # panel's icons are simply re-placed on every render.
         self._buffer.clear()
         cols, rows = self._buffer.cols, self._buffer.rows
+        if self._usage_fn is not None:
+            left_width = cols // 3  # narrow -- the usage bars get the remaining 2/3
+            right_width = cols - left_width
+            top_height = rows // 2
+            draw_box(self._buffer, 0, 0, left_width, top_height, self._title, self._lines)
+            self._render_status_bar(0, 0, left_width, top_height)
+            self._render_usage(left_width, 0, right_width, top_height)
+            draw_box(self._buffer, 0, top_height, cols, rows - top_height, self._devices_title, self._devices)
+            return
         if self._history_fn is None:
             draw_box(self._buffer, 0, 0, cols, rows, self._title, self._lines)
             self._render_status_bar(0, 0, cols, rows)
@@ -240,6 +296,37 @@ class DetailScreen(Screen):
                 break
             self._buffer.write_string(x + 2, row, line[:interior_width])
         draw_bar_chart(self._buffer, x + text_width, y + 1, width - text_width - 1, height - 2, self._breakdown_chart)
+
+    def _render_usage(self, x: int, y: int, width: int, height: int) -> None:
+        """Draws the usage box's border via draw_box, then one entry per
+        UsageBar: its sprite anchored at the entry's top-left, and to the
+        right of it the label + used/total on the first row, a fill bar on
+        the second and its `details` below that -- followed by a blank
+        spacer row. Entries that no longer fit above the bottom border are
+        skipped entirely rather than drawn half-way."""
+        draw_box(self._buffer, x, y, width, height, self._usage_title)
+        if not self._usage:
+            self._buffer.write_string(x + 2, y + 2, "No drives detected."[:max(0, width - 4)])
+            return
+        text_x = x + 2 + _USAGE_ICON_COLS
+        text_width = max(0, (x + width - 2) - text_x)
+        row = y + 2
+        for entry in self._usage:
+            entry_rows = max(_USAGE_ICON_ROWS, 2 + len(entry.details))
+            if row + entry_rows > y + height - 1:
+                break
+            if entry.sprite is not None:
+                self._buffer.place_sprite(x + 2, row, entry.sprite)
+            frac = min(1.0, max(0.0, entry.used / entry.total)) if entry.total > 0 else 0.0
+            info = f"{entry.label}  {entry.used:.0f}/{entry.total:.0f} {entry.unit} ({frac * 100:.1f}%)"
+            self._buffer.write_string(text_x, row, info[:text_width])
+            if text_width >= 3:
+                bar_width = text_width - 2  # minus the surrounding [ ]
+                filled = round(frac * bar_width)
+                self._buffer.write_string(text_x, row + 1, f"[{'#' * filled}{'.' * (bar_width - filled)}]")
+            for i, detail in enumerate(entry.details):
+                self._buffer.write_string(text_x, row + 2 + i, detail[:text_width])
+            row += entry_rows + 1
 
     def _render_options(self, x: int, y: int, width: int, height: int) -> None:
         """Draws the border itself via draw_box, then writes each option's

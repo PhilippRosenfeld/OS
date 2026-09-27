@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from horus.kernel.kernel import Kernel
     from horus.session.user import UserRegistry
     from horus.shell.input_handler import InputHandler
+    from horus.story.progress import BootProgress
     from horus.ui.screens.main_menu_screen import MainMenuScreen
 
 
@@ -47,6 +48,7 @@ class Context:
     process_table: "ProcessTable" = None
     hardware: "HardwareSpec" = None
     system_log: "SystemLog" = None
+    boot_progress: "BootProgress" = None
 
 
     def __post_init__(self):

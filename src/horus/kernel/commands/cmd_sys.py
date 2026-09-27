@@ -2,7 +2,8 @@ from horus.hardware.spec import HardwareSpec
 from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
 from horus.kernel.registry import command
 from horus.processes.process_view import format_system_summary
-from horus.ui.screens.detail_screen import DetailScreen, StatusBarInfo
+from horus.story.progress import BOOT_DISKS, BootProgress
+from horus.ui.screens.detail_screen import DetailScreen, StatusBarInfo, UsageBar
 from horus.ui.screens.hardware_screen import HardwareScreen, HardwareTile
 from horus.ui.screens.settings_screen import SettingOption
 
@@ -79,8 +80,59 @@ def _storage_detail_lines(hardware) -> list[str]:
             drive.name,
             f"Manufacturer: {drive.manufacturer}",
             f"Size: {drive.size} KB",
-            f"Power: {drive.power_usage_watts} W",
         ])
+    # summed across every drive, instead of a per-drive power range
+    current_draw = sum(drive.calc_current_power_usage() for drive in drives)
+    max_draw = sum(drive.power_usage_watts for drive in drives)
+    lines.extend(["", f"Draw: {current_draw}/{max_draw} W"])
+    return lines
+
+
+def _fs_used_kb(fs) -> float:
+    """Total size of every file in the VFS, in KB -- the whole filesystem
+    lives on the system drive (see _storage_usage)."""
+    if fs is None:
+        return 0.0
+    return sum(node.size for node in fs.list_dir("/", show_all=True, recursive=True)) / 1024
+
+
+def _storage_usage(hardware, fs) -> list[UsageBar]:
+    """One usage bar per installed drive for the Storage detail screen's
+    top-right box. The VFS is mounted from the first (system) drive, so
+    that's the only one with anything on it -- any further drives show
+    as empty. Below each bar: the drive's current read/write throughput and
+    power draw (see HardwareSpec._sync_component_load_from_process_table)."""
+    drives = hardware.installed_storage()
+    used_kb = _fs_used_kb(fs) if drives else 0.0
+    return [UsageBar(drive.name, used_kb if i == 0 else 0.0, drive.size, unit="KB", sprite="disk",
+                     details=[f"Read: {drive.read_kbps:4.0f}/{drive.read_speed_kbps} KB/s   "
+                              f"Write: {drive.write_kbps:4.0f}/{drive.write_speed_kbps} KB/s   "
+                              f"Draw: {drive.calc_current_power_usage()}/{drive.power_usage_watts} W"])
+            for i, drive in enumerate(drives)]
+
+
+_BOOT_DEVICE_COL_WIDTH = 30  # per disk column in the Devices box -- fits "Baphomet ..... SUCCESSFUL" plus a gap
+
+
+def _storage_devices_lines(boot_progress) -> list[str]:
+    """External devices, then the disks the boot sequence connects (see
+    BOOT_DISKS) side by side, one column each: the disk's name, and below
+    it each of its partitions as SUCCESSFUL or FAILED (the boot screen's
+    OK/FAILED for the same id)."""
+    boot_disk = boot_progress.latest_ok_disk()
+    columns = []
+    for disk_number, (disk_name, partitions) in enumerate(BOOT_DISKS, start=1):
+        marker = " (boot)" if disk_number == boot_disk else ""
+        column = [f"{disk_name}{marker}"]
+        for partition_number, partition in enumerate(partitions, start=1):
+            ok = boot_progress.status(f"disk{disk_number}_{partition_number}") == "OK"
+            column.append(f"  {partition + ' ':.<14} {'SUCCESSFUL' if ok else 'FAILED'}")
+        columns.append(column)
+
+    lines = ["External:", "  No external devices.", "", "Boot devices:"]
+    for row in range(max(len(column) for column in columns)):
+        cells = [column[row] if row < len(column) else "" for column in columns]
+        lines.append("  " + "".join(cell.ljust(_BOOT_DEVICE_COL_WIDTH) for cell in cells).rstrip())
     return lines
 
 
@@ -117,7 +169,7 @@ def _power_draws(hardware) -> dict[str, float]:
     return {
         "CPU": sum(cpu.calc_current_power_usage() for cpu in hardware.installed_cpus()),
         "RAM": sum(ram.calc_current_power_usage() for ram in hardware.installed_ram()),
-        "Storage": sum(drive.power_usage_watts for drive in hardware.installed_storage()),
+        "Storage": sum(drive.calc_current_power_usage() for drive in hardware.installed_storage()),
         "Network": sum(iface.power_usage_watts for iface in motherboard.network_interfaces),
         "Cooling": motherboard.cooling_system.calc_current_power_usage(),
         "Board": motherboard.power_usage_watts,
@@ -234,7 +286,9 @@ def _network_detail_lines(hardware) -> list[str]:
 def _push_detail_screen(ctx, title: str, lines_fn, history_fn=None, history_title: str = "History",
                          history_y_label: str = "Value", history_unit: str = "", history_markers_fn=None,
                          options: list[SettingOption] | None = None, status_fn=None,
-                         breakdown_fn=None, breakdown_title: str = "Breakdown", breakdown_chart_fn=None) -> None:
+                         breakdown_fn=None, breakdown_title: str = "Breakdown", breakdown_chart_fn=None,
+                         usage_fn=None, usage_title: str = "Usage",
+                         devices_fn=None, devices_title: str = "Devices") -> None:
     """Opens a live-refreshing DetailScreen for one component --
     `lines_fn` is called both now (initial render) and again on every
     refresh tick, so it must stay cheap and side-effect free. `history_fn`,
@@ -246,14 +300,18 @@ def _push_detail_screen(ctx, title: str, lines_fn, history_fn=None, history_titl
     `breakdown_fn`, if given, switches to the full-width-bottom layout
     instead (see DetailScreen) -- not meant to be combined with options/
     status_fn, no panel needs both yet. `breakdown_chart_fn`, if given
-    alongside it, adds a bar chart of the same data next to the text."""
+    alongside it, adds a bar chart of the same data next to the text.
+    `usage_fn`/`devices_fn`, if given, switch to the usage-bars layout
+    instead (see DetailScreen)."""
     ctx.screens.push(DetailScreen(ctx.screen, title, lines_fn(), ctx.screens, refresh=lines_fn,
                                    history_fn=history_fn, history_title=history_title,
                                    history_y_label=history_y_label, history_unit=history_unit,
                                    history_markers_fn=history_markers_fn,
                                    options=options, status_fn=status_fn,
                                    breakdown_fn=breakdown_fn, breakdown_title=breakdown_title,
-                                   breakdown_chart_fn=breakdown_chart_fn))
+                                   breakdown_chart_fn=breakdown_chart_fn,
+                                   usage_fn=usage_fn, usage_title=usage_title,
+                                   devices_fn=devices_fn, devices_title=devices_title))
 
 
 def _build_hardware_screen(ctx) -> tuple[HardwareScreen, dict[str, HardwareTile]]:
@@ -276,11 +334,15 @@ def _build_hardware_screen(ctx) -> tuple[HardwareScreen, dict[str, HardwareTile]
     one of them (its on_select is exactly what Enter would trigger on it)."""
     hardware = ctx.hardware if ctx.hardware is not None else HardwareSpec()
     table = ctx.process_table
+    boot_progress = ctx.boot_progress if ctx.boot_progress is not None else BootProgress()
 
     overview = HardwareTile("Overview")
     cpu = HardwareTile("CPU", on_select=lambda: _push_detail_screen(ctx, "CPU", lambda: _cpu_detail_lines(hardware, table)))
     ram = HardwareTile("RAM", on_select=lambda: _push_detail_screen(ctx, "RAM", lambda: _ram_detail_lines(hardware, table)))
-    storage = HardwareTile("Storage", on_select=lambda: _push_detail_screen(ctx, "Storage", lambda: _storage_detail_lines(hardware)))
+    storage = HardwareTile("Storage", on_select=lambda: _push_detail_screen(
+        ctx, "Storage", lambda: _storage_detail_lines(hardware),
+        usage_fn=lambda: _storage_usage(hardware, ctx.fs), usage_title="Drives",
+        devices_fn=lambda: _storage_devices_lines(boot_progress), devices_title="Devices"))
     external = HardwareTile("External")
     power = HardwareTile("Power", on_select=lambda: _push_detail_screen(
         ctx, "Power", lambda: _power_detail_lines(hardware),

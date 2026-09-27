@@ -740,3 +740,31 @@ def test_hardware_spec_history_is_excluded_from_equality_and_persistence(tmp_pat
     loaded = HardwareSpec.load(path)
     assert loaded == spec
     assert len(loaded.power_history) == 0  # a fresh instance, no borrowed history
+
+
+def test_storage_power_scales_between_idle_and_max_with_io_load():
+    drive = Storage("Disk", 1024, "Test Inc.", power_usage_watts=10, power_usage_watts_idle=2)
+    assert drive.calc_current_power_usage() == 2
+    drive.read_load, drive.write_load = 0.25, 0.5
+    assert drive.calc_current_power_usage() == 6   # driven by the busier of the two
+    drive.write_load = 1.0
+    assert drive.calc_current_power_usage() == 10
+
+
+def test_storage_without_idle_draw_keeps_a_flat_draw():
+    drive = Storage("Disk", 1024, "Test Inc.", power_usage_watts=3)
+    drive.read_load = drive.write_load = 1.0
+    assert drive.calc_current_power_usage() == 3
+
+
+def test_storage_from_dict_accepts_specs_saved_before_idle_draw_existed():
+    drive = Storage.from_dict({"name": "Disk", "size": 1024, "manufacturer": "Test Inc.", "power_usage_watts": 3})
+    assert drive.power_usage_watts_idle == 3
+    assert Storage.from_dict(drive.to_dict()) == drive
+
+
+def test_storage_throughput_is_load_times_rated_speed():
+    drive = Storage("Disk", 1024, "Test Inc.", power_usage_watts=3, read_speed_kbps=1000, write_speed_kbps=400)
+    drive.read_load, drive.write_load = 0.5, 1.5   # over-saturated load is clamped
+    assert drive.read_kbps == 500
+    assert drive.write_kbps == 400

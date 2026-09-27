@@ -1,4 +1,5 @@
 import json
+import random
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -24,6 +25,11 @@ if TYPE_CHECKING:
 
 _AMBIENT_TEMPERATURE_CELSIUS = 25.0  # room temperature -- the system can't cool below this on its own
 _THERMAL_SCALE = 0.05  # tunable: how many degC a net watt of heat vs. cooling shifts the system by per tick
+# Simulated drive I/O (there's no real I/O model yet): read/write load
+# follows overall CPU load scaled by these factors, plus Gaussian jitter
+# with the given stddev so the bars don't sit perfectly still.
+_STORAGE_READ_FACTOR, _STORAGE_READ_JITTER = 0.6, 0.05
+_STORAGE_WRITE_FACTOR, _STORAGE_WRITE_JITTER = 0.3, 0.03
 
 
 def _default_motherboard() -> Motherboard:
@@ -54,9 +60,17 @@ def _default_motherboard() -> Motherboard:
         ],
         storage_slots=[
             StorageSlots(name="SATA A", supported_storage_types=[
-                Storage(name="Horus HDD", size=524288, manufacturer="Horus Inc.",
-                         power_usage_watts=3),
+                Storage(name="System Drive", size=262144, manufacturer="Horus Inc.",
+                         power_usage_watts=6, power_usage_watts_idle=3),
             ]),
+            StorageSlots(name="SATA B", supported_storage_types=[
+                            Storage(name="M.1", size=524288, manufacturer="Horus Inc.",
+                                     power_usage_watts=10, power_usage_watts_idle=5),
+                        ]),
+            StorageSlots(name="SATA C", supported_storage_types=[
+                                        Storage(name="M.2", size=524288, manufacturer="Horus Inc.",
+                                                 power_usage_watts=10, power_usage_watts_idle=5),
+                                    ]),
         ],
         network_interfaces=[
             NetworkInterface(name="eth0", mac_address="00:00:00:00:00:01",
@@ -168,13 +182,14 @@ class HardwareSpec:
 
     def calculate_total_power_usage(self) -> float:
         """Current combined draw across every component. CPU/RAM scale with
-        their live `load` (see start_power_monitoring), Cooling scales with
+        their live `load` and Storage with its read/write load (see
+        start_power_monitoring), Cooling scales with
         how much coolant is left (see CoolingSystem.calc_current_power_usage);
         everything else draws a fixed amount since nothing drives it yet."""
         total = 0.0
         total += sum(cpu.calc_current_power_usage() for cpu in self.installed_cpus())
         total += sum(ram.calc_current_power_usage() for ram in self.installed_ram())
-        total += sum(storage.power_usage_watts for storage in self.installed_storage())
+        total += sum(storage.calc_current_power_usage() for storage in self.installed_storage())
         total += sum(iface.power_usage_watts for iface in self.motherboard.network_interfaces)
         total += self.motherboard.cooling_system.calc_current_power_usage()
         total += self.motherboard.power_usage_watts
@@ -204,6 +219,9 @@ class HardwareSpec:
             cpu.load = cpu_load
         for ram in self.installed_ram():
             ram.load = mem_load
+        for drive in self.installed_storage():
+            drive.read_load = max(0.0, min(1.0, random.gauss(cpu_load * _STORAGE_READ_FACTOR, _STORAGE_READ_JITTER)))
+            drive.write_load = max(0.0, min(1.0, random.gauss(cpu_load * _STORAGE_WRITE_FACTOR, _STORAGE_WRITE_JITTER)))
 
     def _check_power_usage(self, dt: float) -> None:
         self._sync_component_load_from_process_table()

@@ -2,6 +2,15 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# The disks (and their sectors) the boot sequence connects, in the order
+# data/boot/boot_sequence.txt lists them -- disk N's sectors are the
+# "diskN_1".."diskN_3" ids BootProgress tracks.
+BOOT_DISKS: list[tuple[str, list[str]]] = [
+    ("Primary Disk", ["Zero", "Alpha", "Beta"]),
+    ("Secondary Disk", ["Zil", "Aleph", "Bet"]),
+    ("Tertiary Disk", ["Danae", "Urizen", "Baphomet"]),
+]
+
 
 @dataclass
 class BootProgress:
