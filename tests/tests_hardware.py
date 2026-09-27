@@ -768,3 +768,17 @@ def test_storage_throughput_is_load_times_rated_speed():
     drive.read_load, drive.write_load = 0.5, 1.5   # over-saturated load is clamped
     assert drive.read_kbps == 500
     assert drive.write_kbps == 400
+
+
+def test_storage_activity_is_the_busiest_drives_read_or_write_load():
+    busy = Storage("Busy", 1024, "Test Inc.", power_usage_watts=3)
+    quiet = Storage("Quiet", 1024, "Test Inc.", power_usage_watts=3)
+    busy.read_load, busy.write_load = 0.2, 0.7
+    quiet.read_load = 0.4
+    spec = HardwareSpec(motherboard=make_motherboard(storages=[busy, quiet]))
+    assert spec.storage_activity() == 0.7
+
+
+def test_storage_activity_is_zero_without_drives():
+    spec = HardwareSpec(motherboard=make_motherboard(storages=[]))
+    assert spec.storage_activity() == 0.0

@@ -57,6 +57,13 @@ class PowerUsageCheckedEvent(Event):
     over_budget: bool
 
 @dataclass(frozen=True)
+class StorageActivityCheckedEvent(Event):
+    """Published every tick of HardwareSpec.start_power_monitoring(), right
+    after the drives' read/write load was resynced -- `activity` is the
+    busiest drive's max(read_load, write_load), 0.0 (idle) to 1.0 (saturated)."""
+    activity: float
+
+@dataclass(frozen=True)
 class TemperatureCriticalEvent(Event):
     """Published once when the system's temperature crosses the critical
     threshold, triggering a full thermal shutdown (see HardwareSpec.

@@ -19,6 +19,7 @@ from horus.processes.seed_process import seed_processes
 from horus.processes.system_reactions import (
     register_power_reactions,
     register_status_bar,
+    register_storage_reactions,
     register_system_log,
     register_system_reactions,
     register_temperature_reactions,
@@ -100,6 +101,7 @@ def main() -> None:
     #--- SYSTEM REACTIONS -----
     register_system_reactions(bus, screens, window, sounds, window.buffer)
     register_power_reactions(bus, sounds)
+    register_storage_reactions(bus, sounds)
     register_temperature_reactions(bus, screens, window, sounds, window.buffer)
     system_log = SystemLog()
     register_system_log(bus, system_log)

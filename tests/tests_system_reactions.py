@@ -4,9 +4,17 @@ from horus.display.screen_buffer import ScreenBuffer
 from horus.display.status_bar import StatusBar
 from horus.events.bus import EventBus
 from horus.events.system_log import LogSeverity, SystemLog
-from horus.events.types import PowerUsageCheckedEvent, ProcessKilledEvent, ProcessStartedEvent, TemperatureCriticalEvent, TemperatureWarningEvent
+from horus.events.types import (
+    PowerUsageCheckedEvent,
+    ProcessKilledEvent,
+    ProcessStartedEvent,
+    StorageActivityCheckedEvent,
+    TemperatureCriticalEvent,
+    TemperatureWarningEvent,
+)
 from horus.processes.system_reactions import (
     register_status_bar,
+    register_storage_reactions,
     register_system_log,
     register_system_reactions,
     register_temperature_reactions,
@@ -437,3 +445,71 @@ def test_temperature_warning_does_not_light_other_indicators():
     assert status_bar.is_lit("PWR") is False
     assert status_bar.is_lit("SYS") is False
     assert status_bar.is_lit("MSC") is False
+
+
+class FakeLoopPlayer:
+    def __init__(self) -> None:
+        self.playing = True
+
+    def pause(self) -> None:
+        self.playing = False
+
+
+class FakeLoopingSounds(FakeSounds):
+    def __init__(self) -> None:
+        super().__init__()
+        self.looped: list[FakeLoopPlayer] = []
+        self.faded: list[FakeLoopPlayer] = []
+
+    def play_looped(self, name: str) -> FakeLoopPlayer:
+        self.played.append(name)
+        player = FakeLoopPlayer()
+        self.looped.append(player)
+        return player
+
+    def fade_out(self, target_volume, duration=1.5, player=None, on_complete=None, **kwargs) -> None:
+        self.faded.append(player)
+        on_complete()
+
+
+def test_idle_drives_stay_silent():
+    bus = EventBus()
+    sounds = FakeLoopingSounds()
+    register_storage_reactions(bus, sounds)
+
+    bus.publish(StorageActivityCheckedEvent(activity=0.1))
+
+    assert sounds.played == []
+
+
+def test_busy_drives_loop_the_grinding_noise_once_with_volume_following_activity():
+    bus = EventBus()
+    sounds = FakeLoopingSounds()
+    register_storage_reactions(bus, sounds)
+
+    bus.publish(StorageActivityCheckedEvent(activity=0.3))
+    quiet = sounds.volumes["grinding-noise-from-a-hdd"]
+    bus.publish(StorageActivityCheckedEvent(activity=1.0))
+
+    assert sounds.played == ["grinding-noise-from-a-hdd"]   # keeps the one loop running, no restarts
+    assert 0.0 < quiet < sounds.volumes["grinding-noise-from-a-hdd"] == 1.0
+
+
+def test_grinding_noise_fades_out_and_stops_once_activity_drops_again():
+    bus = EventBus()
+    sounds = FakeLoopingSounds()
+    register_storage_reactions(bus, sounds)
+
+    bus.publish(StorageActivityCheckedEvent(activity=0.8))
+    bus.publish(StorageActivityCheckedEvent(activity=0.05))
+
+    assert sounds.faded == sounds.looped
+    assert not sounds.looped[0].playing
+    bus.publish(StorageActivityCheckedEvent(activity=0.8))
+    assert len(sounds.looped) == 2   # starts fresh once busy again
+
+
+def test_storage_reactions_without_sounds_do_nothing():
+    bus = EventBus()
+    register_storage_reactions(bus, sounds=None)
+    bus.publish(StorageActivityCheckedEvent(activity=1.0))

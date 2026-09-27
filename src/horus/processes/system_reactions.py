@@ -4,7 +4,13 @@ happen no matter *what* killed a process."""
 from horus.display.status_bar import StatusBar
 from horus.events.bus import EventBus
 from horus.events.system_log import SystemLog
-from horus.events.types import PowerUsageCheckedEvent, ProcessKilledEvent, TemperatureCriticalEvent, TemperatureWarningEvent
+from horus.events.types import (
+    PowerUsageCheckedEvent,
+    ProcessKilledEvent,
+    StorageActivityCheckedEvent,
+    TemperatureCriticalEvent,
+    TemperatureWarningEvent,
+)
 from horus.ui.screens.crash_screen import CrashScreen
 
 
@@ -40,6 +46,40 @@ def register_power_reactions(bus: EventBus, sounds) -> None:
             sounds.play("system_error_notification")
 
     bus.subscribe(PowerUsageCheckedEvent, _on_power_usage_checked)
+
+# Drive grinding noise (see register_storage_reactions): silent below
+# _GRIND_THRESHOLD activity -- just above what the drives idle at with the
+# seeded processes -- then ramping from _GRIND_MIN_VOLUME up to full volume
+# as activity approaches 1.0.
+_GRIND_SOUND = "grinding-noise-from-a-hdd"
+_GRIND_THRESHOLD = 0.15
+_GRIND_MIN_VOLUME = 0.2
+_GRIND_FADE_OUT_SECONDS = 1.0
+
+
+def register_storage_reactions(bus: EventBus, sounds) -> None:
+    """Subscribes to StorageActivityCheckedEvent so busy drives are audible:
+    once activity crosses _GRIND_THRESHOLD, the HDD grinding noise starts
+    looping, its volume following the activity on every tick; once it drops
+    back below, the loop fades out and stops."""
+    player = None
+
+    def _on_storage_activity_checked(event: StorageActivityCheckedEvent) -> None:
+        nonlocal player
+        if sounds is None:
+            return
+        if event.activity < _GRIND_THRESHOLD:
+            if player is not None:
+                fading, player = player, None
+                sounds.fade_out(0.0, duration=_GRIND_FADE_OUT_SECONDS, player=fading, on_complete=fading.pause)
+            return
+        ramp = (min(1.0, event.activity) - _GRIND_THRESHOLD) / (1.0 - _GRIND_THRESHOLD)
+        sounds.set_sound_volume(_GRIND_SOUND, _GRIND_MIN_VOLUME + (1.0 - _GRIND_MIN_VOLUME) * ramp)
+        if player is None or not player.playing:
+            player = sounds.play_looped(_GRIND_SOUND)
+
+    bus.subscribe(StorageActivityCheckedEvent, _on_storage_activity_checked)
+
 
 def register_temperature_reactions(bus: EventBus, screens, window, sounds, buffer) -> None:
     """Subscribes to TemperatureCriticalEvent so when the system overheats,

@@ -6,7 +6,12 @@ from typing import TYPE_CHECKING
 
 import pyglet
 
-from horus.events.types import PowerUsageCheckedEvent, TemperatureCriticalEvent, TemperatureWarningEvent
+from horus.events.types import (
+    PowerUsageCheckedEvent,
+    StorageActivityCheckedEvent,
+    TemperatureCriticalEvent,
+    TemperatureWarningEvent,
+)
 from horus.hardware.cooling_system import CoolantType, CoolingSystem
 from horus.hardware.cpu import Cpu
 from horus.hardware.metric_history import MetricHistory
@@ -237,6 +242,12 @@ class HardwareSpec:
             psu_output_watts=psu_output_watts,
             over_budget=total_power_usage > psu_output_watts,
         ))
+        self._events.publish(StorageActivityCheckedEvent(activity=self.storage_activity()))
+
+    def storage_activity(self) -> float:
+        """The busiest drive's current max(read_load, write_load) -- 0.0
+        with no drives installed."""
+        return max((max(drive.read_load, drive.write_load) for drive in self.installed_storage()), default=0.0)
 
     # --- temperature ---
     critical_temperature: float = 90.0  # arbitrary threshold for thermal shutdown
