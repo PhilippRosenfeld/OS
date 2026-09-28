@@ -255,7 +255,7 @@ def test_cooling_system_active_and_max_cooling_temperature_persist_through_save_
 
 def test_defaults_when_nothing_loaded():
     spec = HardwareSpec()
-    assert spec.cpu_cores == 1
+    assert spec.cpu_cores == 2
     assert spec.memory_count == 2
 
 
@@ -322,8 +322,8 @@ def test_total_cpu_mhz_sums_every_installed_cpu():
 
 
 def test_total_cpu_mhz_with_default_spec():
-    spec = HardwareSpec()  # cpu_mhz=550, cpu_cores=1
-    assert spec.total_cpu_mhz() == 550
+    spec = HardwareSpec()  # cpu_mhz=550, cpu_cores=2
+    assert spec.total_cpu_mhz() == 1100
 
 
 # --- calculate_total_power_usage ---
@@ -782,3 +782,24 @@ def test_storage_activity_is_the_busiest_drives_read_or_write_load():
 def test_storage_activity_is_zero_without_drives():
     spec = HardwareSpec(motherboard=make_motherboard(storages=[]))
     assert spec.storage_activity() == 0.0
+
+
+def test_drives_without_mount_points_get_root_then_mnt_defaults():
+    first = Storage("Old Disk", 1024, "Test Inc.", power_usage_watts=3)
+    second = Storage("M.1", 1024, "Test Inc.", power_usage_watts=3)
+    HardwareSpec(motherboard=make_motherboard(storages=[first, second]))
+    assert first.mount_point == "/"
+    assert second.mount_point == "/mnt/m1"
+
+
+def test_default_mount_points_never_take_an_already_used_one():
+    rooted = Storage("Root", 1024, "Test Inc.", power_usage_watts=3, mount_point="/")
+    taken = Storage("Other", 1024, "Test Inc.", power_usage_watts=3, mount_point="/mnt/disk")
+    fresh = Storage("Disk", 1024, "Test Inc.", power_usage_watts=3)
+    HardwareSpec(motherboard=make_motherboard(storages=[fresh, rooted, taken]))
+    assert fresh.mount_point == "/mnt/disk2"
+
+
+def test_mount_point_survives_a_save_load_round_trip():
+    drive = Storage("Disk", 1024, "Test Inc.", power_usage_watts=3, mount_point="/mnt/data")
+    assert Storage.from_dict(drive.to_dict()).mount_point == "/mnt/data"

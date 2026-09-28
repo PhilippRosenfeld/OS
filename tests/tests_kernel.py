@@ -1617,9 +1617,24 @@ def test_sys_storage_shows_drive_usage_with_a_disk_sprite():
 
     drive = hardware.installed_storage()[0]
     full = full_text(buffer)
-    assert f"{drive.name}  2/{drive.size} KB" in full
+    assert f"{drive.name} ({drive.mount_point})  2/{drive.size} KB" in full
     assert "[#" in full or "[." in full
     assert "disk" in buffer.sprites.values()
+
+
+def test_sys_storage_fills_each_drive_by_the_files_under_its_own_mount_point():
+    from horus.filesystem.disk_usage import ensure_mount_points
+    ctx, buffer, screens, table, hardware = make_sys_context(cols=160, rows=40)
+    ctx.fs = InMemoryVFS()
+    drives = hardware.installed_storage()
+    ensure_mount_points(ctx.fs, drives)
+    ctx.fs.write_file(f"{drives[1].mount_point}/data.bin", "x" * 3072, user="root")
+
+    sys_command(ctx, ["-s"])
+
+    full = full_text(buffer)
+    assert f"{drives[0].name} ({drives[0].mount_point})  0/{drives[0].size} KB" in full
+    assert f"{drives[1].name} ({drives[1].mount_point})  3/{drives[1].size} KB" in full
 
 
 def test_sys_storage_shows_read_write_throughput_and_draw_under_each_bar():

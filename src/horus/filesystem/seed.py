@@ -7,12 +7,12 @@ from horus.paths import VFS_SEED_DIR
 # add more here to seed additional files; the destination's parent directory
 # must already exist by the time _seed_text_files() runs.
 _TEXT_FILE_SEEDS: list[tuple[str, str]] = [
-    ("readme.txt", "/home/root/readme.txt"),
-    ("poem.txt", "/home/root/poems/poem.txt"),
-    ("solstice.txt", "/home/root/poems/solstice.txt"),
-    ("ozymandias.txt", "/home/root/poems/ozymandias.txt"),
-    ("audio.wav", "/home/root/media/audio.wav"),
-    ("video.mp4", "/home/root/media/video.mp4"),
+    ("readme.txt", "/system/root/readme.txt"),
+    ("poem.txt", "/system/root/poems/poem.txt"),
+    ("solstice.txt", "/system/root/poems/solstice.txt"),
+    ("ozymandias.txt", "/system/root/poems/ozymandias.txt"),
+    ("audio.wav", "/system/root/media/audio.wav"),
+    ("video.mp4", "/system/root/media/video.mp4"),
 ]
 
 
@@ -26,12 +26,12 @@ def seed_minimal(fs: VFS) -> None:
     """Creates a minimal directory structure so the terminal isn't
     completely empty on first boot. Called once at startup, before
     the Context is built."""
-    fs.mkdir("/home", user="root")
-    fs.mkdir("/home/hidden", user="root", hidden=True)
-    fs.mkdir("/home/protected", user="root", protected=True)
-    fs.mkdir("/home/root", user="root")
-    fs.mkdir("/home/tmp", user="root")
-    fs.mkdir("/home/logs", user="root")
-    fs.mkdir("/home/root/poems", user="root")
-    fs.mkdir("/home/root/media", user="root")
+    fs.mkdir("/system", user="root")
+    fs.mkdir("/system/hidden", user="root", hidden=True)
+    fs.mkdir("/system/protected", user="root", protected=True)
+    fs.mkdir("/system/root", user="root")
+    fs.mkdir("/system/tmp", user="root")
+    fs.mkdir("/system/logs", user="root")
+    fs.mkdir("/system/root/poems", user="root")
+    fs.mkdir("/system/root/media", user="root")
     _seed_text_files(fs)

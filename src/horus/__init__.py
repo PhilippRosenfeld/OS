@@ -8,6 +8,7 @@ from horus.display.window import DisplayWindow
 from horus.events.bus import EventBus
 from horus.events.system_log import SystemLog
 from horus.filesystem.backend.sqlite import SQLiteVFS
+from horus.filesystem.disk_usage import ensure_mount_points
 from horus.filesystem.seed import seed_minimal
 from horus.hardware.spec import HardwareSpec
 from horus.kernel.commands.cmd_menu import horus_menu, open_settings_menu
@@ -89,6 +90,7 @@ def main() -> None:
 
     #--- HARDWARE -----
     hardware = HardwareSpec.load(HARDWARE_SPEC_PATH)
+    ensure_mount_points(fs, hardware.installed_storage())
 
     #--- PROCESSES -----
     process_table = ProcessTable(events=bus, total_memory_kb=hardware.total_memory_kb(),
@@ -112,7 +114,7 @@ def main() -> None:
     context = Context(
         session_id = "local",
         user="root",
-        cwd="/home",
+        cwd="/",
         fs=fs,
         screen=window.buffer,
         events=bus,

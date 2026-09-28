@@ -1,7 +1,8 @@
 class Storage:
     def __init__(self, name: str, size: int, manufacturer: str, power_usage_watts: int,
                  power_usage_watts_idle: int | None = None,
-                 read_speed_kbps: int = 1200, write_speed_kbps: int = 800):
+                 read_speed_kbps: int = 1200, write_speed_kbps: int = 800,
+                 mount_point: str | None = None):
         self.name = name
         self.size = size
         self.data = bytearray(size)
@@ -13,6 +14,10 @@ class Storage:
         self.write_speed_kbps = write_speed_kbps  # max write throughput, in KB/s
         self.read_load = 0.0   # current read utilization: 0.0 (idle) to 1.0 (saturated)
         self.write_load = 0.0  # same, for writes
+        # VFS directory this drive is mounted at (e.g. "/" or "/mnt/m1") --
+        # every file under it (but not under a deeper mount) takes up space
+        # on this drive, see filesystem.disk_usage. None = not mounted.
+        self.mount_point = mount_point
 
     @property
     def read_kbps(self) -> float:
@@ -41,6 +46,7 @@ class Storage:
             "power_usage_watts_idle": self.power_usage_watts_idle,
             "read_speed_kbps": self.read_speed_kbps,
             "write_speed_kbps": self.write_speed_kbps,
+            "mount_point": self.mount_point,
         }
 
     @classmethod

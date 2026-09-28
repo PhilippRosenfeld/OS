@@ -48,7 +48,7 @@ def _default_motherboard() -> Motherboard:
         power_usage_watts=20,
         cpu_sockets=[
             CpuSocket(name="Socket A", supported_cpus=[
-                Cpu(name="Coele X551", cores=1, mhz=550,
+                Cpu(name="Coele X551", cores=2, mhz=550,
                     power_usage_watts_max=65, power_usage_watts_min=5,
                     manufacturer="Coele Systems"),
             ]),
@@ -66,15 +66,15 @@ def _default_motherboard() -> Motherboard:
         storage_slots=[
             StorageSlots(name="SATA A", supported_storage_types=[
                 Storage(name="System Drive", size=262144, manufacturer="Horus Inc.",
-                         power_usage_watts=6, power_usage_watts_idle=3),
+                         power_usage_watts=6, power_usage_watts_idle=3, mount_point="/"),
             ]),
             StorageSlots(name="SATA B", supported_storage_types=[
                             Storage(name="M.1", size=524288, manufacturer="Horus Inc.",
-                                     power_usage_watts=10, power_usage_watts_idle=5),
+                                     power_usage_watts=10, power_usage_watts_idle=2, mount_point="/mnt/m1"),
                         ]),
             StorageSlots(name="SATA C", supported_storage_types=[
                                         Storage(name="M.2", size=524288, manufacturer="Horus Inc.",
-                                                 power_usage_watts=10, power_usage_watts_idle=5),
+                                                 power_usage_watts=10, power_usage_watts_idle=2, mount_point="/mnt/m2"),
                                     ]),
         ],
         network_interfaces=[
@@ -125,6 +125,27 @@ class HardwareSpec:
                                                     # fires -- the system is already going
                                                     # down (see _check_temperature), so
                                                     # nothing further should act on its heat
+        self._assign_default_mount_points()
+
+    def _assign_default_mount_points(self) -> None:
+        """Gives every drive without a mount_point one (e.g. hardware saved
+        before drives had mount points): the first one becomes the root "/"
+        unless another drive already is, the rest go under /mnt, named
+        after the drive."""
+        drives = self.installed_storage()
+        taken = {drive.mount_point for drive in drives if drive.mount_point is not None}
+        for drive in drives:
+            if drive.mount_point is not None:
+                continue
+            if "/" not in taken:
+                mount_point = "/"
+            else:
+                slug = "".join(ch for ch in drive.name.lower() if ch.isalnum()) or "drive"
+                mount_point, n = f"/mnt/{slug}", 2
+                while mount_point in taken:
+                    mount_point, n = f"/mnt/{slug}{n}", n + 1
+            drive.mount_point = mount_point
+            taken.add(mount_point)
 
     def installed_cpus(self) -> list[Cpu]:
         return [cpu for socket in self.motherboard.cpu_sockets for cpu in socket.supported_cpus]

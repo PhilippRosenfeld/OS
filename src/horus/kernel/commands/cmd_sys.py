@@ -1,3 +1,4 @@
+from horus.filesystem.disk_usage import drive_used_kb
 from horus.hardware.spec import HardwareSpec
 from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
 from horus.kernel.registry import command
@@ -88,27 +89,20 @@ def _storage_detail_lines(hardware) -> list[str]:
     return lines
 
 
-def _fs_used_kb(fs) -> float:
-    """Total size of every file in the VFS, in KB -- the whole filesystem
-    lives on the system drive (see _storage_usage)."""
-    if fs is None:
-        return 0.0
-    return sum(node.size for node in fs.list_dir("/", show_all=True, recursive=True)) / 1024
-
-
 def _storage_usage(hardware, fs) -> list[UsageBar]:
     """One usage bar per installed drive for the Storage detail screen's
-    top-right box. The VFS is mounted from the first (system) drive, so
-    that's the only one with anything on it -- any further drives show
-    as empty. Below each bar: the drive's current read/write throughput and
-    power draw (see HardwareSpec._sync_component_load_from_process_table)."""
+    top-right box -- each filled by the VFS files under that drive's own
+    mount point (see filesystem.disk_usage). Below each bar: the drive's
+    current read/write throughput and power draw (see
+    HardwareSpec._sync_component_load_from_process_table)."""
     drives = hardware.installed_storage()
-    used_kb = _fs_used_kb(fs) if drives else 0.0
-    return [UsageBar(drive.name, used_kb if i == 0 else 0.0, drive.size, unit="KB", sprite="disk",
+    used = drive_used_kb(fs, drives)
+    return [UsageBar(f"{drive.name} ({drive.mount_point or 'not mounted'})", used_kb, drive.size,
+                     unit="KB", sprite="disk",
                      details=[f"Read: {drive.read_kbps:4.0f}/{drive.read_speed_kbps} KB/s   "
                               f"Write: {drive.write_kbps:4.0f}/{drive.write_speed_kbps} KB/s   "
                               f"Draw: {drive.calc_current_power_usage()}/{drive.power_usage_watts} W"])
-            for i, drive in enumerate(drives)]
+            for drive, used_kb in zip(drives, used)]
 
 
 _BOOT_DEVICE_COL_WIDTH = 30  # per disk column in the Devices box -- fits "Baphomet ..... SUCCESSFUL" plus a gap
