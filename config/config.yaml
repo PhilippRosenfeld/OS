@@ -1,7 +1,8 @@
 debug_level: INFO
 
 display:
-  char_size: 3
+  char_size: 3          # the user's font size (shell) -- also changeable in Settings
+  fixed_char_size: 4    # boot, logo, menus, sys and crash always use this, regardless of char_size
   width: 2560 
   height: 1600 
   fullscreen: false

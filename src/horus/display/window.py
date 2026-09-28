@@ -16,6 +16,9 @@ class DisplayWindow:
         self._char_height = char_height
         self._margin = margin
         self._font_path = font_path
+        self._fixed_char_size: tuple[int, int] | None = None  # see set_fixed_char_size
+        self._user_char_size = (char_width, char_height)      # only meaningful while fixed
+        self._saved_user_screen: dict | None = None           # buffer as it was when the fixed size kicked in
         if fullscreen:
             # let pyglet size the window to the actual screen instead of a guessed
             # width/height, so it correctly covers whatever monitor it opens on
@@ -56,11 +59,51 @@ class DisplayWindow:
     def window_size(self) -> tuple[int, int]:
         return (self._window.width, self._window.height)
 
+    @property
+    def user_char_size(self) -> tuple[int, int]:
+        """The user's own (char_width, char_height) -- what set_char_size()
+        last set, even while a fixed size (see set_fixed_char_size) is what's
+        actually shown right now."""
+        if self._fixed_char_size is not None:
+            return self._user_char_size
+        return (self._char_width, self._char_height)
+
     def set_char_size(self, char_width: int, char_height: int) -> None:
         """Rebuild the font atlas at a new glyph size and re-fit the grid
         (more or fewer cols/rows) to the current window size -- an explicit
         zoom, as opposed to _on_resize() below, which holds cols/rows fixed
-        and scales the glyph size instead."""
+        and scales the glyph size instead. This is the *user's* size: while a
+        fixed size is active (see set_fixed_char_size) it's only remembered,
+        and applied once the fixed size is lifted again."""
+        if self._fixed_char_size is not None:
+            self._user_char_size = (char_width, char_height)
+            return
+        self._apply_char_size(char_width, char_height)
+
+    def set_fixed_char_size(self, size: tuple[int, int] | None) -> None:
+        """Overrides the user's char size with `size` (char_width,
+        char_height) regardless of what they picked -- e.g. for boot/menus/
+        sys, which are laid out for one known size -- or, with None, goes
+        back to the user's size. Entering the override snapshots the buffer
+        as-is and leaving it restores that snapshot at the user's size again,
+        so whatever was on screen before (e.g. the shell) comes back exactly
+        as it was, instead of being re-wrapped twice by the two resizes."""
+        if size == self._fixed_char_size:
+            return
+        if size is not None:
+            if self._fixed_char_size is None:
+                self._user_char_size = (self._char_width, self._char_height)
+                self._saved_user_screen = self.buffer.snapshot()
+            self._fixed_char_size = size
+            self._apply_char_size(*size)
+            return
+        self._fixed_char_size = None
+        self._apply_char_size(*self._user_char_size)
+        if self._saved_user_screen is not None:
+            self.buffer.restore(self._saved_user_screen)
+            self._saved_user_screen = None
+
+    def _apply_char_size(self, char_width: int, char_height: int) -> None:
         cols = max(1, (self._window.width - 2 * self._margin) // char_width)
         rows = max(1, (self._window.height - 2 * self._margin) // char_height)
         self._apply_grid(cols, rows, char_width, char_height)

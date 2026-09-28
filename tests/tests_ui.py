@@ -2246,3 +2246,50 @@ def test_one_keystroke_skips_boot_but_not_also_logo():
     manager.handle_text("a")
     manager.handle_key(key.A, 0)
     assert after_logo == [True]
+
+
+# --- ScreenManager: on_before_activate ---
+
+class _OrderScreen(Screen):
+    def __init__(self, name, log):
+        self.name, self.log = name, log
+
+    def on_push(self):
+        self.log.append(f"{self.name}.on_push")
+
+    def on_pop(self):
+        self.log.append(f"{self.name}.on_pop")
+
+    def on_resume(self):
+        self.log.append(f"{self.name}.on_resume")
+
+    def handle_text(self, text): pass
+    def handle_motion(self, motion): pass
+    def handle_enter(self): pass
+    def handle_key(self, symbol, modifiers): pass
+
+
+def test_on_before_activate_runs_before_the_new_screen_draws_and_after_the_old_one_leaves():
+    log = []
+    manager = ScreenManager(on_before_activate=lambda s: log.append(f"before:{s.name}"))
+    a, b, c = _OrderScreen("a", log), _OrderScreen("b", log), _OrderScreen("c", log)
+
+    manager.push(a)
+    manager.push(b)
+    manager.pop()
+    manager.replace(c)
+
+    assert log == [
+        "before:a", "a.on_push",
+        "before:b", "b.on_push",
+        "b.on_pop", "before:a", "a.on_resume",
+        "a.on_pop", "before:c", "c.on_push",
+    ]
+
+
+def test_on_before_activate_is_not_called_when_popping_to_an_empty_stack():
+    log = []
+    manager = ScreenManager(on_before_activate=lambda s: log.append(s.name))
+    manager.push(_OrderScreen("a", []))
+    manager.pop()
+    assert log == ["a"]

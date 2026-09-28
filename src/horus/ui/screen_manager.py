@@ -7,16 +7,23 @@ class ScreenManager:
     """Owns a stack of Screens. Only the top screen receives input --
     push()/pop()/replace() switch which one that is."""
 
-    def __init__(self, on_active_changed: Callable[["Screen | None"], None] | None = None) -> None:
+    def __init__(self, on_active_changed: Callable[["Screen | None"], None] | None = None,
+                 on_before_activate: Callable[["Screen"], None] | None = None) -> None:
         self._stack: list[Screen] = []
         self._on_active_changed = on_active_changed  # notified (with the new self.active) whenever
                                                        # push()/pop()/replace() change what's on top --
                                                        # e.g. so the status bar can show only while the
                                                        # active screen is the shell (see horus.__init__)
+        self._on_before_activate = on_before_activate  # called with the screen about to become active,
+                                                         # *before* its on_push()/on_resume() draws anything
+                                                         # (and after the outgoing screen's on_pop()) -- e.g.
+                                                         # to switch the char size the new screen is laid
+                                                         # out in (see horus.__init__)
 
     def push(self, screen: Screen) -> None:
         """Make `screen` the active one, on top of whatever was active before."""
         self._stack.append(screen)
+        self._before_activate(screen)
         screen.on_push()
         self._notify_active_changed()
 
@@ -29,6 +36,7 @@ class ScreenManager:
         screen = self._stack.pop()
         screen.on_pop()
         if self._stack:
+            self._before_activate(self._stack[-1])
             self._stack[-1].on_resume()
         self._notify_active_changed()
 
@@ -43,8 +51,13 @@ class ScreenManager:
             old = self._stack.pop()
             old.on_pop()
         self._stack.append(screen)
+        self._before_activate(screen)
         screen.on_push()
         self._notify_active_changed()
+
+    def _before_activate(self, screen: Screen) -> None:
+        if self._on_before_activate is not None:
+            self._on_before_activate(screen)
 
     def _notify_active_changed(self) -> None:
         if self._on_active_changed is not None:

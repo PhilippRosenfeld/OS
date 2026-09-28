@@ -988,3 +988,67 @@ def test_newly_lit_indicator_respects_the_current_blink_phase():
     bar.set_lit("SYS", True)
     col = bar_text(bar).index("SYS")
     assert bar.buffer.get_cell(col, 0).bg_color == bar.buffer.default_bg  # lit, but blinked off right now
+
+
+# --- fixed char size (boot/menus/sys ignore the user's font size) ---
+
+def test_fixed_char_size_overrides_the_users_size_and_lifting_it_restores_it():
+    window = DisplayWindow(font_path=FONT, char_width=8, char_height=16, width=640, height=400, margin=0)
+    try:
+        window.set_fixed_char_size((16, 32))
+        assert (window.char_width, window.char_height) == (16, 32)
+        assert (window.buffer.cols, window.buffer.rows) == (640 // 16, 400 // 32)
+        assert window.user_char_size == (8, 16)
+
+        window.set_fixed_char_size(None)
+        assert (window.char_width, window.char_height) == (8, 16)
+        assert (window.buffer.cols, window.buffer.rows) == (640 // 8, 400 // 16)
+    finally:
+        window._window.close()
+
+
+def test_changing_the_users_size_while_fixed_only_applies_once_the_fixed_size_is_lifted():
+    window = DisplayWindow(font_path=FONT, char_width=8, char_height=16, width=640, height=400, margin=0)
+    try:
+        window.set_fixed_char_size((16, 32))
+        window.set_char_size(24, 48)   # e.g. Font Size changed in the (fixed-size) settings menu
+        assert (window.char_width, window.char_height) == (16, 32)
+        assert window.user_char_size == (24, 48)
+
+        window.set_fixed_char_size(None)
+        assert (window.char_width, window.char_height) == (24, 48)
+    finally:
+        window._window.close()
+
+
+def test_lifting_the_fixed_size_brings_back_the_screen_exactly_as_it_was():
+    """The shell's content must survive a trip into sys/menus unchanged,
+    rather than being re-wrapped by the two resizes in between."""
+    window = DisplayWindow(font_path=FONT, char_width=8, char_height=16, width=640, height=400, margin=0)
+    try:
+        long_line = "x" * 70 + "END"
+        window.buffer.write_string(0, 3, long_line)
+        before = [[window.buffer.get_cell(c, r).char for c in range(window.buffer.cols)] for r in range(window.buffer.rows)]
+
+        window.set_fixed_char_size((16, 32))
+        window.buffer.clear()
+        window.buffer.write_string(0, 0, "SYS SCREEN")
+        window.set_fixed_char_size(None)
+
+        after = [[window.buffer.get_cell(c, r).char for c in range(window.buffer.cols)] for r in range(window.buffer.rows)]
+        assert after == before
+    finally:
+        window._window.close()
+
+
+def test_switching_between_fixed_screens_keeps_the_original_snapshot():
+    window = DisplayWindow(font_path=FONT, char_width=8, char_height=16, width=640, height=400, margin=0)
+    try:
+        window.buffer.write_string(0, 0, "shell")
+        window.set_fixed_char_size((16, 32))
+        window.buffer.write_string(0, 0, "menu ")
+        window.set_fixed_char_size((16, 32))   # e.g. menu -> settings: already fixed, no new snapshot
+        window.set_fixed_char_size(None)
+        assert "".join(window.buffer.get_cell(c, 0).char for c in range(5)) == "shell"
+    finally:
+        window._window.close()

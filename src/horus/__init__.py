@@ -34,17 +34,30 @@ from horus.shell.input_handler import InputHandler
 from horus.story.progress import BootProgress
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.screens.boot_screen import BootFrame, BootScreen
+from horus.ui.screens.crash_screen import CrashScreen
+from horus.ui.screens.detail_screen import DetailScreen
+from horus.ui.screens.hardware_screen import HardwareScreen
 from horus.ui.screens.logo_screen import LogoScreen
 from horus.ui.screens.main_menu_screen import MainMenuScreen
-from horus.ui.screens.menu_screen import MenuOption
+from horus.ui.screens.menu_screen import MenuOption, MenuScreen
+from horus.ui.screens.settings_screen import SettingScreen
 from horus.ui.screens.shell_screen import ShellScreen
 from horus.utils.config_manager import load_config
 from horus.utils.logging_setup import setup_logging
 
 cfg = load_config()
 char_size = cfg['display']['char_size']
+# boot/logo/menus/sys/crash are laid out for one known size and ignore the
+# user's font size (see _on_before_screen_activate below)
+fixed_char_size = cfg['display'].get('fixed_char_size', char_size)
 setup_logging(level=cfg['debug_level'], log_file="horus.log")
 logger = logging.getLogger(__name__)
+
+_FIXED_CHAR_SIZE_SCREENS = (
+    BootScreen, LogoScreen, MainMenuScreen, MenuScreen, SettingScreen,  # boot, logo, main menu, menus
+    HardwareScreen, DetailScreen,                                       # sys (and its detail screens)
+    CrashScreen,
+)
 
 
 def main() -> None:
@@ -81,8 +94,18 @@ def main() -> None:
         # settings/etc. all hide it again.
         window.status_bar.set_visible(isinstance(screen, ShellScreen))
 
+    def _on_before_screen_activate(screen) -> None:
+        # Screens with a fixed layout always get the configured
+        # display.fixed_char_size, never the user's font size -- everything
+        # else (shell, top, ...) goes back to the user's own size.
+        if isinstance(screen, _FIXED_CHAR_SIZE_SCREENS):
+            window.set_fixed_char_size((8 * fixed_char_size, 16 * fixed_char_size))
+        else:
+            window.set_fixed_char_size(None)
+
     #---- SCREENS -----
-    screens = ScreenManager(on_active_changed=_on_active_screen_changed)
+    screens = ScreenManager(on_active_changed=_on_active_screen_changed,
+                            on_before_activate=_on_before_screen_activate)
     
     #---- USERS -----
     users = UserRegistry()

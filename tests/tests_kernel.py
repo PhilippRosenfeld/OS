@@ -464,6 +464,10 @@ class FakeMenuWindow:
     def window_size(self):
         return self._window_size
 
+    @property
+    def user_char_size(self):
+        return (self.char_width, self.char_width * 2)
+
     def set_window_size(self, w, h):
         self._window_size = (w, h)
         self.calls.append(("set_window_size", w, h))

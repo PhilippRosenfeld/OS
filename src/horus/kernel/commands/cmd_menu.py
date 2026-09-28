@@ -57,7 +57,9 @@ def open_settings_menu(ctx) -> None:
     Left/Right and applied live via ctx.window."""
 
     window_index = _closest_index([w for w, h in _WINDOW_SIZES], ctx.window.window_size[0])
-    char_index = _closest_index(_CHAR_SIZES, ctx.window.char_width // 8)
+    # the user's own size (applies to the shell), not the fixed one the
+    # settings menu itself is shown in -- see DisplayWindow.set_fixed_char_size
+    char_index = _closest_index(_CHAR_SIZES, ctx.window.user_char_size[0] // 8)
     font_paths = [path for _, path in _FONTS]
     font_index = font_paths.index(ctx.window.font_path) if ctx.window.font_path in font_paths else 0
 
