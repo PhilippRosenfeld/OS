@@ -83,6 +83,21 @@ class SQLiteVFS(VFS):
             size=row["size"],
         )
 
+    def _node_with_dir_size(self, row: sqlite3.Row) -> Node:
+        """Like _row_to_node, but a directory's size is the sum of every file
+        inside it, recursively, hidden ones included -- derived on every read
+        rather than stored, so it can never go stale (the stored size of a
+        directory row always stays 0)."""
+        node = self._row_to_node(row)
+        if node.type == NodeType.DIRECTORY:
+            prefix = row["path"].rstrip("/") + "/"
+            # substr() instead of LIKE, so '%'/'_' in names aren't treated as wildcards
+            node.size = self._conn.execute(
+                "SELECT COALESCE(SUM(size), 0) FROM nodes WHERE type = ? AND substr(path, 1, ?) = ?",
+                (NodeType.FILE.value, len(prefix), prefix),
+            ).fetchone()[0]
+        return node
+
     def _fetch(self, path: str) -> sqlite3.Row | None:
         return self._conn.execute("SELECT * FROM nodes WHERE path = ?", (path,)).fetchone()
 
@@ -121,7 +136,7 @@ class SQLiteVFS(VFS):
 
         entries: list[Node] = []
         for child in children:
-            entries.append(self._row_to_node(child))
+            entries.append(self._node_with_dir_size(child))
             if recursive and child["type"] == NodeType.DIRECTORY.value:
                 child_path = path.rstrip("/") + "/" + child["name"]
                 entries.extend(self.list_dir(child_path, show_all=show_all, recursive=True))
@@ -195,7 +210,7 @@ class SQLiteVFS(VFS):
         row = self._fetch(path)
         if row is None:
             raise FileNotFoundError(path)
-        return self._row_to_node(row)
+        return self._node_with_dir_size(row)
 
     def get_file_type(self, path: str) -> str:
         node = self.get_meta(path)

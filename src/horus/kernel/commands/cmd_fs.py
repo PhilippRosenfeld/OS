@@ -199,6 +199,25 @@ _cat_parser = _build_cat_parser()
 _encrypt_parser = _build_encrypt_parser()
 _decrypt_parser = _build_decrypt_parser()
 
+# Fixed column widths for 'ls -m', so C:/M: line up regardless of owner,
+# type or size -- _format_size() never gets wider than _SIZE_WIDTH.
+_OWNER_WIDTH = 8
+_TYPE_WIDTH = len("DIRECTORY")
+_SIZE_WIDTH = len("1023.9 KB")
+
+
+def _format_size(size: int) -> str:
+    """Bytes as-is below 1 KB, otherwise the largest fitting unit (KB, MB,
+    GB) with one decimal -- e.g. 512 B, 1.5 KB, 12.0 MB."""
+    if size < 1024:
+        return f"{size} B"
+    value = float(size)
+    for unit in ("KB", "MB", "GB"):
+        value /= 1024
+        if value < 1024 or unit == "GB":
+            return f"{value:.1f} {unit}"
+
+
 def _print_node(ctx, node, show_meta: bool) -> None:
     type = "DIRECTORY" if node.type is NodeType.DIRECTORY else "FILE"
     hidden = "H" if node.hidden else "V"
@@ -207,7 +226,9 @@ def _print_node(ctx, node, show_meta: bool) -> None:
     if show_meta:
         created_at = node.created_at.isoformat(sep=" ", timespec="seconds")
         modified_at = node.modified_at.isoformat(sep=" ", timespec="seconds")
-        ctx.write_line(f"{node.permissions}    {hidden}-{protected}-{immutable}    {node.owner}   {type}   {node.size} bytes   C:{created_at}   M:{modified_at}   {node.name}")
+        ctx.write_line(f"{node.permissions}    {hidden}-{protected}-{immutable}    {node.owner:<{_OWNER_WIDTH}}   "
+                       f"{type:<{_TYPE_WIDTH}}   {_format_size(node.size):>{_SIZE_WIDTH}}   "
+                       f"C:{created_at}   M:{modified_at}   {node.name}")
     else:
         ctx.write_line(f"{node.permissions}   {node.owner}   {type}   {node.name}")
 

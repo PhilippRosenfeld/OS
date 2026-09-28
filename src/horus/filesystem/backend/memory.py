@@ -71,16 +71,29 @@ class InMemoryVFS(VFS):
         if cur_node.meta.type != NodeType.DIRECTORY:
             raise NotADirectoryError(path)
 
+        self._update_dir_sizes(cur_node)
+        return self._list(cur_node, show_all, recursive)
+
+    def _list(self, dir_node: _TreeNode, show_all: bool, recursive: bool) -> list[Node]:
+        """Internal: list_dir()'s walk, once directory sizes are up to date."""
         entries: list[Node] = []
-        for name, child in cur_node.children.items():
+        for child in dir_node.children.values():
             if not show_all and child.meta.hidden:
                 continue
             entries.append(child.meta)
             if recursive and child.meta.type == NodeType.DIRECTORY:
-                child_path = path.rstrip("/") + "/" + name
-                entries.extend(self.list_dir(child_path, show_all=show_all, recursive=True))
-
+                entries.extend(self._list(child, show_all, recursive=True))
         return entries
+
+    def _update_dir_sizes(self, node: _TreeNode) -> int:
+        """Internal: sets every directory's size (from `node` down) to the
+        sum of everything inside it, recursively, hidden entries included --
+        derived on every read rather than kept in sync on every write, so
+        it can never go stale. Returns `node`'s own size."""
+        if node.meta.type != NodeType.DIRECTORY:
+            return node.meta.size
+        node.meta.size = sum(self._update_dir_sizes(child) for child in node.children.values())
+        return node.meta.size
 
     def read_file(self, path: str, user: str) -> str:
         """Reads the content of a file and returns it as a string.
@@ -126,6 +139,7 @@ class InMemoryVFS(VFS):
         node = self._walk(path)
         if node is None:
             raise FileNotFoundError(path)
+        self._update_dir_sizes(node)
         return node.meta
 
     def get_file_type(self, path: str) -> str:

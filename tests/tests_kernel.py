@@ -597,6 +597,35 @@ def test_ls_with_meta_shows_timestamps_without_fractional_seconds():
     assert "." not in full_text(buffer)  # no fractional-second remainder anywhere in the output
 
 
+def test_ls_with_meta_lines_up_the_timestamp_columns_regardless_of_size_or_type():
+    buffer = ScreenBuffer(160, 10)
+    fs = InMemoryVFS()
+    fs.mkdir("/home", user="root")
+    fs.mkdir("/home/dir", user="root")
+    fs.write_file("/home/dir/big", "x" * 5 * 1024 * 1024, user="root")
+    fs.write_file("/home/tiny", "x", user="root")
+    fs.write_file("/home/mid", "x" * 123456, user="root")
+    ctx = Context(session_id="s", user="root", cwd="/home", fs=fs, screen=buffer)
+
+    ls(ctx, ["-m"])
+
+    lines = [row_text(buffer, r) for r in range(buffer.rows) if "C:" in row_text(buffer, r)]
+    assert len(lines) == 3
+    assert len({line.index("C:") for line in lines}) == 1
+    assert len({line.index("M:") for line in lines}) == 1
+
+
+def test_format_size_switches_to_kb_mb_gb_for_large_values():
+    from horus.kernel.commands.cmd_fs import _SIZE_WIDTH, _format_size
+    assert _format_size(0) == "0 B"
+    assert _format_size(1023) == "1023 B"
+    assert _format_size(1024) == "1.0 KB"
+    assert _format_size(123456) == "120.6 KB"
+    assert _format_size(5 * 1024 * 1024) == "5.0 MB"
+    assert _format_size(3 * 1024 ** 3) == "3.0 GB"
+    assert all(len(_format_size(n)) <= _SIZE_WIDTH for n in (1023, 1024 ** 2 - 1, 1024 ** 3 - 1, 999 * 1024 ** 3))
+
+
 def test_ls_recursive_lists_each_directory_with_a_path_header():
     buffer = ScreenBuffer(80, 20)
     fs = InMemoryVFS()

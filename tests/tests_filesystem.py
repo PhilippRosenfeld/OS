@@ -654,5 +654,50 @@ def test_seed_minimal_reads_readme_content_from_disk():
     seed_minimal(fs)
 
     expected = (VFS_SEED_DIR / "readme.txt").read_text(encoding="utf-8")
-    assert fs.read_file("/home/root/readme.txt", user=ROOT) == expected
+    assert fs.read_file("/system/root/readme.txt", user=ROOT) == expected
     assert expected.strip() != ""  # sanity: the seed file itself isn't empty
+
+# --- directory sizes: sum of everything inside, recursively ---
+
+def _entry(fs, directory, name):
+    return next(node for node in fs.list_dir(directory, show_all=True) if node.name == name)
+
+
+def test_directory_size_is_the_recursive_sum_of_its_contents(fs):
+    fs.mkdir("/a", user=ROOT)
+    fs.mkdir("/a/b", user=ROOT)
+    fs.mkdir("/a/b/c", user=ROOT)
+    fs.write_file("/a/one.txt", "1" * 10, user=ROOT)
+    fs.write_file("/a/b/two.txt", "2" * 20, user=ROOT)
+    fs.write_file("/a/b/c/three.txt", "3" * 30, user=ROOT)
+
+    assert _entry(fs, "/", "a").size == 60
+    assert _entry(fs, "/a", "b").size == 50
+    assert _entry(fs, "/a/b", "c").size == 30
+    assert fs.get_meta("/a").size == 60
+    assert fs.get_meta("/").size == 60
+
+
+def test_directory_size_includes_hidden_entries(fs):
+    fs.mkdir("/d", user=ROOT)
+    fs.mkdir("/d/secret", user=ROOT, hidden=True)
+    fs.write_file("/d/secret/x.txt", "x" * 7, user=ROOT)
+    assert fs.get_meta("/d").size == 7
+
+
+def test_directory_size_follows_writes_and_removals(fs):
+    fs.mkdir("/d", user=ROOT)
+    fs.write_file("/d/f.txt", "f" * 5, user=ROOT)
+    assert fs.get_meta("/d").size == 5
+    fs.write_file("/d/f.txt", "f" * 12, user=ROOT)
+    assert fs.get_meta("/d").size == 12
+    fs.remove("/d/f.txt", user=ROOT)
+    assert fs.get_meta("/d").size == 0
+
+
+def test_empty_directory_and_sibling_with_shared_prefix_are_not_mixed_up(fs):
+    fs.mkdir("/data", user=ROOT)
+    fs.mkdir("/data2", user=ROOT)
+    fs.write_file("/data2/f.txt", "f" * 9, user=ROOT)
+    assert fs.get_meta("/data").size == 0
+    assert fs.get_meta("/data2").size == 9
