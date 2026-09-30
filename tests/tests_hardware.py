@@ -322,8 +322,8 @@ def test_total_cpu_mhz_sums_every_installed_cpu():
 
 
 def test_total_cpu_mhz_with_default_spec():
-    spec = HardwareSpec()  # cpu_mhz=550, cpu_cores=2
-    assert spec.total_cpu_mhz() == 1100
+    spec = HardwareSpec()  # cpu_mhz=550, cpu_cores=8
+    assert spec.total_cpu_mhz() == 550*2
 
 
 # --- calculate_total_power_usage ---

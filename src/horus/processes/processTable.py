@@ -33,6 +33,19 @@ class ProcessTable:
                                                  # passed in rather than looked up here so ProcessTable
                                                  # doesn't need to know HardwareSpec exists
         self.throttle_factor = 1.0  # 1.0 = no throttling, 0.5 = half speed, 2.0 = double speed, etc.
+        self.core_capacity_mhz: dict[int, float] = {}  # core number -> its clock; empty = no per-core
+                                                        # limits (see set_cpu_capacity/CpuScheduler)
+
+    def set_cpu_capacity(self, total_cpu_mhz: float, core_capacity_mhz: dict[int, float] | None = None) -> None:
+        """Updates how much CPU there is -- e.g. after a core got disabled or
+        the CPU overclocked (see CpuScheduler) -- and immediately scales
+        usage back down if it no longer fits. `core_capacity_mhz` additionally
+        caps what the processes pinned to each core may use together, since
+        a process only ever runs on its own single core."""
+        self.total_cpu_mhz = total_cpu_mhz
+        if core_capacity_mhz is not None:
+            self.core_capacity_mhz = dict(core_capacity_mhz)
+        self._enforce_resource_caps()
 
     def add_process(self, process: process = None) -> process:
         if process is None:
@@ -94,7 +107,19 @@ class ProcessTable:
         process's usage *relative to the others* is preserved, only the
         overall scale shrinks. This can push an individual process below its
         usual _MIN_MEM_KB floor under heavy combined load; that's expected,
-        not a bug -- the system-wide cap takes priority."""
+        not a bug -- the system-wide cap takes priority.
+
+        With per-core capacities set (see set_cpu_capacity), the processes
+        pinned to one core are first scaled the same way to fit that core's
+        own clock -- a process can never use more than the one core it runs on."""
+        for core, capacity in self.core_capacity_mhz.items():
+            on_core = [proc for proc in self.processes.values() if proc.core == core]
+            core_total = sum(proc.cpu_mhz for proc in on_core)
+            if core_total > capacity and core_total > 0:
+                scale = capacity / core_total
+                for proc in on_core:
+                    proc.cpu_mhz *= scale
+
         total_cpu = self.used_cpu_mhz()
         if total_cpu > self.total_cpu_mhz and total_cpu > 0:
             scale = self.total_cpu_mhz / total_cpu

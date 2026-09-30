@@ -5,6 +5,11 @@ from PIL import Image, ImageDraw, ImageFont
 
 from ..paths import FONTS_DIR
 
+# Non-ASCII glyphs rasterized on top of printable ASCII -- e.g. the CPU
+# screen's status lamps and activity chart (see ui.screens.cpu_screen).
+# Both bundled fonts have them.
+EXTRA_GLYPHS = "■░▒▓█"  # ■ ░ ▒ ▓ █
+
 
 class FontAtlas:
     """Rasterizes a font into a texture atlas and provides glyph metrics for rendering text."""
@@ -28,10 +33,9 @@ class FontAtlas:
         raise FileNotFoundError(f"Font '{font_path}' not found directly or in {FONTS_DIR}")
 
     def _rasterize_all_glyphs(self, font_path: str) -> None:
-        """Render every printable ASCII character into a texture atlas and store their metrics."""
+        """Render every printable ASCII character (plus EXTRA_GLYPHS) into a texture atlas and store their metrics."""
         font = ImageFont.truetype(font_path, size=self.char_height)
-        for code in range(32, 127):
-            char = chr(code)
+        for char in [chr(code) for code in range(32, 127)] + list(EXTRA_GLYPHS):
             image = Image.new("L", (self.char_width, self.char_height), color=0)
             draw = ImageDraw.Draw(image)
             draw.text((0, 0), char, font=font, fill=255)

@@ -16,6 +16,7 @@ SORT_KEYS = {
     "pid": (lambda p: p.pid, False),
     "name": (lambda p: p.name.lower(), False),
     "time": (lambda p: p.started_at, False),
+    "cputime": (lambda p: p.cpu_time, True),
 }
 
 
@@ -38,6 +39,24 @@ def format_uptime(started_at: datetime, now: datetime | None = None) -> str:
     if hours:
         return f"{hours}:{minutes:02d}:{seconds:02d}"
     return f"{minutes:02d}:{seconds:02d}"
+
+
+def format_cpu_time(seconds: float) -> str:
+    """CPU time a process has actually been worked on, like top's TIME+:
+    M:SS.hh (hundredths), switching to H:MM:SS once it reaches an hour."""
+    hundredths = max(0, int(seconds * 100))
+    total_seconds, hundredths = divmod(hundredths, 100)
+    minutes, secs = divmod(total_seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}.{hundredths:02d}"
+
+
+def format_core(proc) -> str:
+    """The core a process is pinned to, 1-based like the CPU screen shows
+    them, or '-' while it isn't scheduled on any."""
+    return "-" if proc.core is None else str(proc.core + 1)
 
 
 def format_cpu_percent(proc, process_table) -> float:

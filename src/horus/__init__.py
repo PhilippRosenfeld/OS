@@ -16,6 +16,7 @@ from horus.kernel.kernel import Kernel
 from horus.kernel.registry import registry
 from horus.paths import BOOT_DIR, BOOT_PROGRESS_PATH, DATA_DIR, HARDWARE_SPEC_PATH, SAVES_DIR, SOUNDS_DIR
 from horus.processes.processTable import ProcessTable
+from horus.processes.scheduler import CpuScheduler
 from horus.processes.seed_process import seed_processes
 from horus.processes.system_reactions import (
     register_power_reactions,
@@ -34,6 +35,7 @@ from horus.shell.input_handler import InputHandler
 from horus.story.progress import BootProgress
 from horus.ui.screen_manager import ScreenManager
 from horus.ui.screens.boot_screen import BootFrame, BootScreen
+from horus.ui.screens.cpu_screen import CpuScreen
 from horus.ui.screens.crash_screen import CrashScreen
 from horus.ui.screens.detail_screen import DetailScreen
 from horus.ui.screens.hardware_screen import HardwareScreen
@@ -55,7 +57,7 @@ logger = logging.getLogger(__name__)
 
 _FIXED_CHAR_SIZE_SCREENS = (
     BootScreen, LogoScreen, MainMenuScreen, MenuScreen, SettingScreen,  # boot, logo, main menu, menus
-    HardwareScreen, DetailScreen,                                       # sys (and its detail screens)
+    HardwareScreen, DetailScreen, CpuScreen,                            # sys (and its detail screens)
     CrashScreen,
 )
 
@@ -120,6 +122,8 @@ def main() -> None:
                                   total_cpu_mhz=hardware.total_cpu_mhz())
     seed_processes(process_table)
     process_table.start_fluctuating()
+    cpu_scheduler = CpuScheduler(process_table, hardware)  # pins processes to cores, tracks CPU time
+    cpu_scheduler.start()
     
     hardware.start_power_monitoring(process_table, bus)
     
@@ -148,7 +152,8 @@ def main() -> None:
         kernel=kernel,
         process_table=process_table,
         hardware=hardware,
-        system_log=system_log
+        system_log=system_log,
+        cpu_scheduler=cpu_scheduler,
     )
 
     def on_submit(line: str) -> None:

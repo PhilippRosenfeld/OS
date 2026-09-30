@@ -160,12 +160,19 @@ class Renderer:
 
         self._composite_sprites()
 
+    def _sprite_scale(self) -> int:
+        """Whole-number factor sprites are enlarged by, following the glyph
+        size relative to the base 8x16 cell -- so a sprite covers the same
+        number of grid cells at any font size (layouts can reserve space for
+        it in cells), while staying pixel-crisp instead of being resampled."""
+        return max(1, min(self.font_atlas.char_width // 8, self.font_atlas.char_height // 16))
+
     def _composite_sprites(self) -> None:
         """Alpha-blends every sprite placed via screen_buffer.place_sprite()
         on top of the glyph grid just built. Unlike a glyph block, a sprite
         keeps its own authored colors -- only its alpha channel drives the
-        blend, so it isn't tinted by any cell's fg/bg. Drawn at native pixel
-        size (see SpriteAtlas), clipped to whatever of its footprint still
+        blend, so it isn't tinted by any cell's fg/bg. Drawn at its native
+        pixel size times _sprite_scale() (see SpriteAtlas), clipped to whatever of its footprint still
         fits inside the pixel buffer; a sprite anchored (partially) outside
         the grid, or not resolvable by the atlas, is simply skipped rather
         than raising."""
@@ -173,11 +180,12 @@ class Renderer:
             return
         char_width = self.font_atlas.char_width
         char_height = self.font_atlas.char_height
+        scale = self._sprite_scale()
         buffer_height, buffer_width = self._pixel_buffer.shape[:2]
         for (col, row), name in self.screen_buffer.sprites.items():
             if col < 0 or row < 0 or not self.sprite_atlas.exists(name):
                 continue
-            sprite = self.sprite_atlas.get(name)
+            sprite = self.sprite_atlas.get(name, scale)
             x0, y0 = col * char_width, row * char_height
             if x0 >= buffer_width or y0 >= buffer_height:
                 continue

@@ -13,7 +13,7 @@ from horus.events.types import (
     TemperatureWarningEvent,
 )
 from horus.hardware.cooling_system import CoolantType, CoolingSystem
-from horus.hardware.cpu import Cpu
+from horus.hardware.cpu import Cpu, CpuCore
 from horus.hardware.metric_history import MetricHistory
 from horus.hardware.motherboard import CpuSocket, Motherboard, RamSlots, StorageSlots
 from horus.hardware.network_interface import NetworkInterface
@@ -150,6 +150,12 @@ class HardwareSpec:
     def installed_cpus(self) -> list[Cpu]:
         return [cpu for socket in self.motherboard.cpu_sockets for cpu in socket.supported_cpus]
 
+    def installed_cores(self) -> list[tuple[Cpu, CpuCore]]:
+        """Every core across every installed CPU, in a stable order -- a
+        core's position in this list is its system-wide core number (what
+        process.core refers to, see processes.scheduler)."""
+        return [(cpu, core) for cpu in self.installed_cpus() for core in cpu.core_list]
+
     def installed_ram(self) -> list[Ram]:
         return [ram for slot in self.motherboard.ram_slots for ram in slot.supported_ram_types]
 
@@ -203,8 +209,9 @@ class HardwareSpec:
         return sum(ram.size for ram in self.installed_ram())
 
     def total_cpu_mhz(self) -> int:
-        """Total simulated CPU capacity in MHz across every installed CPU."""
-        return sum(cpu.mhz * cpu.cores for cpu in self.installed_cpus())
+        """Total simulated CPU capacity in MHz across every installed CPU --
+        only enabled cores count, each at its overclocked clock."""
+        return round(sum(cpu.effective_mhz * len(cpu.enabled_cores()) for cpu in self.installed_cpus()))
 
     def calculate_total_power_usage(self) -> float:
         """Current combined draw across every component. CPU/RAM scale with
@@ -241,8 +248,12 @@ class HardwareSpec:
         table = self._process_table
         cpu_load = table.used_cpu_mhz() / table.total_cpu_mhz if table.total_cpu_mhz else 0.0
         mem_load = table.used_mem_kb() / table.total_memory_kb if table.total_memory_kb else 0.0
-        for cpu in self.installed_cpus():
-            cpu.load = cpu_load
+        # With a CpuScheduler pinning processes to cores, it keeps each core's
+        # own load current (and more precisely than one CPU-wide average
+        # could) -- only fall back to spreading the load evenly without one.
+        if not any(proc.core is not None for proc in table.list_processes()):
+            for cpu in self.installed_cpus():
+                cpu.load = cpu_load
         for ram in self.installed_ram():
             ram.load = mem_load
         for drive in self.installed_storage():

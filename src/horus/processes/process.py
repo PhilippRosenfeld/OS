@@ -25,6 +25,11 @@ class process:
                                             # cpu_mhz (see __post_init__) so existing
                                             # callers don't need to pass it explicitly
     baseline_mem_kb: float | None = None   # same, for mem_kb
+    core: int | None = None  # system-wide core number this process is pinned to (see
+                              # HardwareSpec.installed_cores) -- always exactly one core,
+                              # chosen by CpuScheduler; None = not scheduled (yet)
+    cpu_time: float = 0.0    # seconds of CPU actually spent on this process so far --
+                              # a process using half its core's clock for 10s has 5s
 
     def __post_init__(self) -> None:
         if self.baseline_cpu_mhz is None:

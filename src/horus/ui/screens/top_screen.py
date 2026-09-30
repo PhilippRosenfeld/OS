@@ -1,7 +1,15 @@
 import pyglet
 
 from horus.display.screen_buffer import ScreenBuffer
-from horus.processes.process_view import DEFAULT_SORT, format_cpu_percent, format_system_summary, format_uptime, sort_processes
+from horus.processes.process_view import (
+    DEFAULT_SORT,
+    format_core,
+    format_cpu_percent,
+    format_cpu_time,
+    format_system_summary,
+    format_uptime,
+    sort_processes,
+)
 from horus.processes.processTable import ProcessTable
 from horus.ui.screen import Screen
 from horus.ui.screen_manager import ScreenManager
@@ -48,8 +56,8 @@ class TopScreen(Screen):
     def _render(self) -> None:
         self._buffer.clear()
         self._buffer.write_string(0, 0, format_system_summary(self._process_table, self._hardware))
-        self._buffer.write_string(0, 1, f"{'PID':<8}{'USER':<12}{'CPU%':<10}{'MEM(KB)':<12}{'UPTIME':<10}{'CRIT':<9}{'NAME'}")
-        self._buffer.write_string(0, 2, "-" * 70)
+        self._buffer.write_string(0, 1, f"{'PID':<8}{'USER':<12}{'CPU%':<10}{'CORE':<6}{'TIME':<11}{'MEM(KB)':<12}{'UPTIME':<10}{'CRIT':<9}{'NAME'}")
+        self._buffer.write_string(0, 2, "-" * 87)
 
         processes = sort_processes(self._process_table.list_processes(), self._sort_by)
         last_row = self._buffer.rows - 1
@@ -59,7 +67,9 @@ class TopScreen(Screen):
                 break
             uptime = format_uptime(proc.started_at)
             cpu_percent = format_cpu_percent(proc, self._process_table)
-            self._buffer.write_string(0, row, f"{proc.pid:<8}{proc.owner:<12}{cpu_percent:<10.1f}{proc.mem_kb:<12}{uptime:<11}{ 'Y' if proc.critical else 'N':<8}{proc.name}")
+            cpu_time = format_cpu_time(proc.cpu_time)
+            self._buffer.write_string(0, row, f"{proc.pid:<8}{proc.owner:<12}{cpu_percent:<10.1f}{format_core(proc):<6}{cpu_time:<11}"
+                                              f"{proc.mem_kb:<12}{uptime:<11}{ 'Y' if proc.critical else 'N':<8}{proc.name}")
 
         self._buffer.write_string(0, last_row, "Ctrl+C to exit")
 

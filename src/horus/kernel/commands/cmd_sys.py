@@ -1,9 +1,12 @@
 from horus.filesystem.disk_usage import drive_used_kb
+from horus.hardware.cpu import OVERCLOCK_MIN, OVERCLOCK_STEP
 from horus.hardware.spec import HardwareSpec
 from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
 from horus.kernel.registry import command
 from horus.processes.process_view import format_system_summary
+from horus.processes.scheduler import CpuScheduler
 from horus.story.progress import BOOT_DISKS, BootProgress
+from horus.ui.screens.cpu_screen import CoreView, CpuScreen
 from horus.ui.screens.detail_screen import DetailScreen, StatusBarInfo, UsageBar
 from horus.ui.screens.hardware_screen import HardwareScreen, HardwareTile
 from horus.ui.screens.settings_screen import SettingOption
@@ -39,17 +42,67 @@ def _cpu_detail_lines(hardware, table) -> list[str]:
     used_cpu = table.used_cpu_mhz()
     total_cpu = table.total_cpu_mhz
     cpu_percent = (used_cpu / total_cpu * 100) if total_cpu else 0.0
+    cores = hardware.installed_cores()
+    enabled = sum(core.enabled for _, core in cores)
     lines = [
         hardware.cpu_name,
         f"Manufacturer: {cpus[0].manufacturer}" if cpus else "Manufacturer: -",
-        f"Cores: {hardware.cpu_cores}",
-        f"Clock: {hardware.cpu_mhz} MHz",
+        f"Cores: {enabled}/{len(cores)} enabled",
+        f"Clock: {hardware.cpu_mhz} MHz" + (f" -> {cpus[0].effective_mhz:.0f} MHz (OC)" if cpus and cpus[0].overclock > 1.0 else ""),
         f"Power range: {cpus[0].power_usage_watts_min}-{cpus[0].power_usage_watts_max} W" if cpus else "Power range: -",
-        "",
-        f"Load: {used_cpu:.0f}/{total_cpu} MHz ({cpu_percent:.1f}%)",
+        f"Load: {used_cpu:.0f}/{total_cpu:.0f} MHz ({cpu_percent:.1f}%)",
         f"Current draw: {sum(cpu.calc_current_power_usage() for cpu in cpus):.0f} W",
     ]
     return lines
+
+
+def _cpu_core_views(hardware, table) -> list[CoreView]:
+    """One CoreView per installed core (system-wide numbering, 1-based
+    labels), naming the process a working core is busy with."""
+    views = []
+    for number, (_, core) in enumerate(hardware.installed_cores()):
+        proc = table.get_process(core.current_pid) if core.current_pid is not None else None
+        views.append(CoreView(f"Core {number + 1}", core.state,
+                              f"{proc.name} ({proc.pid})" if proc is not None else None,
+                              history=tuple(core.history)))
+    return views
+
+
+def _cpu_scheduler(ctx, hardware, table) -> CpuScheduler:
+    """The running scheduler if there is one, otherwise a local (unstarted)
+    one -- its set_core_enabled/set_overclock work the same either way."""
+    if ctx.cpu_scheduler is not None:
+        return ctx.cpu_scheduler
+    return CpuScheduler(table, hardware)
+
+
+def _cpu_options(hardware, scheduler) -> list[SettingOption]:
+    """CPU-wide knobs for the CPU screen's options box."""
+    def overclock() -> float:
+        cpus = hardware.installed_cpus()
+        return cpus[0].overclock if cpus else OVERCLOCK_MIN
+
+    return [
+        SettingOption("Overclock all cores",
+                      get_value=lambda: f"{overclock() * 100:.0f}%",
+                      on_left=lambda: scheduler.set_overclock(overclock() - OVERCLOCK_STEP),
+                      on_right=lambda: scheduler.set_overclock(overclock() + OVERCLOCK_STEP)),
+    ]
+
+
+def _push_cpu_screen(ctx, hardware, table) -> None:
+    scheduler = _cpu_scheduler(ctx, hardware, table)
+
+    def toggle_core(index: int) -> None:
+        cores = hardware.installed_cores()
+        if index < len(cores):
+            scheduler.set_core_enabled(index, not cores[index][1].enabled)
+
+    ctx.screens.push(CpuScreen(ctx.screen, ctx.screens, "CPU",
+                               info_fn=lambda: _cpu_detail_lines(hardware, table),
+                               cores_fn=lambda: _cpu_core_views(hardware, table),
+                               on_toggle_core=toggle_core,
+                               options=_cpu_options(hardware, scheduler)))
 
 
 def _ram_detail_lines(hardware, table) -> list[str]:
@@ -331,7 +384,7 @@ def _build_hardware_screen(ctx) -> tuple[HardwareScreen, dict[str, HardwareTile]
     boot_progress = ctx.boot_progress if ctx.boot_progress is not None else BootProgress()
 
     overview = HardwareTile("Overview")
-    cpu = HardwareTile("CPU", on_select=lambda: _push_detail_screen(ctx, "CPU", lambda: _cpu_detail_lines(hardware, table)))
+    cpu = HardwareTile("CPU", on_select=lambda: _push_cpu_screen(ctx, hardware, table))
     ram = HardwareTile("RAM", on_select=lambda: _push_detail_screen(ctx, "RAM", lambda: _ram_detail_lines(hardware, table)))
     storage = HardwareTile("Storage", on_select=lambda: _push_detail_screen(
         ctx, "Storage", lambda: _storage_detail_lines(hardware),
@@ -363,7 +416,7 @@ def _build_hardware_screen(ctx) -> tuple[HardwareScreen, dict[str, HardwareTile]
         cpu_percent = (used_cpu / total_cpu * 100) if total_cpu else 0.0
         cpu.lines = [
             hardware.cpu_name,
-            f"{hardware.cpu_cores} core(s) @ {hardware.cpu_mhz} MHz",
+            f"{sum(core.enabled for _, core in hardware.installed_cores())}/{hardware.cpu_cores} core(s) @ {hardware.cpu_mhz} MHz",
             f"Load: {used_cpu:.0f}/{total_cpu} MHz ({cpu_percent:.1f}%)",
         ]
 

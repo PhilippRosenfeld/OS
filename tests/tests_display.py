@@ -475,10 +475,12 @@ def test_snapshot_restore_round_trips_sprites():
 
 # --- FontAtlas / FontRegistry ---
 
-def test_font_atlas_rasterizes_printable_ascii():
+def test_font_atlas_rasterizes_printable_ascii_plus_the_extra_glyphs():
+    from horus.display.font_atlas import EXTRA_GLYPHS
     atlas = make_atlas()
-    assert set(atlas.glyphs.keys()) == {chr(c) for c in range(32, 127)}
+    assert set(atlas.glyphs.keys()) == {chr(c) for c in range(32, 127)} | set(EXTRA_GLYPHS)
     assert atlas.get_glyph("A").shape == (16, 8)
+    assert atlas.get_glyph("■").any()   # the lamp glyph actually has ink, not a blank cell
 
 
 def test_font_atlas_resolves_bare_filename_against_fonts_dir():
@@ -1052,3 +1054,17 @@ def test_switching_between_fixed_screens_keeps_the_original_snapshot():
         assert "".join(window.buffer.get_cell(c, 0).char for c in range(5)) == "shell"
     finally:
         window._window.close()
+
+
+def test_renderer_enlarges_sprites_along_with_the_glyph_size(tmp_path):
+    """At twice the base 8x16 glyph size a sprite is drawn twice as big, so
+    it keeps covering the same grid cells regardless of the font size."""
+    make_sprite_png(tmp_path, "disk", width=2, height=2, rgba=(255, 0, 0, 255))
+    sprite_atlas = SpriteAtlas(tmp_path)
+    renderer, buffer, atlas = make_renderer(cols=10, rows=5, char_width=16, char_height=32, sprite_atlas=sprite_atlas)
+    buffer.cursor_enabled = False
+    buffer.place_sprite(0, 0, "disk")
+    renderer.render(400, 200)
+
+    assert tuple(renderer._pixel_buffer[3, 3]) == (255, 0, 0)          # inside the 4x4 (2x scaled) sprite
+    assert tuple(renderer._pixel_buffer[0, 5]) == buffer.default_bg     # just past it
