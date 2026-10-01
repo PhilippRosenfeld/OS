@@ -15,10 +15,12 @@ from horus.kernel.commands.cmd_menu import horus_menu, open_settings_menu
 from horus.kernel.kernel import Kernel
 from horus.kernel.registry import registry
 from horus.paths import BOOT_DIR, BOOT_PROGRESS_PATH, DATA_DIR, HARDWARE_SPEC_PATH, SAVES_DIR, SOUNDS_DIR
+from horus.processes.memory import MemoryManager
 from horus.processes.processTable import ProcessTable
 from horus.processes.scheduler import CpuScheduler
 from horus.processes.seed_process import seed_processes
 from horus.processes.system_reactions import (
+    register_memory_reactions,
     register_power_reactions,
     register_status_bar,
     register_storage_reactions,
@@ -42,6 +44,7 @@ from horus.ui.screens.hardware_screen import HardwareScreen
 from horus.ui.screens.logo_screen import LogoScreen
 from horus.ui.screens.main_menu_screen import MainMenuScreen
 from horus.ui.screens.menu_screen import MenuOption, MenuScreen
+from horus.ui.screens.ram_screen import RamScreen
 from horus.ui.screens.settings_screen import SettingScreen
 from horus.ui.screens.shell_screen import ShellScreen
 from horus.utils.config_manager import load_config
@@ -57,7 +60,7 @@ logger = logging.getLogger(__name__)
 
 _FIXED_CHAR_SIZE_SCREENS = (
     BootScreen, LogoScreen, MainMenuScreen, MenuScreen, SettingScreen,  # boot, logo, main menu, menus
-    HardwareScreen, DetailScreen, CpuScreen,                            # sys (and its detail screens)
+    HardwareScreen, DetailScreen, CpuScreen, RamScreen,                 # sys (and its detail screens)
     CrashScreen,
 )
 
@@ -124,12 +127,15 @@ def main() -> None:
     process_table.start_fluctuating()
     cpu_scheduler = CpuScheduler(process_table, hardware)  # pins processes to cores, tracks CPU time
     cpu_scheduler.start()
+    memory_manager = MemoryManager(process_table, hardware, events=bus, fs=fs)  # RAM pages, swap, OOM, memory errors
+    memory_manager.start()
     
     hardware.start_power_monitoring(process_table, bus)
     
     #--- SYSTEM REACTIONS -----
     register_system_reactions(bus, screens, window, sounds, window.buffer)
     register_power_reactions(bus, sounds)
+    register_memory_reactions(bus, sounds)
     register_storage_reactions(bus, sounds)
     register_temperature_reactions(bus, screens, window, sounds, window.buffer)
     system_log = SystemLog()
@@ -154,6 +160,7 @@ def main() -> None:
         hardware=hardware,
         system_log=system_log,
         cpu_scheduler=cpu_scheduler,
+        memory_manager=memory_manager,
     )
 
     def on_submit(line: str) -> None:

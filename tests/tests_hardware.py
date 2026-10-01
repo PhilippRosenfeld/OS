@@ -255,7 +255,7 @@ def test_cooling_system_active_and_max_cooling_temperature_persist_through_save_
 
 def test_defaults_when_nothing_loaded():
     spec = HardwareSpec()
-    assert spec.cpu_cores == 2
+    assert spec.cpu_cores == 8
     assert spec.memory_count == 2
 
 
@@ -323,7 +323,7 @@ def test_total_cpu_mhz_sums_every_installed_cpu():
 
 def test_total_cpu_mhz_with_default_spec():
     spec = HardwareSpec()  # cpu_mhz=550, cpu_cores=8
-    assert spec.total_cpu_mhz() == 550*2
+    assert spec.total_cpu_mhz() == 550 * 8
 
 
 # --- calculate_total_power_usage ---

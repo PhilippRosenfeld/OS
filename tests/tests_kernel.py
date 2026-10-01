@@ -33,6 +33,7 @@ from horus.ui.screens.crash_screen import CrashScreen
 from horus.ui.screens.detail_screen import DetailScreen
 from horus.ui.screens.hardware_screen import HardwareScreen
 from horus.ui.screens.menu_screen import MenuScreen
+from horus.ui.screens.ram_screen import RamScreen
 from horus.ui.screens.settings_screen import SettingScreen
 from horus.ui.screens.top_screen import TopScreen
 
@@ -1614,9 +1615,11 @@ def test_sys_enter_on_ram_opens_its_detail_screen():
     sys_command(ctx, [])
     _select(screens.active, col_moves=0, row_moves=1)
     screens.active.handle_enter()
+    assert isinstance(screens.active, RamScreen)
     full = "".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
     assert hardware.memory_kb in full
-    assert "Total:" in full
+    assert "Used:" in full
+    assert "Memory Map" in full
 
 
 def test_sys_enter_on_storage_opens_its_detail_screen():
@@ -1772,7 +1775,7 @@ def test_sys_detail_screen_escape_returns_to_the_hardware_screen():
     ctx, buffer, screens, table, hardware = make_sys_context()
     sys_command(ctx, [])
     hardware_screen = screens.active
-    _select(hardware_screen, col_moves=0, row_moves=1)  # RAM -- a plain DetailScreen
+    _select(hardware_screen, col_moves=0, row_moves=2)  # Storage -- a DetailScreen
     hardware_screen.handle_enter()
     assert isinstance(screens.active, DetailScreen)
     screens.active.handle_key(pyglet.window.key.ESCAPE, 0)
@@ -1936,7 +1939,7 @@ def test_sys_enter_on_other_tiles_does_not_open_a_history_graph():
     the plain single-box layout."""
     ctx, buffer, screens, table, hardware = make_sys_context()
     sys_command(ctx, [])
-    _select(screens.active, col_moves=0, row_moves=1)  # RAM tile
+    _select(screens.active, col_moves=0, row_moves=2)  # Storage tile
     screens.active.handle_enter()
     detail_screen = screens.active
 

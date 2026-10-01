@@ -59,6 +59,13 @@ def format_core(proc) -> str:
     return "-" if proc.core is None else str(proc.core + 1)
 
 
+def format_mem_percent(proc, process_table) -> float:
+    """A process's mem_kb as a percentage of the RAM the table has --
+    can exceed 100% in total once memory is swapped out."""
+    capacity = process_table.total_memory_kb
+    return (proc.mem_kb / capacity * 100) if capacity else 0.0
+
+
 def format_cpu_percent(proc, process_table) -> float:
     """A process's cpu_mhz expressed as a percentage of the table's total
     cpu_mhz capacity -- process.cpu_mhz itself stays an absolute value (see

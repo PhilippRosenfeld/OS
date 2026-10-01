@@ -5,6 +5,8 @@ from horus.display.status_bar import StatusBar
 from horus.events.bus import EventBus
 from horus.events.system_log import SystemLog
 from horus.events.types import (
+    MemoryCheckedEvent,
+    MemoryErrorEvent,
     PowerUsageCheckedEvent,
     ProcessKilledEvent,
     StorageActivityCheckedEvent,
@@ -142,10 +144,17 @@ def register_system_log(bus: EventBus, log: SystemLog) -> None:
     def _on_temperature_critical(event: TemperatureCriticalEvent) -> None:
         log.error(f"System temperature critical at {event.temperature:.1f}C")
 
+    def _on_memory_error(event: MemoryErrorEvent) -> None:
+        if event.kind == "corrected":
+            log.warning(event.detail)
+        else:
+            log.error(event.detail)
+
     bus.subscribe(PowerUsageCheckedEvent, _on_power_usage_checked)
     bus.subscribe(ProcessKilledEvent, _on_process_killed)
     bus.subscribe(TemperatureWarningEvent, _on_temperature_warning)
     bus.subscribe(TemperatureCriticalEvent, _on_temperature_critical)
+    bus.subscribe(MemoryErrorEvent, _on_memory_error)
 
 
 def register_status_bar(bus: EventBus, status_bar: StatusBar) -> None:
@@ -157,8 +166,9 @@ def register_status_bar(bus: EventBus, status_bar: StatusBar) -> None:
     process kill; there's no meaningful 'recovered' event for that (the
     system crashes shortly after -- see register_system_reactions), so it
     doesn't auto-clear. Once lit, a light actually blinks via
-    StatusBar.start_blinking(), not anything done here. MSC still has no
-    real trigger yet."""
+    StatusBar.start_blinking(), not anything done here. MSC lights while
+    memory is being swapped out (see MemoryManager) and turns off once
+    everything fits in RAM again."""
 
     def _on_power_usage_checked(event: PowerUsageCheckedEvent) -> None:
         status_bar.set_lit("PWR", event.over_budget)
@@ -170,6 +180,24 @@ def register_status_bar(bus: EventBus, status_bar: StatusBar) -> None:
     def _on_temperature_warning(event: TemperatureWarningEvent) -> None:
         status_bar.set_lit("TEMP", event.over_warning)
 
+    def _on_memory_checked(event: MemoryCheckedEvent) -> None:
+        status_bar.set_lit("MSC", event.swap_used_kb > 0)
+
     bus.subscribe(PowerUsageCheckedEvent, _on_power_usage_checked)
     bus.subscribe(ProcessKilledEvent, _on_process_killed)
     bus.subscribe(TemperatureWarningEvent, _on_temperature_warning)
+    bus.subscribe(MemoryCheckedEvent, _on_memory_checked)
+
+
+def register_memory_reactions(bus: EventBus, sounds) -> None:
+    """Audible memory trouble: a quiet notification for a corrected error,
+    the harsher system error sound when a process got killed (OOM, crash)
+    or a file corrupted. A memory error that kills a critical process
+    already crashes the system via register_system_reactions."""
+
+    def _on_memory_error(event: MemoryErrorEvent) -> None:
+        if sounds is None:
+            return
+        sounds.play("error_notification" if event.kind == "corrected" else "system_error_notification")
+
+    bus.subscribe(MemoryErrorEvent, _on_memory_error)

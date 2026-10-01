@@ -30,6 +30,16 @@ class process:
                               # chosen by CpuScheduler; None = not scheduled (yet)
     cpu_time: float = 0.0    # seconds of CPU actually spent on this process so far --
                               # a process using half its core's clock for 10s has 5s
+    swapped_kb: int = 0      # part of mem_kb paged out to swap instead of held in RAM
+                              # (see processes.memory.MemoryManager) -- slows the process down
+    memory_strings: list[str] = field(default_factory=list)  # text that shows up in this process's
+                                                              # memory dump ('memdump') -- e.g. story
+                                                              # clues only ever held in RAM
+
+    @property
+    def resident_share(self) -> float:
+        """Share of the process's memory actually in RAM, 0.0-1.0."""
+        return 1.0 - (self.swapped_kb / self.mem_kb) if self.mem_kb > 0 else 1.0
 
     def __post_init__(self) -> None:
         if self.baseline_cpu_mhz is None:

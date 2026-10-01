@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     # on Context, so only a type checker (never actual execution) sees them
     from horus.audio.sound_manager import SoundManager
     from horus.kernel.kernel import Kernel
+    from horus.processes.memory import MemoryManager
     from horus.processes.scheduler import CpuScheduler
     from horus.session.user import UserRegistry
     from horus.shell.input_handler import InputHandler
@@ -51,6 +52,7 @@ class Context:
     system_log: "SystemLog" = None
     boot_progress: "BootProgress" = None
     cpu_scheduler: "CpuScheduler" = None
+    memory_manager: "MemoryManager" = None
 
 
     def __post_init__(self):

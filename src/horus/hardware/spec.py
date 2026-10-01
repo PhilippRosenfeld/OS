@@ -48,7 +48,7 @@ def _default_motherboard() -> Motherboard:
         power_usage_watts=20,
         cpu_sockets=[
             CpuSocket(name="Socket A", supported_cpus=[
-                Cpu(name="Coele X551", cores=2, mhz=550,
+                Cpu(name="Coele X551", cores=8, mhz=550,
                     power_usage_watts_max=65, power_usage_watts_min=5,
                     manufacturer="Coele Systems"),
             ]),
@@ -126,6 +126,9 @@ class HardwareSpec:
                                                     # down (see _check_temperature), so
                                                     # nothing further should act on its heat
         self._assign_default_mount_points()
+        # runtime state a MemoryManager (see processes.memory) drives, if one is running
+        self.memory_managed = False  # True: it sets each RAM module's load itself
+        self.swap_activity = 0.0     # 0.0-1.0, how hard paging to/from swap works the system drive
 
     def _assign_default_mount_points(self) -> None:
         """Gives every drive without a mount_point one (e.g. hardware saved
@@ -205,8 +208,23 @@ class HardwareSpec:
     # --- capacity/usage ---
 
     def total_memory_kb(self) -> int:
-        """Total simulated RAM in KB across every installed stick."""
-        return sum(ram.size for ram in self.installed_ram())
+        """Total simulated RAM in KB across every enabled stick."""
+        return sum(ram.size for ram in self.installed_ram() if ram.enabled)
+
+    def memory_speed_factor(self) -> float:
+        """How fast work runs relative to stock memory settings -- the
+        slowest enabled module sets the pace (see Ram.speed_factor)."""
+        factors = [ram.speed_factor for ram in self.installed_ram() if ram.enabled]
+        return min(factors) if factors else 1.0
+
+    def memory_instability(self) -> float:
+        """How error-prone the memory settings are -- the shakiest enabled
+        module counts (see Ram.instability); 0 at stock."""
+        return max((ram.instability for ram in self.installed_ram() if ram.enabled), default=0.0)
+
+    def system_drive(self) -> Storage | None:
+        """The drive mounted at "/" -- where the swap space lives."""
+        return next((drive for drive in self.installed_storage() if drive.mount_point == "/"), None)
 
     def total_cpu_mhz(self) -> int:
         """Total simulated CPU capacity in MHz across every installed CPU --
@@ -254,11 +272,14 @@ class HardwareSpec:
         if not any(proc.core is not None for proc in table.list_processes()):
             for cpu in self.installed_cpus():
                 cpu.load = cpu_load
-        for ram in self.installed_ram():
-            ram.load = mem_load
+        if not self.memory_managed:  # a MemoryManager sets each module's own load instead
+            for ram in self.installed_ram():
+                ram.load = mem_load
+        system_drive = self.system_drive()
         for drive in self.installed_storage():
-            drive.read_load = max(0.0, min(1.0, random.gauss(cpu_load * _STORAGE_READ_FACTOR, _STORAGE_READ_JITTER)))
-            drive.write_load = max(0.0, min(1.0, random.gauss(cpu_load * _STORAGE_WRITE_FACTOR, _STORAGE_WRITE_JITTER)))
+            swap = self.swap_activity if drive is system_drive else 0.0  # paging hits the swap's drive hard
+            drive.read_load = min(1.0, max(0.0, random.gauss(cpu_load * _STORAGE_READ_FACTOR, _STORAGE_READ_JITTER)) + swap)
+            drive.write_load = min(1.0, max(0.0, random.gauss(cpu_load * _STORAGE_WRITE_FACTOR, _STORAGE_WRITE_JITTER)) + swap)
 
     def _check_power_usage(self, dt: float) -> None:
         self._sync_component_load_from_process_table()

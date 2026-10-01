@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 import pyglet
 
+from horus.processes.memory import MIN_RESIDENT_SPEED
+
 if TYPE_CHECKING:
     from horus.hardware.spec import HardwareSpec
     from horus.processes.processTable import ProcessTable
@@ -22,7 +24,9 @@ class CpuScheduler:
        disabled) to the least loaded enabled core -- a process always runs
        on exactly one core, never spread across several;
     3. adds the CPU time each process used since the last tick (dt scaled
-       by the share of its core's clock it uses) to process.cpu_time;
+       by the share of its core's clock it uses, slowed down by however much
+       of it is swapped out and sped up by faster memory -- see
+       processes.memory) to process.cpu_time;
     4. decides per core whether it's working right now -- with probability
        equal to its load, so a lightly used core mostly idles in standby and
        a busy one is almost always working -- and if so, on which of its
@@ -74,10 +78,13 @@ class CpuScheduler:
         self._table.set_cpu_capacity(round(sum(capacities.values())), capacities)
 
         processes = self._table.list_processes()
+        memory_speed = self._hardware.memory_speed_factor()
         for proc in processes:
             capacity = capacities.get(proc.core)
             if capacity:
-                proc.cpu_time += dt * min(1.0, proc.cpu_mhz / capacity)
+                # swapped-out memory stalls a process (it waits on the disk), faster RAM speeds it up
+                speed = max(MIN_RESIDENT_SPEED, proc.resident_share) * memory_speed
+                proc.cpu_time += dt * min(1.0, proc.cpu_mhz / capacity) * speed
 
         for number, (cpu, core) in enumerate(cores):
             pinned = [proc for proc in processes if proc.core == number]

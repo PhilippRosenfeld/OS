@@ -1,14 +1,17 @@
 from horus.filesystem.disk_usage import drive_used_kb
 from horus.hardware.cpu import OVERCLOCK_MIN, OVERCLOCK_STEP
+from horus.hardware.ram import DEFAULT_RAM_TIMINGS, RAM_OVERCLOCK_STEP, RAM_TIMINGS
 from horus.hardware.spec import HardwareSpec
 from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
 from horus.kernel.registry import command
+from horus.processes.memory import MemoryManager
 from horus.processes.process_view import format_system_summary
 from horus.processes.scheduler import CpuScheduler
 from horus.story.progress import BOOT_DISKS, BootProgress
 from horus.ui.screens.cpu_screen import CoreView, CpuScreen
 from horus.ui.screens.detail_screen import DetailScreen, StatusBarInfo, UsageBar
 from horus.ui.screens.hardware_screen import HardwareScreen, HardwareTile
+from horus.ui.screens.ram_screen import ModuleView, RamScreen
 from horus.ui.screens.settings_screen import SettingOption
 
 # One (mutually exclusive) flag per hardware tile, so e.g. 'sys -c' jumps
@@ -105,21 +108,102 @@ def _push_cpu_screen(ctx, hardware, table) -> None:
                                options=_cpu_options(hardware, scheduler)))
 
 
-def _ram_detail_lines(hardware, table) -> list[str]:
+def _ram_detail_lines(hardware, table, memory=None) -> list[str]:
+    """RAM info -- with a MemoryManager running, what's actually resident
+    in RAM, what's swapped out and how stable the settings are."""
     ram_sticks = hardware.installed_ram()
-    used_mem = table.used_mem_kb()
-    total_mem = table.total_memory_kb
+    enabled = sum(ram.enabled for ram in ram_sticks)
+    if memory is not None:
+        used_mem, total_mem = memory.used_kb, memory.total_kb
+    else:
+        used_mem, total_mem = table.used_mem_kb(), table.total_memory_kb
     mem_percent = (used_mem / total_mem * 100) if total_mem else 0.0
     lines = [
-        f"{hardware.memory_count} x {hardware.memory_kb}",
+        f"Modules: {enabled}/{hardware.memory_count} x {hardware.memory_kb}",
         f"Manufacturer: {ram_sticks[0].manufacturer}" if ram_sticks else "Manufacturer: -",
-        f"Power range per stick: {ram_sticks[0].power_usage_watts_min}-{ram_sticks[0].power_usage_watts_max} W" if ram_sticks else "Power range: -",
-        "",
-        f"Total: {total_mem} KB",
-        f"Used: {used_mem} KB ({mem_percent:.1f}%)",
-        f"Current draw: {sum(ram.calc_current_power_usage() for ram in ram_sticks):.0f} W",
+        f"Used: {used_mem}/{total_mem} KB",
     ]
+    if memory is not None:
+        lines += [
+            f"Swap: {memory.swap_used_kb}/{memory.swap_kb} KB",
+            f"Speed: {hardware.memory_speed_factor() * 100:.0f}%",
+            f"Errors: {memory.error_count}",
+            f"OOM kills: {memory.oom_kills}",
+        ]
+    else:
+        lines.append(f"Load: {mem_percent:.1f}%")
+    lines.append(f"Current draw: {sum(ram.calc_current_power_usage() for ram in ram_sticks):.0f} W")
     return lines
+
+
+def _memory_manager(ctx, hardware, table):
+    """The running MemoryManager if there is one, otherwise a local
+    (unstarted) one -- enough to lay out and display the memory."""
+    if ctx.memory_manager is not None:
+        return ctx.memory_manager
+    memory = MemoryManager(table, hardware, events=ctx.events, fs=ctx.fs)
+    memory.tick(0.0)
+    return memory
+
+
+def _ram_module_views(hardware, memory) -> list[ModuleView]:
+    """One ModuleView per installed module, labelled by its slot."""
+    views = []
+    for slot in hardware.motherboard.ram_slots:
+        for ram in slot.supported_ram_types:
+            views.append(ModuleView(slot.name, ram.size, ram.enabled, ram.load * 100))
+    return views
+
+
+def _ram_options(hardware, memory) -> list[SettingOption]:
+    """Memory-wide knobs: clock and timings, applied to every module."""
+    timings = list(RAM_TIMINGS)
+
+    def modules():
+        return hardware.installed_ram()
+
+    def clock() -> float:
+        return modules()[0].overclock if modules() else 1.0
+
+    def set_clock(value: float) -> None:
+        for ram in modules():
+            ram.set_overclock(value)
+
+    def current_timings() -> str:
+        return modules()[0].timings if modules() else DEFAULT_RAM_TIMINGS
+
+    def step_timings(delta: int) -> None:
+        new = timings[(timings.index(current_timings()) + delta) % len(timings)]
+        for ram in modules():
+            ram.timings = new
+
+    return [
+        SettingOption("Clock", get_value=lambda: f"{clock() * 100:.0f}%",
+                      on_left=lambda: set_clock(clock() - RAM_OVERCLOCK_STEP),
+                      on_right=lambda: set_clock(clock() + RAM_OVERCLOCK_STEP)),
+        SettingOption("Timings", get_value=current_timings,
+                      on_left=lambda: step_timings(-1), on_right=lambda: step_timings(1)),
+    ]
+
+
+def _push_ram_screen(ctx, hardware, table) -> None:
+    memory = _memory_manager(ctx, hardware, table)
+
+    def toggle_module(index: int) -> None:
+        modules = hardware.installed_ram()
+        if index < len(modules):
+            memory.module_set_enabled(index, not modules[index].enabled)
+
+    ctx.screens.push(RamScreen(ctx.screen, ctx.screens, "RAM",
+                               info_fn=lambda: _ram_detail_lines(hardware, table, memory),
+                               history_fn=memory.history.values,
+                               map_fn=memory.page_map,
+                               names_fn=lambda: {proc.pid: proc.name for proc in table.list_processes()},
+                               modules_fn=lambda: _ram_module_views(hardware, memory),
+                               on_toggle_module=toggle_module,
+                               options=_ram_options(hardware, memory),
+                               swapped_fn=lambda: [(proc.name, proc.swapped_kb) for proc in table.list_processes()
+                                                   if proc.swapped_kb]))
 
 
 def _storage_detail_lines(hardware) -> list[str]:
@@ -385,7 +469,7 @@ def _build_hardware_screen(ctx) -> tuple[HardwareScreen, dict[str, HardwareTile]
 
     overview = HardwareTile("Overview")
     cpu = HardwareTile("CPU", on_select=lambda: _push_cpu_screen(ctx, hardware, table))
-    ram = HardwareTile("RAM", on_select=lambda: _push_detail_screen(ctx, "RAM", lambda: _ram_detail_lines(hardware, table)))
+    ram = HardwareTile("RAM", on_select=lambda: _push_ram_screen(ctx, hardware, table))
     storage = HardwareTile("Storage", on_select=lambda: _push_detail_screen(
         ctx, "Storage", lambda: _storage_detail_lines(hardware),
         usage_fn=lambda: _storage_usage(hardware, ctx.fs), usage_title="Drives",
@@ -420,14 +504,17 @@ def _build_hardware_screen(ctx) -> tuple[HardwareScreen, dict[str, HardwareTile]
             f"Load: {used_cpu:.0f}/{total_cpu} MHz ({cpu_percent:.1f}%)",
         ]
 
-        used_mem = table.used_mem_kb()
-        total_mem = table.total_memory_kb
+        memory = ctx.memory_manager
+        used_mem = memory.used_kb if memory is not None else table.used_mem_kb()
+        total_mem = memory.total_kb if memory is not None else table.total_memory_kb
         mem_percent = (used_mem / total_mem * 100) if total_mem else 0.0
         ram.lines = [
             f"{hardware.memory_count} x {hardware.memory_kb}",
             f"Total: {total_mem} KB",
             f"Used: {used_mem} KB ({mem_percent:.1f}%)",
         ]
+        if memory is not None and memory.swap_used_kb:
+            ram.lines.append(f"Swap: {memory.swap_used_kb} KB")
 
         drives = hardware.installed_storage()
         storage.lines = [f"{drive.name}: {drive.size} KB" for drive in drives] or ["No drives detected."]

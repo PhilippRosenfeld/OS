@@ -64,6 +64,27 @@ class StorageActivityCheckedEvent(Event):
     activity: float
 
 @dataclass(frozen=True)
+class MemoryErrorEvent(Event):
+    """Published by MemoryManager (see processes.memory) when memory fails:
+    kind is "corrected" (a bit flip caught in time -- harmless), "crash"
+    (a flip took a process down), "corruption" (a flip ended up in a file
+    on disk) or "oom" (out of RAM and swap -- a process was killed to free
+    some). `detail` is a human-readable description for the log."""
+    kind: str
+    detail: str
+
+
+@dataclass(frozen=True)
+class MemoryCheckedEvent(Event):
+    """Published every MemoryManager tick with the current memory state, so
+    subscribers (status bar, ...) always see live values."""
+    used_kb: int
+    total_kb: int
+    swap_used_kb: int
+    swap_total_kb: int
+
+
+@dataclass(frozen=True)
 class TemperatureCriticalEvent(Event):
     """Published once when the system's temperature crosses the critical
     threshold, triggering a full thermal shutdown (see HardwareSpec.

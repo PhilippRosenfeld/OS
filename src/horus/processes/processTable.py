@@ -35,6 +35,8 @@ class ProcessTable:
         self.throttle_factor = 1.0  # 1.0 = no throttling, 0.5 = half speed, 2.0 = double speed, etc.
         self.core_capacity_mhz: dict[int, float] = {}  # core number -> its clock; empty = no per-core
                                                         # limits (see set_cpu_capacity/CpuScheduler)
+        self.enforce_memory_cap = True  # False once a MemoryManager handles running out of RAM itself
+                                         # (swap, OOM killer) instead of silently shrinking every process
 
     def set_cpu_capacity(self, total_cpu_mhz: float, core_capacity_mhz: dict[int, float] | None = None) -> None:
         """Updates how much CPU there is -- e.g. after a core got disabled or
@@ -127,7 +129,7 @@ class ProcessTable:
                 proc.cpu_mhz *= scale
 
         total_mem = self.used_mem_kb()
-        if total_mem > self.total_memory_kb and total_mem > 0:
+        if self.enforce_memory_cap and total_mem > self.total_memory_kb and total_mem > 0:
             scale = self.total_memory_kb / total_mem
             for proc in self.processes.values():
                 proc.mem_kb = max(1, round(proc.mem_kb * scale))
