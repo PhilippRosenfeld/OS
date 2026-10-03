@@ -1311,6 +1311,19 @@ def test_ps_also_shows_the_combined_system_usage_summary():
     assert "System:" in full_text(buffer)
 
 
+def test_ps_shows_whether_a_process_is_critical():
+    ctx, buffer = make_context(cols=120, rows=10)
+    ctx.process_table = ProcessTable()
+    ctx.process_table.add_process(Process(name="init", pid=0, owner="root", critical=True))
+    ctx.process_table.add_process(Process(name="bash", pid=0, owner="root"))
+    ps(ctx, [])
+    rows = [row_text(buffer, r) for r in range(buffer.rows)]
+    header = next(row for row in rows if "CRIT" in row)
+    crit_col = header.index("CRIT")
+    assert next(row for row in rows if row.rstrip().endswith("init"))[crit_col] == "Y"
+    assert next(row for row in rows if row.rstrip().endswith("bash"))[crit_col] == "N"
+
+
 def test_top_pushes_a_top_screen_with_the_requested_sort():
     ctx, buffer, screens, table = make_proc_context()
     top(ctx, ["--sort", "mem"])

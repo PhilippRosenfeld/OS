@@ -23,14 +23,15 @@ def _render_top(ctx, sort_by: str | None = None) -> None:
     if sort_by is not None:
         processes = sort_processes(processes, sort_by)
     ctx.write_line(format_system_summary(ctx.process_table, ctx.hardware))
-    ctx.write_line(f"{'PID':<8}{'USER':<12}{'CPU%':<10}{'CORE':<6}{'TIME':<11}{'MEM(KB)':<12}{'MEM%':<7}{'UPTIME':<10}{'NAME'}")
-    ctx.write_line("-" * 94)
+    ctx.write_line(f"{'PID':<8}{'USER':<12}{'CPU%':<10}{'CORE':<6}{'TIME':<11}{'MEM(KB)':<12}{'MEM%':<7}{'UPTIME':<10}{'CRIT':<6}{'NAME'}")
+    ctx.write_line("-" * 100)
     for proc in processes:
         uptime = format_uptime(proc.started_at)
         cpu_percent = format_cpu_percent(proc, ctx.process_table)
         cpu_time = format_cpu_time(proc.cpu_time)
+        crit = "Y" if proc.critical else "N"
         ctx.write_line(f"{proc.pid:<8}{proc.owner:<12}{cpu_percent:<10.1f}{format_core(proc):<6}{cpu_time:<11}"
-                       f"{proc.mem_kb:<12}{format_mem_percent(proc, ctx.process_table):<7.1f}{uptime:<10}{proc.name}")
+                       f"{proc.mem_kb:<12}{format_mem_percent(proc, ctx.process_table):<7.1f}{uptime:<10}{crit:<6}{proc.name}")
 
 def _build_top_parser() -> CommandArgumentParser:
     parser = CommandArgumentParser(prog="top", add_help=True, description="Display system processes")
