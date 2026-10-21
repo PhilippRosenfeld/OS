@@ -119,6 +119,15 @@ class DisplayWindow:
         self._window.set_size(width, height)
         self._on_resize(width, height)
 
+    def show_buffer(self, buffer: ScreenBuffer | None) -> None:
+        """Renders `buffer` instead of the main one -- e.g. a WindowManager's
+        composite of the shell and its windows -- or, with None, the main
+        buffer again. It must have the main buffer's cols/rows."""
+        target = buffer if buffer is not None else self.buffer
+        if self._renderer.screen_buffer is not target:
+            self._renderer.screen_buffer = target
+            target.dirty = True
+
     def close(self) -> None:
         """Closes the OS window. pyglet.app.run() returns once no windows remain open."""
         self._window.close()

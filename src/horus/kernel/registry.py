@@ -64,14 +64,21 @@ class Registry:
 registry = Registry()
 
 
-def command(name: str, help_text: str = "", category: str | None = None) -> Callable[[CommandHandler], CommandHandler]:
+def command(name: str, help_text: str = "", category: str | None = None,
+            target: Registry | None = None) -> Callable[[CommandHandler], CommandHandler]:
     """Decorator: registers the decorated function under `name` in the
-    module-level registry.
+    module-level registry -- or in `target`, e.g. an app's own command set
+    (see apps.shell_window.ShellWindow):
 
         @command("echo", help_text="print the given text")
         def echo(ctx, argv): ...
+
+        netman_commands = Registry()
+
+        @command("connect", help_text="connect to a host", target=netman_commands)
+        def connect(ctx, argv): ...
     """
     def decorator(func: CommandHandler) -> CommandHandler:
-        registry.register(name, func, help_text, category=category)
+        (target if target is not None else registry).register(name, func, help_text, category=category)
         return func
     return decorator

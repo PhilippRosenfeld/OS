@@ -3,6 +3,7 @@ from pathlib import Path
 
 import horus.kernel.commands
 from horus.__about__ import VERSION
+from horus.apps.window_manager import WindowManager
 from horus.audio.sound_manager import SoundManager
 from horus.display.window import DisplayWindow
 from horus.events.bus import EventBus
@@ -97,7 +98,10 @@ def main() -> None:
         # The status bar (see DisplayWindow.status_bar) is only meaningful
         # while the interactive shell is what's on screen -- boot/menus/
         # settings/etc. all hide it again.
-        window.status_bar.set_visible(isinstance(screen, ShellScreen))
+        window.status_bar.set_visible(isinstance(screen, (ShellScreen, WindowManager)))
+        # A WindowManager composites the shell and its windows into a buffer
+        # of its own -- show that while it's on top, the main buffer otherwise.
+        window.show_buffer(screen.display if isinstance(screen, WindowManager) else None)
 
     def _on_before_screen_activate(screen) -> None:
         # Screens with a fixed layout always get the configured
