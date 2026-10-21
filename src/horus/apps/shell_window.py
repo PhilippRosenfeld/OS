@@ -40,6 +40,13 @@ class ShellWindow(Window):
         self.ctx: Context | None = None
         self.input: InputHandler | None = None
 
+    @property
+    def window_name(self) -> str:
+        """How this window shows up in the log (see Context.window_name):
+        its title, plus its process's PID if it runs as one -- so two open
+        windows of the same program can be told apart."""
+        return f"{self.title} (PID {self.pid})" if self.pid is not None else self.title
+
     # --- hooks for programs ---
 
     def prompt(self) -> str:
@@ -59,7 +66,8 @@ class ShellWindow(Window):
         self.shell_buffer = ScreenBuffer(width, height)
         self.shell_buffer.default_fg, self.shell_buffer.default_bg = self.surface.default_fg, self.surface.default_bg
         self.shell_buffer.clear()
-        self.ctx = dataclasses.replace(self.parent_ctx, screen=self.shell_buffer, screens=self.screens)
+        self.ctx = dataclasses.replace(self.parent_ctx, screen=self.shell_buffer, screens=self.screens,
+                                       window_name=self.window_name)
         for line in self._welcome:
             self.ctx.write_line(line)
         self.input = InputHandler(self.shell_buffer, self.history, on_submit=self._submit,

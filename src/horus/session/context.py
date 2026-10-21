@@ -44,6 +44,8 @@ class Context:
     users: "UserRegistry" = None
     kernel: "Kernel" = None
     window: DisplayWindow = None
+    window_name: str = "shell"  # which window the commands run in -- the main shell, or a program's
+                                # window (see apps.shell_window.ShellWindow), e.g. for the log
     effective_user: str = None    #user that executes command, defaults to user
     input_handler: "InputHandler" = None
     main_menu: "MainMenuScreen" = None

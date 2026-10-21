@@ -382,3 +382,29 @@ def test_command_decorator_registers_into_a_given_registry_only():
     from horus.kernel.registry import registry as global_registry
     assert own.lookup("only_here_xyz") is handler
     assert global_registry.lookup("only_here_xyz") is None
+
+
+# --- logging ---
+
+def test_the_log_names_the_window_a_command_was_entered_in(caplog):
+    window, host, *_ = open_shell(process_name="testapp")
+    with caplog.at_level("INFO", logger="horus.kernel.kernel"):
+        type_line(window, host, "greet")
+    assert f"WINDOW=Test App (PID {window.pid})" in caplog.text
+    assert "Executed Command 'greet'" in caplog.text
+
+
+def test_a_window_without_a_process_is_logged_by_its_title(caplog):
+    window, host, *_ = open_shell()
+    with caplog.at_level("INFO", logger="horus.kernel.kernel"):
+        type_line(window, host, "greet")
+    assert "WINDOW=Test App," in caplog.text
+
+
+def test_the_main_shell_is_logged_as_shell(caplog):
+    from horus.kernel.kernel import Kernel
+    commands = make_commands()
+    ctx, *_ = make_ctx()
+    with caplog.at_level("INFO", logger="horus.kernel.kernel"):
+        Kernel(registry=commands, bus=EventBus()).execute("greet", ctx)
+    assert "WINDOW=shell," in caplog.text

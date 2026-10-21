@@ -37,7 +37,7 @@ class Kernel:
         try:
             handler(ctx, argv)
         except Exception:
-            logger.exception(f"Command '{command_name}' raised an exception")
+            logger.exception(f"Command '{command_name}' in window '{ctx.window_name}' raised an exception")
             ctx.write_line(f"{command_name}: internal error")
             return
         
@@ -51,4 +51,4 @@ class Kernel:
         )
 
         fs_name = type(ctx.fs).__name__ if ctx.fs is not None else "None"
-        logger.info(f"CTX: ID={ctx.session_id}, USER={ctx.user}, CWD={ctx.cwd}, FS={fs_name} | Executed Command '{command_name}', args: {argv}")
+        logger.info(f"CTX: ID={ctx.session_id}, WINDOW={ctx.window_name}, USER={ctx.user}, CWD={ctx.cwd}, FS={fs_name} | Executed Command '{command_name}', args: {argv}")
