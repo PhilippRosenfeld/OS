@@ -52,6 +52,9 @@ class Context:
     process_table: "ProcessTable" = None
     hardware: "HardwareSpec" = None
     system_log: "SystemLog" = None
+    background_apps: dict = field(default_factory=dict)  # app_id -> running windowed program (see
+                                                          # apps.window.Window.keep_running), shared by
+                                                          # every copy of this context
     boot_progress: "BootProgress" = None
     cpu_scheduler: "CpuScheduler" = None
     memory_manager: "MemoryManager" = None

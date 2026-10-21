@@ -39,6 +39,7 @@ class ShellWindow(Window):
         self.shell_buffer: ScreenBuffer | None = None
         self.ctx: Context | None = None
         self.input: InputHandler | None = None
+        self._needs_prompt = False  # a command took the focus away before the next prompt was drawn
 
     @property
     def window_name(self) -> str:
@@ -83,8 +84,17 @@ class ShellWindow(Window):
 
     def on_resume(self) -> None:
         """A screen one of our commands opened was closed -- give the shell
-        its next prompt (handle_enter skipped it)."""
-        if self.is_open:
+        the prompt handle_enter left pending."""
+        self._give_pending_prompt()
+
+    def on_focus(self) -> None:
+        """Back in focus (e.g. a command of ours had opened another window)
+        -- same as on_resume."""
+        self._give_pending_prompt()
+
+    def _give_pending_prompt(self) -> None:
+        if self.is_open and self._needs_prompt:
+            self._needs_prompt = False
             self.input.start_line()
             self.render()
 
@@ -124,8 +134,12 @@ class ShellWindow(Window):
         builtins = {
             "help": (self._cmd_help, "List this program's commands"),
             "clear": (self._cmd_clear, "Clear the window"),
-            "exit": (self._cmd_exit, "Close the window"),
         }
+        if self.keep_running:
+            builtins["exit"] = (self._cmd_exit, "Close the window -- keeps running in the background")
+            builtins["quit"] = (self._cmd_quit, "Quit the program")
+        else:
+            builtins["exit"] = (self._cmd_exit, "Close the window")
         for name, (handler, help_text) in builtins.items():
             if combined.lookup(name) is None:
                 combined.register(name, handler, help_text)
@@ -144,6 +158,9 @@ class ShellWindow(Window):
     def _cmd_exit(self, ctx: Context, argv: list[str]) -> None:
         self.close()
 
+    def _cmd_quit(self, ctx: Context, argv: list[str]) -> None:
+        self.quit()
+
     def _submit(self, line: str) -> None:
         self.kernel.execute(line, self.ctx)
 
@@ -159,9 +176,12 @@ class ShellWindow(Window):
 
     def handle_enter(self) -> None:
         self.input._handle_enter()
-        # a command may have closed us, or opened a full screen on top
-        if self.is_open and self._host.is_active(self):
+        # a command may have closed or hidden us, opened a full screen on top,
+        # or moved the focus to another window -- then the prompt waits
+        if self.attached and self._host.is_active(self):
             self.input.start_line()
+        elif self.is_open:
+            self._needs_prompt = True
         if self.is_open:
             self.render()
 

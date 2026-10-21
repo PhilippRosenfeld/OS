@@ -1,21 +1,23 @@
 """Windows: programs that draw into a framed area of the screen instead of
 taking it over. A Window only ever draws into its own surface (a
 ScreenBuffer the size of the window, frame included) and never knows
-where on screen it sits -- a host places it there. Today that host is
-WindowScreen (one window over the previous screen, see window_screen.py);
-later a window manager can show several side by side, switch focus
-between them, and keep the unfocused ones updating, without the windows
-themselves changing.
+where on screen it sits -- a host places it there, and can show several
+side by side, switch the focus between them and keep the unfocused ones
+updating, without the windows themselves knowing.
 
 A host gives a window:
-    open(host, width, height)   once, before anything else
+    open(host, width, height)   before anything else -- again to show a
+                                program that ran on in the background
     update(dt)                  every refresh, focused or not
     handle_text/motion/enter/key  input, while it has the focus
     focus() / blur()            when it gains / loses the focus
     resize(width, height)       when the host re-lays it out
     on_resume()                 when a full screen one of its commands opened is closed
 and reads back `surface`, `dirty` and cursor(). A host must provide
-close_window(window), is_active(window), `screens` and `main_buffer`."""
+close_window(window) (the program ended), detach_window(window) (hide it,
+the program keeps running), is_active(window), `screens` and `main_buffer`.
+WindowManager (window_manager.py) is that host: it shows several windows
+over the shell and switches the focus between them."""
 
 import pyglet
 
@@ -44,12 +46,21 @@ class Window:
     window.
 
     `width`/`height` are the preferred size; without them a window asks
-    for 3/4 of the screen (see preferred_size)."""
+    for 3/4 of the screen (see preferred_size).
+
+    `keep_running` makes closing (close keys, `exit`) only hide the window:
+    the program -- its process and all its state, shell output, history,
+    settings -- keeps running in the background, and opening it again
+    (see show_app) brings that same window back. quit() really ends it, as
+    does killing its process. `app_id` names it in the session's
+    background_apps (see Context) so it can be found again; it defaults to
+    `process_name`."""
 
     def __init__(self, ctx: Context, title: str, width: int | None = None, height: int | None = None,
                  header_rows: int = 0, border_color: tuple[int, int, int] | None = None,
                  close_keys: tuple[int, ...] = (key.ESCAPE,), process_name: str | None = None,
-                 process_cpu_mhz: float = 5.0, process_mem_kb: int = 1024) -> None:
+                 process_cpu_mhz: float = 5.0, process_mem_kb: int = 1024,
+                 keep_running: bool = False, app_id: str | None = None) -> None:
         self.parent_ctx = ctx
         self.title = title
         self._width = width
@@ -60,10 +71,13 @@ class Window:
         self._process_name = process_name
         self._process_cpu_mhz = process_cpu_mhz
         self._process_mem_kb = process_mem_kb
+        self.keep_running = keep_running
+        self.app_id = app_id if app_id is not None else process_name
         self.surface: ScreenBuffer | None = None
         self.dirty = True       # surface changed since the host last copied it
         self.focused = False
-        self.is_open = False
+        self.is_open = False    # running -- shown on a host, or hidden in the background
+        self.attached = False   # currently shown on a host
         self.pid: int | None = None
         self._host = None
         self._unsubscribe = None
@@ -128,10 +142,22 @@ class Window:
     # --- lifecycle (called by the host) ---
 
     def open(self, host, width: int, height: int) -> None:
+        """Shows the window on `host` -- starting the program the first
+        time, or bringing a program running in the background back exactly
+        as it was (only re-fitted if the size changed)."""
         self._host = host
+        self.attached = True
+        if self.is_open:
+            if self.size != (width, height):
+                self.resize(width, height)
+            else:
+                self.render()
+            return
         self.surface = self._new_surface(width, height)
         self.is_open = True
         self._start_process()
+        if self.app_id is not None and self.parent_ctx.background_apps is not None:
+            self.parent_ctx.background_apps[self.app_id] = self
         self._setup()
         self.on_open()
         self.render()
@@ -161,21 +187,42 @@ class Window:
             self.render()
 
     def close(self) -> None:
-        """Asks the host to close this window."""
-        if self._host is not None and self.is_open:
+        """What closing the window does: with keep_running, hide it and let
+        the program run on in the background; otherwise quit()."""
+        if self.keep_running and self.is_open:
+            if self._host is not None and self.attached:
+                self._host.detach_window(self)
+            return
+        self.quit()
+
+    def quit(self) -> None:
+        """Ends the program for good -- window gone, process stopped."""
+        if self._host is not None and self.attached:
             self._host.close_window(self)
         else:
             self.closed()
 
+    def detached(self) -> None:
+        """The host stopped showing the window -- it keeps running in the
+        background (see keep_running)."""
+        self.attached = False
+        self.focused = False
+        self._host = None
+
     def closed(self) -> None:
-        """The host took the window down -- stop its process and clean up.
-        Safe to call more than once."""
+        """The program ended -- stop its process and clean up. Safe to call
+        more than once."""
         if not self.is_open:
             return
         self.is_open = False
+        self.attached = False
+        self.focused = False
         if self._unsubscribe is not None:
             self._unsubscribe()
             self._unsubscribe = None
+        apps = self.parent_ctx.background_apps
+        if apps is not None and apps.get(self.app_id) is self:
+            del apps[self.app_id]
         self._stop_process()
         self.on_close()
 
@@ -288,4 +335,4 @@ class Window:
     def _on_process_killed(self, event: ProcessKilledEvent) -> None:
         if event.pid == self.pid and self.is_open:
             self.pid = None  # already gone -- nothing left to remove
-            self.close()
+            self.quit()      # a killed program is over, background or not
