@@ -15,6 +15,7 @@ from horus.hardware.spec import HardwareSpec
 from horus.kernel.commands.cmd_menu import horus_menu, open_settings_menu
 from horus.kernel.kernel import Kernel
 from horus.kernel.registry import registry
+from horus.network.port_table import PortTable
 from horus.paths import BOOT_DIR, BOOT_PROGRESS_PATH, DATA_DIR, HARDWARE_SPEC_PATH, SAVES_DIR, SOUNDS_DIR
 from horus.processes.memory import MemoryManager
 from horus.processes.processTable import ProcessTable
@@ -133,7 +134,8 @@ def main() -> None:
     cpu_scheduler.start()
     memory_manager = MemoryManager(process_table, hardware, events=bus, fs=fs)  # RAM pages, swap, OOM, memory errors
     memory_manager.start()
-    
+    port_table = PortTable(process_table, events=bus)  # open ports -- freed when their process dies
+
     hardware.start_power_monitoring(process_table, bus)
     
     #--- SYSTEM REACTIONS -----
@@ -165,6 +167,7 @@ def main() -> None:
         system_log=system_log,
         cpu_scheduler=cpu_scheduler,
         memory_manager=memory_manager,
+        port_table=port_table,
     )
 
     def on_submit(line: str) -> None:
