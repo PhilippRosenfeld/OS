@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from horus.processes.memory import MemoryManager
     from horus.processes.scheduler import CpuScheduler
     from horus.session.user import UserRegistry
+    from horus.shell.clipboard import Clipboard
     from horus.shell.input_handler import InputHandler
     from horus.story.progress import BootProgress
     from horus.ui.screens.main_menu_screen import MainMenuScreen
@@ -53,6 +54,7 @@ class Context:
     process_table: "ProcessTable" = None
     hardware: "HardwareSpec" = None
     system_log: "SystemLog" = None
+    clipboard: "Clipboard" = None   # shared by every shell's copy/paste -- the OS clipboard in the game
     background_apps: dict = field(default_factory=dict)  # app_id -> running windowed program (see
                                                           # apps.window.Window.keep_running), shared by
                                                           # every copy of this context

@@ -49,6 +49,9 @@ class ShellScreen(Screen):
     def handle_motion(self, motion: int) -> None:
         self._input_handler._handle_motion(motion)
 
+    def handle_motion_select(self, motion: int) -> None:
+        self._input_handler._handle_motion_select(motion)
+
     def handle_enter(self) -> None:
         """The submitted command may have opened a different screen -- then
         don't draw the next prompt over it, leave it for on_resume(). Compared

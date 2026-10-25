@@ -266,6 +266,12 @@ class WindowManager(Screen):
             target.handle_motion(motion)
         self._after_input()
 
+    def handle_motion_select(self, motion: int) -> None:
+        target = self._target()
+        if target is not None:
+            target.handle_motion_select(motion)
+        self._after_input()
+
     def handle_enter(self) -> None:
         target = self._target()
         if target is not None:

@@ -5,19 +5,40 @@ import pyglet
 
 from horus.display.screen_buffer import ScreenBuffer
 from horus.session.history import CommandHistory
+from horus.shell.clipboard import Clipboard
 
 logger = logging.getLogger(__name__)
 
+key = pyglet.window.key
+
+# Text motions that only move the cursor -- with Shift held (see
+# _handle_motion_select) they extend the selection instead.
+_CURSOR_MOTIONS = (
+    key.MOTION_LEFT, key.MOTION_RIGHT,
+    key.MOTION_BEGINNING_OF_LINE, key.MOTION_END_OF_LINE,
+    key.MOTION_PREVIOUS_WORD, key.MOTION_NEXT_WORD,
+)
+
+
 class InputHandler:
-    
+    """Line editing for a shell prompt: typing, cursor movement, history,
+    Tab completion -- and selecting part of the line with Shift (+ arrows,
+    Home/End, Ctrl for whole words), shown inverted, which Ctrl+C copies,
+    Ctrl+X cuts, typing/Backspace/Delete replace and Ctrl+A selects all of.
+    Ctrl+V pastes. `clipboard` is shared with whatever else copies/pastes
+    (see shell.clipboard) -- without one, a private in-memory clipboard."""
+
     def __init__(self, buffer: ScreenBuffer, history: CommandHistory, on_submit: Callable[[str], None] | None = None,
-                 get_prompt: Callable[[], str] | None = None, complete: Callable[[str], list[str]] | None = None) -> None:
+                 get_prompt: Callable[[], str] | None = None, complete: Callable[[str], list[str]] | None = None,
+                 clipboard: Clipboard | None = None) -> None:
         self.buffer = buffer
         self.history = history
         self.current_line: str = ""
         self._on_submit = on_submit
         self._get_prompt = get_prompt
         self._complete = complete  # word (prefix) -> sorted list of candidate replacements; None disables Tab completion
+        self.clipboard = clipboard if clipboard is not None else Clipboard()
+        self.selection_anchor: int | None = None  # line index where the selection started; None = nothing selected
         self.insert_mode: bool = False
         self.line_cursor: int = 0
         self.start_line()
@@ -42,7 +63,105 @@ class InputHandler:
             self.buffer.write_string(col=0, row=self.buffer.cursor_row, string=prompt)
         self.buffer.cursor_col = len(prompt)
         self.line_cursor = 0
+        self.selection_anchor = None
         self._sync_cursor()
+
+    # --- selection ---
+
+    @property
+    def selection(self) -> tuple[int, int] | None:
+        """(start, end) of the selected part of current_line, end exclusive --
+        or None when nothing is selected."""
+        if self.selection_anchor is None or self.selection_anchor == self.line_cursor:
+            return None
+        return min(self.selection_anchor, self.line_cursor), max(self.selection_anchor, self.line_cursor)
+
+    @property
+    def selected_text(self) -> str:
+        selection = self.selection
+        return self.current_line[selection[0]:selection[1]] if selection is not None else ""
+
+    def _position_of(self, index: int) -> tuple[int, int]:
+        """(col, row) on screen of current_line[index] -- derived from where
+        the cursor is, since the line may wrap over several rows."""
+        cols = self.buffer.cols
+        linear = self.buffer.cursor_row * cols + self.buffer.cursor_col + (index - self.line_cursor)
+        return linear % cols, linear // cols
+
+    def _redraw_line(self) -> None:
+        """Rewrites current_line in place, the selected part inverted."""
+        selection = self.selection or (len(self.current_line), len(self.current_line))
+        pieces = ((0, selection[0], False), (selection[0], selection[1], True),
+                  (selection[1], len(self.current_line), False))
+        for start, end, inverted in pieces:
+            if start >= end:
+                continue
+            col, row = self._position_of(start)
+            if row < 0:
+                continue  # scrolled off the top
+            text = self._display(self.current_line[start:end])
+            if inverted:
+                self.buffer.write_string(col, row, text, fg=self.buffer.default_bg, bg=self.buffer.default_fg)
+            else:
+                self.buffer.write_string(col, row, text)
+        self._sync_cursor()
+
+    def _clear_selection(self) -> None:
+        """Drops the selection, un-inverting it on screen."""
+        had_selection = self.selection is not None
+        self.selection_anchor = None
+        if had_selection:
+            self._redraw_line()
+
+    def _delete_selection(self) -> bool:
+        """Removes the selected text (cursor ends up where it began).
+        Returns whether there was anything to remove."""
+        selection = self.selection
+        self.selection_anchor = None
+        if selection is None:
+            return False
+        start, end = selection
+        self._adjust_cursor(start - self.line_cursor)
+        self.current_line = self.current_line[:start] + self.current_line[end:]
+        tail = self.current_line[start:]
+        self.buffer.write_string(col=self.buffer.cursor_col, row=self.buffer.cursor_row,
+                                 string=self._display(tail) + " " * (end - start))
+        self._sync_cursor()
+        return True
+
+    def _handle_motion_select(self, motion: int) -> None:
+        """A cursor motion with Shift held: moves the cursor like
+        _handle_motion, but extends the selection from where it started."""
+        if motion not in _CURSOR_MOTIONS:
+            return
+        if self.selection_anchor is None:
+            self.selection_anchor = self.line_cursor
+        self._move_cursor(motion)
+        self._redraw_line()
+
+    def select_all(self) -> None:
+        self.selection_anchor = 0
+        self._adjust_cursor(len(self.current_line) - self.line_cursor)
+        self._redraw_line()
+
+    def copy(self) -> None:
+        """Puts the selection on the clipboard -- never a masked (password) one."""
+        if self.masked or self.selection is None:
+            return
+        self.clipboard.set_text(self.selected_text)
+
+    def cut(self) -> None:
+        if self.masked or self.selection is None:
+            return
+        self.copy()
+        self._delete_selection()
+
+    def paste(self) -> None:
+        """Types the clipboard's text in, replacing the selection -- line
+        breaks become spaces, so pasting never submits a line by itself."""
+        text = " ".join(self.clipboard.get_text().splitlines())
+        if text:
+            self._handle_text(text)
 
     def _sync_cursor(self) -> None:
         """Mirror our cursor position and mode onto the ScreenBuffer so the Renderer can draw it:
@@ -183,6 +302,7 @@ class InputHandler:
         text = "".join(char for char in text if char.isprintable())
         if not text:
             return
+        self._delete_selection()  # typing replaces whatever is selected
         if self.insert_mode:
             end = self.line_cursor + len(text)
             self.current_line = self.current_line[:self.line_cursor] + text + self.current_line[end:]
@@ -197,51 +317,62 @@ class InputHandler:
     def _handle_motion(self, motion: int):
         """Handles key presses pyglet models as a text motion: Backspace, Left, Right, End..."""
         logger.debug(f"INPUT: Motion='{motion}'")
+        if motion in _CURSOR_MOTIONS:
+            self._clear_selection()  # moving without Shift drops the selection
+            self._move_cursor(motion)
+            return
+
         match motion:
             case None:
                 return
-            
+
             case pyglet.window.key.MOTION_BACKSPACE:
+                if self._delete_selection():
+                    return
                 if self.line_cursor == 0:
                     return
                 tail = self.current_line[self.line_cursor:]
                 self.current_line = self.current_line[:self.line_cursor - 1] + tail
                 self._adjust_cursor(-1)
                 self.buffer.write_string(col=self.buffer.cursor_col, row=self.buffer.cursor_row, string=self._display(tail) + " ")
-                
-            case pyglet.window.key.MOTION_LEFT:
-                if self.line_cursor == 0:
-                    return
-                self._adjust_cursor(-1)
-                
-            case pyglet.window.key.MOTION_RIGHT:
-                if self.line_cursor >= len(self.current_line):
-                    return
-                self._adjust_cursor(1)
 
             case pyglet.window.key.MOTION_UP:
                 entry = self.history.previous(self.current_line)
                 if entry is not None:
+                    self._clear_selection()
                     self._replace_current_line(entry)
 
             case pyglet.window.key.MOTION_DOWN:
                 entry = self.history.next()
                 if entry is not None:
+                    self._clear_selection()
                     self._replace_current_line(entry)
-   
-            case pyglet.window.key.MOTION_BEGINNING_OF_LINE:
-                self._adjust_cursor(-self.line_cursor)
-                self.line_cursor = 0
-                
-            case pyglet.window.key.MOTION_END_OF_LINE:
-                self._adjust_cursor(len(self.current_line) - self.line_cursor)
-                self.line_cursor = len(self.current_line)
-            
+
             case pyglet.window.key.MOTION_PREVIOUS_PAGE:  # Page Up: look further back into scrollback history
                 self.buffer.scroll_view(self.buffer.rows // 2)
 
             case pyglet.window.key.MOTION_NEXT_PAGE:  # Page Down: move back toward the live view
                 self.buffer.scroll_view(-(self.buffer.rows // 2))
+
+    def _move_cursor(self, motion: int) -> None:
+        """Moves the cursor within the line for one of _CURSOR_MOTIONS --
+        shared by plain motions and Shift-selecting ones."""
+        match motion:
+            case pyglet.window.key.MOTION_LEFT:
+                if self.line_cursor > 0:
+                    self._adjust_cursor(-1)
+
+            case pyglet.window.key.MOTION_RIGHT:
+                if self.line_cursor < len(self.current_line):
+                    self._adjust_cursor(1)
+
+            case pyglet.window.key.MOTION_BEGINNING_OF_LINE:
+                self._adjust_cursor(-self.line_cursor)
+                self.line_cursor = 0
+
+            case pyglet.window.key.MOTION_END_OF_LINE:
+                self._adjust_cursor(len(self.current_line) - self.line_cursor)
+                self.line_cursor = len(self.current_line)
 
             case pyglet.window.key.MOTION_NEXT_WORD:
                 self._adjust_cursor(self._next_word_boundary() - self.line_cursor)
@@ -253,34 +384,54 @@ class InputHandler:
         """Handles key presses pyglet doesn't model as a text motion: Insert, Delete..."""
         logger.debug(f"INPUT: Symbol='{symbol}', modifiers='{modifiers}'")
         ctrl_held = bool(modifiers & pyglet.window.key.MOD_CTRL)
-        
-        if symbol == pyglet.window.key.INSERT:
+
+        if ctrl_held and symbol == key.C:
+            self.copy()
+
+        elif ctrl_held and symbol == key.X:
+            self.cut()
+
+        elif ctrl_held and symbol == key.V:
+            self.paste()
+
+        elif ctrl_held and symbol == key.A:
+            self.select_all()
+
+        elif symbol == pyglet.window.key.INSERT:
             self.insert_mode = not self.insert_mode
             self._sync_cursor()
-        
+
+        # With a selection, Delete / Ctrl+Backspace just remove it. Plain
+        # Backspace isn't handled here: pyglet also sends it as a text motion
+        # (right after this key press), and _handle_motion removes it there --
+        # doing it in both places would delete one character too many.
+        elif (symbol == pyglet.window.key.DELETE or (symbol == pyglet.window.key.BACKSPACE and ctrl_held)) \
+                and self._delete_selection():
+            return
+
         elif symbol == pyglet.window.key.DELETE and ctrl_held:
             end = self._next_word_boundary()
             if end == self.line_cursor:
                 return
             deleted = end - self.line_cursor
             tail = self.current_line[end:]
-            self.current_line = self.current_line[:self.line_cursor] + self._display(tail)
+            self.current_line = self.current_line[:self.line_cursor] + tail
             self.buffer.write_string(col=self.buffer.cursor_col, row=self.buffer.cursor_row, string=self._display(tail) + " " * deleted)
-        
+
         elif symbol == pyglet.window.key.DELETE:
             if self.line_cursor >= len(self.current_line):
                 return
             tail = self.current_line[1 + self.line_cursor:]
-            self.current_line = self.current_line[:self.line_cursor] + self._display(tail)
+            self.current_line = self.current_line[:self.line_cursor] + tail
             self.buffer.write_string(col=self.buffer.cursor_col, row=self.buffer.cursor_row, string=self._display(tail) + " ")
-            
+
         elif symbol == pyglet.window.key.BACKSPACE and ctrl_held:
             start = self._previous_word_boundary()
             if start == self.line_cursor:
                 return
             deleted = self.line_cursor - start
             tail = self.current_line[self.line_cursor:]
-            self.current_line = self.current_line[:start] + self._display(tail)
+            self.current_line = self.current_line[:start] + tail
             self._adjust_cursor(start - self.line_cursor)
             self.buffer.write_string(col=self.buffer.cursor_col, row=self.buffer.cursor_row, string=self._display(tail) + " " * deleted)
         
@@ -291,12 +442,14 @@ class InputHandler:
             self.buffer.scroll_view(-1)
 
         elif symbol == pyglet.window.key.TAB:
+            self._clear_selection()
             self._handle_tab()
 
     def _handle_enter(self):
         """Handles enter key presses. Leaves writing the prompt for the next line to
         start_line() -- see its docstring for why that's the caller's decision."""
         logger.debug(f"INPUT: 'enter', Current Line='{self.current_line}")
+        self._clear_selection()  # the submitted line stays on screen -- not highlighted
         self._advance_row(1)
         self.buffer.cursor_col = 0
         self._sync_cursor()

@@ -168,6 +168,7 @@ def main() -> None:
         cpu_scheduler=cpu_scheduler,
         memory_manager=memory_manager,
         port_table=port_table,
+        clipboard=window.clipboard,
     )
 
     def on_submit(line: str) -> None:
@@ -216,7 +217,8 @@ def main() -> None:
     
     # ---- INPUT HANDLER -----
     history = CommandHistory()
-    input_handler = InputHandler(window.buffer, history, on_submit=on_submit, get_prompt=get_prompt, complete=complete_file)
+    input_handler = InputHandler(window.buffer, history, on_submit=on_submit, get_prompt=get_prompt, complete=complete_file,
+                                 clipboard=window.clipboard)
     context.input_handler = input_handler
 
     logo_lines = _load_logo_lines(BOOT_DIR / "logo.txt")
@@ -264,6 +266,7 @@ def main() -> None:
         on_motion=screens.handle_motion,
         on_enter=screens.handle_enter,
         on_key=screens.handle_key,
+        on_motion_select=screens.handle_motion_select,
     )
     
     # ---- BOOT SEQUENCE -----

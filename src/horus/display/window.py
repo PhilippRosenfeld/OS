@@ -1,6 +1,8 @@
 import moderngl
 import pyglet
 
+from horus.shell.clipboard import SystemClipboard
+
 from .font_atlas import FontAtlas
 from .renderer import Renderer
 from .screen_buffer import ScreenBuffer
@@ -39,8 +41,10 @@ class DisplayWindow:
         self._on_key_callback = None
         self._on_text_callback = None
         self._on_motion_callback = None
+        self._on_motion_select_callback = None
         self._on_enter_callback = None
         self._on_special_key_callback = None
+        self._clipboard = SystemClipboard(self._window)
         self._window.push_handlers(on_draw=self._on_draw, on_resize=self._on_resize)
 
     @property
@@ -137,20 +141,29 @@ class DisplayWindow:
         self._on_key_callback = callback
         self._window.push_handlers(on_key_press=self._on_key_press)
 
-    def set_text_handler(self, on_text=None, on_motion=None, on_enter=None, on_key=None) -> None:
+    def set_text_handler(self, on_text=None, on_motion=None, on_enter=None, on_key=None,
+                         on_motion_select=None) -> None:
         """Register callbacks for text input: on_text(str) for typed characters,
         on_motion(motion) for cursor/backspace motions (see pyglet.window.key.MOTION_*),
-        on_enter() when Enter/Return is pressed, on_key(symbol, modifiers) for other
-        key presses pyglet doesn't model as a text motion (e.g. key.INSERT)."""
+        on_motion_select(motion) for the same motions with Shift held (selecting
+        text), on_enter() when Enter/Return is pressed, on_key(symbol, modifiers)
+        for other key presses pyglet doesn't model as a text motion (e.g. key.INSERT)."""
         self._on_text_callback = on_text
         self._on_motion_callback = on_motion
+        self._on_motion_select_callback = on_motion_select
         self._on_enter_callback = on_enter
         self._on_special_key_callback = on_key
         self._window.push_handlers(
             on_text=self._on_text,
             on_text_motion=self._on_text_motion,
+            on_text_motion_select=self._on_text_motion_select,
             on_key_press=self._on_text_key_press,
         )
+
+    @property
+    def clipboard(self) -> SystemClipboard:
+        """The OS clipboard, for copy/paste in the shell (see InputHandler)."""
+        return self._clipboard
 
     def start_cursor_blink(self, interval: float = 0.5) -> None:
         """Toggle the ScreenBuffer's cursor visibility on a timer, making it blink.
@@ -213,6 +226,12 @@ class DisplayWindow:
         """pyglet event handler: forwards cursor/backspace motions to self._on_motion_callback."""
         if self._on_motion_callback is not None:
             self._on_motion_callback(motion)
+
+    def _on_text_motion_select(self, motion: int) -> None:
+        """pyglet event handler: a cursor motion with Shift held -- forwards
+        to self._on_motion_select_callback."""
+        if self._on_motion_select_callback is not None:
+            self._on_motion_select_callback(motion)
 
     def _on_text_key_press(self, symbol: int, modifiers: int) -> pyglet.event.EVENT_HANDLE_STATE:
         """pyglet event handler: fires self._on_enter_callback for Enter/Return,

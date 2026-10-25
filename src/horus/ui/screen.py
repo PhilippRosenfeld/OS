@@ -24,6 +24,10 @@ class Screen(ABC):
     def handle_motion(self, motion: int) -> None:
         pass
 
+    def handle_motion_select(self, motion: int) -> None:
+        """A cursor motion with Shift held (e.g. Shift+Left) -- selects text
+        in screens that have any (see ShellScreen); ignored by default."""
+
     @abstractmethod
     def handle_enter(self) -> None:
         pass

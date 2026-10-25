@@ -295,6 +295,9 @@ class Window:
     def handle_motion(self, motion: int) -> None:
         pass
 
+    def handle_motion_select(self, motion: int) -> None:
+        """A cursor motion with Shift held -- see ShellWindow."""
+
     def handle_enter(self) -> None:
         pass
 

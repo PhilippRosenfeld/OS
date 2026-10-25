@@ -75,6 +75,10 @@ class ScreenManager:
         if self.active is not None:
             self.active.handle_motion(motion)
 
+    def handle_motion_select(self, motion: int) -> None:
+        if self.active is not None:
+            self.active.handle_motion_select(motion)
+
     def handle_enter(self) -> None:
         if self.active is not None:
             self.active.handle_enter()

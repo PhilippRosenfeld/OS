@@ -72,7 +72,8 @@ class ShellWindow(Window):
         for line in self._welcome:
             self.ctx.write_line(line)
         self.input = InputHandler(self.shell_buffer, self.history, on_submit=self._submit,
-                                  get_prompt=self.prompt, complete=self.complete)
+                                  get_prompt=self.prompt, complete=self.complete,
+                                  clipboard=self.parent_ctx.clipboard)  # shared with the main shell
         self.ctx.input_handler = self.input
 
     def on_resize(self) -> None:
@@ -172,6 +173,10 @@ class ShellWindow(Window):
 
     def handle_motion(self, motion: int) -> None:
         self.input._handle_motion(motion)
+        self.render()
+
+    def handle_motion_select(self, motion: int) -> None:
+        self.input._handle_motion_select(motion)
         self.render()
 
     def handle_enter(self) -> None:
