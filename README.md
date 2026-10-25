@@ -11,7 +11,7 @@ uv run horus
 
 ## Status
 
-Early development (`v0.2.0`). See the [Releases](../../releases) page for changelogs.
+Early development (`v0.3.0`). See the [Releases](../../releases) page for changelogs.
 
 ## Planned 
 Software installer for packages(Audioplayer, Videoplayer...)
