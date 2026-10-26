@@ -166,3 +166,28 @@ def test_ephemeral_ports_skip_taken_ones():
     table.add(Listener("tcp", first, pid=1, service="taken"))
     assert table.allocate_ephemeral("tcp") == first + 1
     assert table.allocate_ephemeral("udp") == first          # other protocol, other number space
+
+
+# --- system services open their ports at startup ---
+
+def test_seeded_services_listen_on_their_ports_and_close_them_when_killed():
+    from horus.processes.seed_process import seed_processes
+    bus = EventBus()
+    processes = ProcessTable(events=bus)
+    table = PortTable(processes, events=bus)
+    seed_processes(processes, table)
+
+    opened = {(listener.protocol, listener.port): listener for listener in table.list()}
+    assert set(opened) == {("udp", 53), ("udp", 514)}
+    netd = next(proc for proc in processes.list_processes() if proc.name == "netd")
+    assert opened[("udp", 53)].pid == netd.pid and opened[("udp", 53)].service == "dns"
+
+    processes.remove_process(netd.pid, user="root", role=ROOT)
+    assert not table.is_open("udp", 53) and table.is_open("udp", 514)
+
+
+def test_seeding_without_a_port_table_only_starts_the_processes():
+    from horus.processes.seed_process import seed_processes
+    processes = ProcessTable()
+    seed_processes(processes)
+    assert len(processes.list_processes()) == 10

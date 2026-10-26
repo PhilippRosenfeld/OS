@@ -128,13 +128,14 @@ def main() -> None:
     #--- PROCESSES -----
     process_table = ProcessTable(events=bus, total_memory_kb=hardware.total_memory_kb(),
                                   total_cpu_mhz=hardware.total_cpu_mhz())
-    seed_processes(process_table)
+    port_table = PortTable(process_table, events=bus)  # open ports -- freed when their process dies
+
+    seed_processes(process_table, port_table)
     process_table.start_fluctuating()
     cpu_scheduler = CpuScheduler(process_table, hardware)  # pins processes to cores, tracks CPU time
     cpu_scheduler.start()
     memory_manager = MemoryManager(process_table, hardware, events=bus, fs=fs)  # RAM pages, swap, OOM, memory errors
     memory_manager.start()
-    port_table = PortTable(process_table, events=bus)  # open ports -- freed when their process dies
 
     hardware.start_power_monitoring(process_table, bus)
     
