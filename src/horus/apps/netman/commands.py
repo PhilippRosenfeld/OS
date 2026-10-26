@@ -104,3 +104,16 @@ def speed(ctx, argv):
     iface.link_speed_down_mbps = down_mbps
     iface.link_speed_up_mbps = up_mbps
     ctx.write_line(f"Interface '{iface.name}' speed set to {down_mbps}/{up_mbps} Mbps (down/up).")
+    
+@command("ports", help_text="List the open ports and their associated processes", target=netman_commands)
+def ports(ctx, argv):
+    port_table = ctx.port_table
+    listeners = port_table.list()
+    if not listeners:
+        ctx.write_line("No open ports.")
+        return
+
+    ctx.write_line(f"{'Protocol':<10} {'Port':<6} {'Address':<15} {'PID':<6} {'Service':<20}")
+    ctx.write_line("-" * 60)
+    for listener in listeners:
+        ctx.write_line(f"{listener.protocol:<10} {listener.port:<6} {listener.address:<15} {listener.pid:<6} {listener.service:<20}")
