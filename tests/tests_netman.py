@@ -5,7 +5,10 @@ from horus.display.screen_buffer import ScreenBuffer
 from horus.events.bus import EventBus
 from horus.hardware.spec import HardwareSpec
 from horus.kernel.kernel import Kernel
+from horus.network.listener import Listener
+from horus.network.port_table import PortTable
 from horus.session.context import Context
+from horus.session.user import UserRole
 
 
 def full_text(buffer):
@@ -39,8 +42,54 @@ def test_status_lists_every_interface(netman):
 def test_iface_shows_details_or_reports_an_unknown_interface(netman):
     run, hardware, _ = netman
     out = run("iface eth0")
-    assert "Interface: eth0" in out and f"IP Address: {eth0(hardware).ip_address}" in out
+    assert "Interface   | eth0" in out
+    assert f"IP Address  | {eth0(hardware).ip_address}" in out
+    assert f"MAC Address | {eth0(hardware).mac_address}" in out
+    assert "Mbps (down/up)" in out and "Status      | UP" in out
     assert "Interface 'wlan9' not found." in run("iface wlan9")
+
+
+@pytest.fixture
+def netman_with_ports():
+    """Like `netman`, plus a port table: one port on every interface, one
+    on eth0's own IP, one on another interface's IP."""
+    buffer = ScreenBuffer(80, 30)
+    hardware = HardwareSpec()
+    ports = PortTable()
+    ports.add(Listener("tcp", 22, pid=1, service="ssh"), role=UserRole.ROOT)
+    ports.add(Listener("udp", 5353, pid=1, service="mdns", address=eth0(hardware).ip_address))
+    ports.add(Listener("tcp", 8080, pid=1, service="other-nic", address="192.168.9.9"))
+    ctx = Context(session_id="s", user="root", cwd="/", screen=buffer, hardware=hardware, port_table=ports)
+    kernel = Kernel(registry=netman_commands, bus=EventBus())
+
+    def run(line):
+        kernel.execute(line, ctx)
+        return full_text(buffer)
+
+    return run, hardware
+
+
+def test_iface_lists_only_the_ports_reachable_through_that_interface(netman_with_ports):
+    run, _ = netman_with_ports
+    out = run("iface eth0")
+    assert "ssh" in out and "mdns" in out          # bound to all interfaces / to eth0's IP
+    assert "other-nic" not in out                 # bound to a different interface's IP
+
+
+def test_iface_shows_tcp_as_listen_udp_without_state_and_down_when_disabled(netman_with_ports):
+    run, hardware = netman_with_ports
+    out = run("iface eth0")
+    assert any("22" in line and "LISTEN" in line for line in out.splitlines())
+    assert any("5353" in line and "-" in line and "LISTEN" not in line for line in out.splitlines())
+    eth0(hardware).enabled = False
+    out = run("iface eth0")
+    assert sum("DOWN" in line for line in out.splitlines() if "ssh" in line or "mdns" in line) == 2
+
+
+def test_iface_without_a_port_table_still_shows_the_interface(netman):
+    run, _, _ = netman
+    out = run("iface eth0")
+    assert "Interface   | eth0" in out and "Ports" not in out
 
 
 def test_down_and_up_switch_the_interface(netman):
