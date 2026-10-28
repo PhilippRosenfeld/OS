@@ -36,9 +36,9 @@ def iface(ctx, argv):
              if listener.address in (iface.ip_address, ANY_ADDRESS)]
     ctx.write_line("-" * 40)
     ctx.write_line("Ports" if bound else "Ports: none")
-    ctx.write_line(f"{'Proto':<4} {'Port':<6} {'State':<7} {'Service'}")
+    ctx.write_line(f"{'Proto':<6} {'Port':<8} {'State':<8} {'Service'}")
     for listener in bound:
-        ctx.write_line(f"  {listener.protocol:<4} {listener.port:<6} {_port_state(listener, iface):<7} {listener.service}")
+        ctx.write_line(f" {listener.protocol:<6} {listener.port:<7} {_port_state(listener, iface):<9} {listener.service}")
 
 @command("up", help_text="Bring up the specified network interface", target=netman_commands)
 def up(ctx, argv):
@@ -101,7 +101,7 @@ def _port_state(listener, iface) -> str:
     """Not stored on the Listener -- derived from its protocol and the interface."""
     if not iface.enabled:
         return "DOWN"
-    return "LISTEN" if listener.protocol == "tcp" else "-"
+    return "LISTEN" if listener.protocol == "tcp" else "  -"
 
 
 def _configure(ctx, change):
