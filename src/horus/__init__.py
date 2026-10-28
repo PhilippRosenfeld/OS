@@ -15,6 +15,7 @@ from horus.hardware.spec import HardwareSpec
 from horus.kernel.commands.cmd_menu import horus_menu, open_settings_menu
 from horus.kernel.kernel import Kernel
 from horus.kernel.registry import registry
+from horus.network.hosts import HostTable
 from horus.network.netd import NetDaemon
 from horus.network.port_table import PortTable
 from horus.paths import BOOT_DIR, BOOT_PROGRESS_PATH, DATA_DIR, HARDWARE_SPEC_PATH, SAVES_DIR, SOUNDS_DIR
@@ -55,8 +56,6 @@ from horus.utils.logging_setup import setup_logging
 
 cfg = load_config()
 char_size = cfg['display']['char_size']
-# boot/logo/menus/sys/crash are laid out for one known size and ignore the
-# user's font size (see _on_before_screen_activate below)
 fixed_char_size = cfg['display'].get('fixed_char_size', char_size)
 setup_logging(level=cfg['debug_level'], log_file="horus.log")
 logger = logging.getLogger(__name__)
@@ -97,18 +96,10 @@ def main() -> None:
         seed_minimal(fs)
 
     def _on_active_screen_changed(screen) -> None:
-        # The status bar (see DisplayWindow.status_bar) is only meaningful
-        # while the interactive shell is what's on screen -- boot/menus/
-        # settings/etc. all hide it again.
         window.status_bar.set_visible(isinstance(screen, (ShellScreen, WindowManager)))
-        # A WindowManager composites the shell and its windows into a buffer
-        # of its own -- show that while it's on top, the main buffer otherwise.
         window.show_buffer(screen.display if isinstance(screen, WindowManager) else None)
 
     def _on_before_screen_activate(screen) -> None:
-        # Screens with a fixed layout always get the configured
-        # display.fixed_char_size, never the user's font size -- everything
-        # else (shell, top, ...) goes back to the user's own size.
         if isinstance(screen, _FIXED_CHAR_SIZE_SCREENS):
             window.set_fixed_char_size((8 * fixed_char_size, 16 * fixed_char_size))
         else:
@@ -130,6 +121,7 @@ def main() -> None:
     process_table = ProcessTable(events=bus, total_memory_kb=hardware.total_memory_kb(),
                                   total_cpu_mhz=hardware.total_cpu_mhz())
     port_table = PortTable(process_table, events=bus)  # open ports -- freed when their process dies
+    host_table = HostTable()  # hostname -> IP address
 
     seed_processes(process_table, port_table)
     process_table.start_fluctuating()
@@ -137,6 +129,7 @@ def main() -> None:
     cpu_scheduler.start()
     memory_manager = MemoryManager(process_table, hardware, events=bus, fs=fs)  # RAM pages, swap, OOM, memory errors
     memory_manager.start()
+    netd = NetDaemon(hardware, process_table, hosts=host_table, port_table=port_table)
 
     hardware.start_power_monitoring(process_table, bus)
     
@@ -150,7 +143,6 @@ def main() -> None:
     register_system_log(bus, system_log)
     register_status_bar(bus, window.status_bar)
     window.status_bar.start_blinking()
-    netd = NetDaemon(hardware, process_table, port_table, hosts=None)
 
     # ---- CONTEXT -----
     context = Context(
@@ -171,6 +163,7 @@ def main() -> None:
         cpu_scheduler=cpu_scheduler,
         memory_manager=memory_manager,
         port_table=port_table,
+        host_table=host_table,
         clipboard=window.clipboard,
         netd=netd,
     )

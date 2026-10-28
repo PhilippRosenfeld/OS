@@ -1,3 +1,7 @@
+from horus.network.address import is_valid_ip
+from horus.network.hosts import HostNotFoundError, HostTable
+
+
 class NetdError(Exception):
     """Base class for netd-related errors."""
 
@@ -18,22 +22,17 @@ class NetdInvalidConfigError(NetdError):
     """Raised when a configuration value (IP address, link speed) is rejected."""
 
 
-def is_valid_ip(ip):
-    octets = ip.split('.')
-    return len(octets) == 4 and all(o.isdigit() and 0 <= int(o) <= 255 for o in octets)
-
-
 class NetDaemon:
     """A daemon that manages network interfaces and ports. Reading the
     interfaces always works; changing them needs the netd process running."""
 
     PROCESS_NAME = "netd"
 
-    def __init__(self, hardware, process_table, port_table=None, hosts=None):
+    def __init__(self, hardware, process_table, hosts: HostTable | None = None, port_table=None):
         self._hardware = hardware
         self._processes = process_table
         self._ports = port_table
-        self._hosts = dict(hosts or {}) # server.local -> 10.0.0.5
+        self._dns = hosts if hosts is not None else HostTable()  # hostname -> IP address
 
     def is_running(self):
         """Returns True if the netd process is running, False otherwise."""
@@ -74,10 +73,13 @@ class NetDaemon:
         iface.link_speed_up_mbps = up_mbps
         return iface
 
-    def resolve(self, host):
+    def resolve(self, name_or_ip):
         """Resolve a hostname to an IP address, or None if it is unknown. Raises
         NetdNotRunningError for a hostname (not an IP) while netd is not running."""
-        if is_valid_ip(host):
-            return host
+        if is_valid_ip(name_or_ip):
+            return name_or_ip
         self._require()
-        return self._hosts.get(host)
+        try:
+            return self._dns.get_host(name_or_ip).ip
+        except HostNotFoundError:
+            return None

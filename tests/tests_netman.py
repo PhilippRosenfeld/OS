@@ -22,7 +22,7 @@ def running_netd(hardware, port_table=None):
     """A NetDaemon whose netd process is running; returns (netd, process_table)."""
     processes = ProcessTable()
     processes.add_process(Process(name="netd", pid=0, owner="root"))
-    return NetDaemon(hardware, processes, port_table), processes
+    return NetDaemon(hardware, processes, port_table=port_table), processes
 
 
 @pytest.fixture
@@ -241,3 +241,97 @@ def test_iface_without_reachable_ports_says_none():
     Kernel(registry=netman_commands, bus=EventBus()).execute("iface eth0", ctx)
     assert "Ports: none" in full_text(buffer)
     assert "other-nic" not in full_text(buffer)
+
+
+# --- ping ---
+
+@pytest.fixture
+def pinger():
+    """netman with netd running and a host table; returns (run, hardware, hosts, kill_netd)."""
+    from horus.network.hosts import HostEntry, HostTable
+    buffer = ScreenBuffer(100, 40)
+    hardware = HardwareSpec()
+    hosts = HostTable({"files.test": HostEntry(name="files.test", ip="10.0.0.5", latency_ms=20.0)})
+    processes = ProcessTable()
+    processes.add_process(Process(name="netd", pid=0, owner="root"))
+    netd = NetDaemon(hardware, processes, hosts=hosts)
+    ctx = Context(session_id="s", user="root", cwd="/", screen=buffer, hardware=hardware, netd=netd,
+                  host_table=hosts)
+    kernel = Kernel(registry=netman_commands, bus=EventBus())
+
+    def run(line):
+        buffer.clear()
+        buffer.cursor_row, buffer.cursor_col = 0, 0
+        kernel.execute(line, ctx)
+        return full_text(buffer)
+
+    def kill_netd():
+        processes.remove_process(processes.get_process_by_name("netd").pid, user="root", role=UserRole.ROOT)
+
+    return run, hardware, hosts, kill_netd
+
+
+def replies(out):
+    return sum(line.startswith("Reply from") for line in out.splitlines())
+
+
+def test_ping_a_known_host_by_name_gets_replies_with_its_latency(pinger):
+    run, _, _, _ = pinger
+    out = run("ping files.test")
+    assert "Pinging files.test [10.0.0.5] via eth0" in out
+    assert replies(out) == 4
+    assert "Sent = 4, Received = 4, Lost = 0 (0% loss)" in out
+    times = [int(line.split("time=")[1].split("ms")[0]) for line in out.splitlines() if "time=" in line]
+    assert all(16 <= t <= 24 for t in times)              # 20 ms +-20 %
+
+
+def test_ping_count_is_configurable_and_capped(pinger):
+    run, _, _, _ = pinger
+    assert replies(run("ping files.test 2")) == 2
+    assert replies(run("ping files.test 999")) == 20
+
+
+@pytest.mark.parametrize("line", ["ping", "ping a b c", "ping files.test lots"])
+def test_ping_with_bad_arguments_shows_its_usage(pinger, line):
+    run, _, _, _ = pinger
+    assert "Usage: ping <hostname_or_ip> [count]" in run(line)
+
+
+def test_ping_an_unknown_name(pinger):
+    run, _, _, _ = pinger
+    assert "ping: unknown host 'nowhere.test'" in run("ping nowhere.test")
+
+
+def test_ping_by_name_needs_netd_but_by_ip_does_not(pinger):
+    run, _, _, kill_netd = pinger
+    kill_netd()
+    assert "cannot resolve 'files.test': netd is not running" in run("ping files.test")
+    assert replies(run("ping 10.0.0.5")) == 4
+
+
+def test_ping_an_offline_or_unknown_ip_times_out(pinger):
+    run, _, hosts, _ = pinger
+    hosts.get_host("files.test").online = False
+    out = run("ping 10.0.0.5")
+    assert replies(out) == 0 and out.count("Request timed out.") == 4
+    assert "Lost = 4 (100% loss)" in out and "Round trip" not in out
+    assert replies(run("ping 10.9.9.9")) == 0
+
+
+def test_ping_needs_an_interface_that_is_up(pinger):
+    run, hardware, _, _ = pinger
+    eth0(hardware).enabled = False
+    out = run("ping 10.0.0.5")
+    assert "Network is unreachable" in out and replies(out) == 0
+
+
+def test_ping_drops_packets_by_the_interfaces_packet_loss(pinger):
+    run, hardware, _, _ = pinger
+    eth0(hardware).packet_loss_percentage = 100.0
+    assert "Lost = 4 (100% loss)" in run("ping files.test")
+
+
+def test_ping_the_own_address_answers(pinger):
+    run, hardware, _, _ = pinger
+    assert replies(run(f"ping {eth0(hardware).ip_address}")) == 4
+    assert replies(run("ping 127.0.0.1")) == 4

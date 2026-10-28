@@ -2,13 +2,14 @@ import pytest
 
 from horus.events.bus import EventBus
 from horus.hardware.spec import HardwareSpec
+from horus.network.address import is_valid_ip
+from horus.network.hosts import HostEntry, HostTable
 from horus.network.netd import (
     NetDaemon,
     NetdError,
     NetdInterfaceNotFoundError,
     NetdInvalidConfigError,
     NetdNotRunningError,
-    is_valid_ip,
 )
 from horus.network.port_table import PortInUseError, PortTable
 from horus.processes.processTable import ProcessTable
@@ -25,7 +26,8 @@ def system():
     processes = ProcessTable(events=bus)
     ports = PortTable(processes, events=bus)
     start_service(find_service("netd"), processes, ports)
-    netd = NetDaemon(hardware, processes, ports, hosts={"server.local": "10.0.0.5"})
+    hosts = HostTable({"files.test": HostEntry(name="files.test", ip="10.0.0.5")})
+    netd = NetDaemon(hardware, processes, hosts=hosts, port_table=ports)
     return netd, hardware, processes, ports
 
 
@@ -91,12 +93,12 @@ def test_every_refusal_is_a_netd_error():
 
 def test_resolve_needs_netd_for_names_but_not_for_ips(system):
     netd, _, processes, _ = system
-    assert netd.resolve("server.local") == "10.0.0.5"
+    assert netd.resolve("files.test") == "10.0.0.5"
     assert netd.resolve("nowhere.local") is None
     kill(processes, "netd")
     assert netd.resolve("10.0.0.7") == "10.0.0.7"
     with pytest.raises(NetdNotRunningError):
-        netd.resolve("server.local")
+        netd.resolve("files.test")
 
 
 def test_a_restarted_netd_reopens_its_port_and_works_again(system):

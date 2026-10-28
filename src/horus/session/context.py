@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     # on Context, so only a type checker (never actual execution) sees them
     from horus.audio.sound_manager import SoundManager
     from horus.kernel.kernel import Kernel
+    from horus.network.hosts import HostTable
     from horus.network.netd import NetDaemon
     from horus.network.port_table import PortTable
     from horus.processes.memory import MemoryManager
@@ -64,6 +65,7 @@ class Context:
     cpu_scheduler: "CpuScheduler" = None
     memory_manager: "MemoryManager" = None
     port_table: "PortTable" = None
+    host_table: "HostTable" = None
     netd: "NetDaemon" = None  # the network daemon, which manages network interfaces and ports
 
 
