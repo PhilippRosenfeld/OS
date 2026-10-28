@@ -276,13 +276,14 @@ def replies(out):
 
 
 def test_ping_a_known_host_by_name_gets_replies_with_its_latency(pinger):
-    run, _, _, _ = pinger
+    run, hardware, _, _ = pinger
     out = run("ping files.test")
     assert "Pinging files.test [10.0.0.5] via eth0" in out
     assert replies(out) == 4
     assert "Sent = 4, Received = 4, Lost = 0 (0% loss)" in out
     times = [int(line.split("time=")[1].split("ms")[0]) for line in out.splitlines() if "time=" in line]
-    assert all(16 <= t <= 24 for t in times)              # 20 ms +-20 %
+    expected = eth0(hardware).latency_ms + 20.0           # interface + host latency, +-20 % (and rounding)
+    assert all(int(expected * 0.8) <= t <= round(expected * 1.2) for t in times)
 
 
 def test_ping_count_is_configurable_and_capped(pinger):

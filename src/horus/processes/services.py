@@ -26,10 +26,10 @@ class SystemProcess:
 _SYSTEM_PROCESSES = [
     SystemProcess(name="init", owner="root", cpu_mhz=80.0, mem_kb=1024, volatility=0.2, critical=True, memory_strings=("/sbin/init", "runlevel=3", "console=tty0"), description="System initialization process"),
     SystemProcess(name="kthreadd", owner="root", cpu_mhz=15.0, mem_kb=512, volatility=0.3, critical=True, memory_strings=("[kthreadd]", "sched=rr", "workers=8"), description="Kernel thread daemon"),
-    SystemProcess(name="syslogd", owner="root", cpu_mhz=10.0, mem_kb=768, volatility=0.4, critical=False, memory_strings=("/var/log/messages", "facility=kern", "level=warning"), ports=(("udp", 514, "syslog"),), description="System logging daemon"),
+    SystemProcess(name="syslogd", owner="root", cpu_mhz=10.0, mem_kb=768, volatility=0.4, critical=False, memory_strings=("/var/log/messages", "facility=kern", "level=warning"), ports=(("udp", 514, "syslogd"),), description="System logging daemon"),
     SystemProcess(name="crond", owner="root", cpu_mhz=5.0, mem_kb=512, volatility=0.3, critical=False, memory_strings=("/etc/crontab", "*/5 * * * * /sbin/vfsd --sync"), description="Cron daemon"),
     SystemProcess(name="devd", owner="root", cpu_mhz=8.0, mem_kb=640, volatility=0.3, critical=False, memory_strings=("SATA A: System Drive", "SATA B: M.1", "SATA C: M.2"), description="Device daemon"),
-    SystemProcess(name="netd", owner="root", cpu_mhz=25.0, mem_kb=1536, volatility=0.6, critical=False, memory_strings=("iface=eth0", "addr=10.0.0.2", "gateway=10.0.0.1"), ports=(("udp", 53, "dns"),), description="Network daemon"),
+    SystemProcess(name="netd", owner="root", cpu_mhz=25.0, mem_kb=1536, volatility=0.6, critical=False, memory_strings=("iface=eth0", "addr=10.0.0.2", "gateway=10.0.0.1"), ports=(("udp", 53, "netd"),), description="Network daemon"),
     SystemProcess(name="vfsd", owner="root", cpu_mhz=20.0, mem_kb=2048, volatility=0.5, critical=False, memory_strings=("mount / (system)", "mount /mnt/m1", "mount /mnt/m2"), description="Virtual File System daemon"),
     SystemProcess(name="thermald", owner="root", cpu_mhz=12.0, mem_kb=384, volatility=0.3, critical=False, memory_strings=("coolant=WATER", "warn=80C", "crit=90C"), description="Thermal management daemon"),
     SystemProcess(name="powerd", owner="root", cpu_mhz=6.0, mem_kb=384, volatility=0.2, critical=False, memory_strings=("psu=Horus PSU", "budget=500W"), description="Power management daemon"),

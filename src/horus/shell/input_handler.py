@@ -41,6 +41,9 @@ class InputHandler:
         self.selection_anchor: int | None = None  # line index where the selection started; None = nothing selected
         self.insert_mode: bool = False
         self.line_cursor: int = 0
+        self.busy: bool = False  # a command is still producing output (see begin_job) -- input waits
+        self._cancel_job: Callable[[], None] | None = None
+        self._prompt_owed: bool = False  # start_line() was asked for while busy
         self.start_line()
         self._pending_submit: Callable[[str], None] | None = None
         self.masked: bool = False
@@ -57,7 +60,11 @@ class InputHandler:
         for input. Called for the very first line and after every submitted line --
         but the caller decides *when* it's safe to call this (e.g. ShellScreen skips
         it if the submitted command switched to a different screen, since writing
-        here would otherwise clobber whatever that screen just rendered)."""
+        here would otherwise clobber whatever that screen just rendered).
+        While a job is running (see begin_job) the prompt waits until it ends."""
+        if self.busy:
+            self._prompt_owed = True
+            return
         prompt = self._get_prompt() if self._get_prompt is not None else ""
         if prompt:
             self.buffer.write_string(col=0, row=self.buffer.cursor_row, string=prompt)
@@ -65,6 +72,25 @@ class InputHandler:
         self.line_cursor = 0
         self.selection_anchor = None
         self._sync_cursor()
+
+    # --- jobs: commands still running after they returned ---
+
+    def begin_job(self, on_cancel: Callable[[], None] | None = None) -> None:
+        """A command keeps writing output after it returned (e.g. ping, one
+        reply at a time): until end_job() the shell takes no input and gives
+        no prompt. Ctrl+C calls on_cancel, which is expected to stop the job
+        and call end_job()."""
+        self.busy = True
+        self._cancel_job = on_cancel
+
+    def end_job(self) -> None:
+        """The job is done -- input works again, and the prompt it held back
+        is written now."""
+        self.busy = False
+        self._cancel_job = None
+        if self._prompt_owed:
+            self._prompt_owed = False
+            self.start_line()
 
     # --- selection ---
 
@@ -132,7 +158,7 @@ class InputHandler:
     def _handle_motion_select(self, motion: int) -> None:
         """A cursor motion with Shift held: moves the cursor like
         _handle_motion, but extends the selection from where it started."""
-        if motion not in _CURSOR_MOTIONS:
+        if self.busy or motion not in _CURSOR_MOTIONS:
             return
         if self.selection_anchor is None:
             self.selection_anchor = self.line_cursor
@@ -159,6 +185,8 @@ class InputHandler:
     def paste(self) -> None:
         """Types the clipboard's text in, replacing the selection -- line
         breaks become spaces, so pasting never submits a line by itself."""
+        if self.busy:
+            return
         text = " ".join(self.clipboard.get_text().splitlines())
         if text:
             self._handle_text(text)
@@ -297,7 +325,7 @@ class InputHandler:
 
     def _handle_text(self, text: str):
         """Handles simple text input key presses, not correlating to any pyglet models."""
-        if text is None:
+        if text is None or self.busy:
             return
         text = "".join(char for char in text if char.isprintable())
         if not text:
@@ -317,6 +345,8 @@ class InputHandler:
     def _handle_motion(self, motion: int):
         """Handles key presses pyglet models as a text motion: Backspace, Left, Right, End..."""
         logger.debug(f"INPUT: Motion='{motion}'")
+        if self.busy:
+            return
         if motion in _CURSOR_MOTIONS:
             self._clear_selection()  # moving without Shift drops the selection
             self._move_cursor(motion)
@@ -385,6 +415,11 @@ class InputHandler:
         logger.debug(f"INPUT: Symbol='{symbol}', modifiers='{modifiers}'")
         ctrl_held = bool(modifiers & pyglet.window.key.MOD_CTRL)
 
+        if self.busy:
+            if ctrl_held and symbol == key.C and self._cancel_job is not None:
+                self._cancel_job()  # Ctrl+C stops a running job instead of copying
+            return
+
         if ctrl_held and symbol == key.C:
             self.copy()
 
@@ -449,6 +484,8 @@ class InputHandler:
         """Handles enter key presses. Leaves writing the prompt for the next line to
         start_line() -- see its docstring for why that's the caller's decision."""
         logger.debug(f"INPUT: 'enter', Current Line='{self.current_line}")
+        if self.busy:
+            return
         self._clear_selection()  # the submitted line stays on screen -- not highlighted
         self._advance_row(1)
         self.buffer.cursor_col = 0

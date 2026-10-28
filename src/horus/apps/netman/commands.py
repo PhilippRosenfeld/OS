@@ -5,11 +5,14 @@ from horus.network.address import is_valid_ip
 from horus.network.hosts import HostEntry
 from horus.network.listener import ANY_ADDRESS
 from horus.network.netd import NetdError, NetdNotRunningError
+from horus.shell.jobs import run_timed
 
 netman_commands = Registry()
 
 PING_DEFAULT_COUNT = 4
 PING_MAX_COUNT = 20
+PING_INTERVAL_S = 0.5   # pause between two packets
+PING_TIMEOUT_S = 1.0    # how long a lost packet is waited for
 
 @command("status", help_text="Show the network interfaces", target=netman_commands)
 def status(ctx, argv):
@@ -120,21 +123,37 @@ def ping(ctx, argv):
 
     host = _ping_target_host(ctx, iface, ip_address)
     ctx.write_line(f"Pinging {target} [{ip_address}] via {iface.name} with 32 bytes of data:")
+    sent = 0
     times = []
-    for _ in range(count):
-        if host is None or random.random() * 100 < iface.packet_loss_percentage:
-            ctx.write_line("Request timed out.")
-            continue
-        rtt = max(0.0, (iface.latency_ms + host.latency_ms) * random.uniform(0.8, 1.2))
+
+    def packets():
+        """One step per packet: it shows up after its round trip (a lost one
+        after the timeout), the next one is sent PING_INTERVAL later."""
+        nonlocal sent
+        for i in range(count):
+            gap = PING_INTERVAL_S if i > 0 else 0.0
+            if host is None or random.random() * 100 < iface.packet_loss_percentage:
+                yield gap + PING_TIMEOUT_S, lambda: ctx.write_line("Request timed out.")
+            else:
+                rtt = max(0.0, (iface.latency_ms + host.latency_ms) * random.uniform(0.8, 1.2))
+                yield gap + rtt / 1000, lambda rtt=rtt: _reply(rtt)
+            sent += 1
+
+    def _reply(rtt):
         times.append(rtt)
         ctx.write_line(f"Reply from {ip_address}: bytes=32 time={rtt:.0f}ms TTL=64")
 
-    lost = count - len(times)
-    ctx.write_line(f"Ping statistics for {ip_address}:")
-    ctx.write_line(f"    Packets: Sent = {count}, Received = {len(times)}, Lost = {lost} ({lost * 100 // count}% loss)")
-    if times:
-        ctx.write_line(f"    Round trip: min = {min(times):.0f}ms, max = {max(times):.0f}ms, "
-                       f"avg = {sum(times) / len(times):.0f}ms")
+    def statistics():
+        if sent == 0:
+            return
+        lost = sent - len(times)
+        ctx.write_line(f"Ping statistics for {ip_address}:")
+        ctx.write_line(f"    Packets: Sent = {sent}, Received = {len(times)}, Lost = {lost} ({lost * 100 // sent}% loss)")
+        if times:
+            ctx.write_line(f"    Round trip: min = {min(times):.0f}ms, max = {max(times):.0f}ms, "
+                           f"avg = {sum(times) / len(times):.0f}ms")
+
+    run_timed(ctx, packets(), finish=statistics)
 
 
 def _resolve_target(ctx, target):

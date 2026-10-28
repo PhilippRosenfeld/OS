@@ -180,7 +180,7 @@ def test_seeded_services_listen_on_their_ports_and_close_them_when_killed():
     opened = {(listener.protocol, listener.port): listener for listener in table.list()}
     assert set(opened) == {("udp", 53), ("udp", 514)}
     netd = next(proc for proc in processes.list_processes() if proc.name == "netd")
-    assert opened[("udp", 53)].pid == netd.pid and opened[("udp", 53)].service == "dns"
+    assert opened[("udp", 53)].pid == netd.pid and opened[("udp", 53)].service == "netd"
 
     processes.remove_process(netd.pid, user="root", role=ROOT)
     assert not table.is_open("udp", 53) and table.is_open("udp", 514)

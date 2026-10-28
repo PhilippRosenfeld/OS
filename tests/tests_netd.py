@@ -120,5 +120,5 @@ def test_start_service_rolls_back_when_a_port_is_taken(system):
 
 
 def test_find_service():
-    assert find_service("netd").ports == (("udp", 53, "dns"),)
+    assert find_service("netd").ports == (("udp", 53, "netd"),)
     assert find_service("nope") is None
