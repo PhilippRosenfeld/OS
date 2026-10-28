@@ -1319,9 +1319,13 @@ def test_ps_shows_whether_a_process_is_critical():
     ps(ctx, [])
     rows = [row_text(buffer, r) for r in range(buffer.rows)]
     header = next(row for row in rows if "CRIT" in row)
-    crit_col = header.index("CRIT")
-    assert next(row for row in rows if row.rstrip().endswith("init"))[crit_col] == "Y"
-    assert next(row for row in rows if row.rstrip().endswith("bash"))[crit_col] == "N"
+    name_col, crit_col = header.index("NAME"), header.index("CRIT")
+
+    def row_of(name):
+        return next(row for row in rows if row[name_col:].startswith(name))
+
+    assert row_of("init")[crit_col] == "Y"
+    assert row_of("bash")[crit_col] == "N"
 
 
 def test_top_pushes_a_top_screen_with_the_requested_sort():
@@ -1338,7 +1342,7 @@ def test_top_invalid_sort_choice_reports_parse_error():
 
 
 def test_top_without_a_screen_stack_falls_back_to_a_one_shot_snapshot():
-    ctx, buffer = make_context()
+    ctx, buffer = make_context(cols=120, rows=10)   # wide enough that the process row doesn't wrap
     ctx.process_table = ProcessTable()
     ctx.process_table.add_process(Process(name="init", pid=0, owner="root", cpu_mhz=0.1, mem_kb=1024))
     top(ctx, [])

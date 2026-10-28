@@ -70,7 +70,7 @@ class TopScreen(Screen):
             cpu_percent = format_cpu_percent(proc, self._process_table)
             cpu_time = format_cpu_time(proc.cpu_time)
             self._buffer.write_string(0, row, f"{proc.pid:<8}{proc.name:<15}{proc.owner:<12}{cpu_percent:<10.1f}{format_core(proc):<6}{cpu_time:<11}"
-                                              f"{proc.mem_kb:<12}{format_mem_percent(proc, self._process_table):<7.1f}{uptime:<11}{ 'Y' if proc.critical else 'N'}")
+                                              f"{proc.mem_kb:<12}{format_mem_percent(proc, self._process_table):<7.1f}{uptime:<10}{ 'Y' if proc.critical else 'N'}")
 
         self._buffer.write_string(0, last_row, "Ctrl+C to exit")
 

@@ -11,6 +11,7 @@ from horus.processes.process_view import (
     format_uptime,
     sort_processes,
 )
+from horus.processes.services import _SYSTEM_PROCESSES, find_service, start_service
 from horus.ui.screens.top_screen import TopScreen
 
 
@@ -48,9 +49,16 @@ def _build_kill_parser() -> CommandArgumentParser:
     parser.add_argument("pid", type=int, help="PID of the process")
     return parser
 
+def _build_start_parser() -> CommandArgumentParser:
+    parser = CommandArgumentParser(prog="start", add_help=True, description="Start a system native service")
+    parser.add_argument("service", help="Service to start", nargs="?", default=None)
+    parser.add_argument("-l", "--list", action="store_true", help="List available services")
+    return parser
+
 _top_parser = _build_top_parser()
 _ps_parser = _build_ps_parser()
 _kill_parser = _build_kill_parser()
+_start_parser = _build_start_parser()
 
 @command("top", help_text="Display system processes", category="system")
 def top(ctx, argv: list[str]) -> None:
@@ -109,6 +117,36 @@ def kill(ctx, argv: list[str]) -> None:
         return
 
     _finish_kill(ctx, proc)
+    
+@command("start", help_text="Start a system process", category="system")
+def start(ctx, argv: list[str]) -> None:
+    try:
+        args = _start_parser.parse_args(argv)
+        if args.service is None and not args.list:
+            raise CommandParseError("Required argument 'service' is missing", usage="start <service>")
+    except CommandParseError as e:
+        ctx.write_line(e.message or e.usage)
+        return
+    
+    if args.list:
+        ctx.write_line("Known services:")
+        for spec in (find_service(s.name) for s in _SYSTEM_PROCESSES):
+            running = ctx.process_table.get_process_by_name(spec.name) is not None
+            status = "RUN" if running else "STOP"
+            ctx.write_line(f"{spec.name:<15} | {spec.description:<30} | {status}")
+        return
+    
+    spec = find_service(args.service)
+    if spec is None:
+        ctx.write_line(f"start: '{args.service}' - No such service")
+        return
+    
+    if ctx.process_table.get_process_by_name(spec.name) is not None:
+        ctx.write_line(f"start: '{args.service}' - Service is already running")
+        return
+
+    start_service(spec, ctx.process_table, ctx.port_table)
+    ctx.write_line(f"Started service '{spec.name}' (PID {ctx.process_table.get_process_by_name(spec.name).pid})")
 
 
 def _finish_kill(ctx, proc) -> None:

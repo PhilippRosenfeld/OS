@@ -87,6 +87,10 @@ class ProcessTable:
 
     def get_process(self, pid: int) -> process | None:
         return self.processes.get(pid)
+    
+    def get_process_by_name(self, name: str) -> process | None:
+        """Returns the first process with the given name, or None if not found."""
+        return next((proc for proc in self.processes.values() if proc.name == name), None)
 
     def list_processes(self) -> list[process]:
         return list(self.processes.values())
