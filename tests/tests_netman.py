@@ -6,7 +6,10 @@ from horus.events.bus import EventBus
 from horus.hardware.spec import HardwareSpec
 from horus.kernel.kernel import Kernel
 from horus.network.listener import Listener
+from horus.network.netd import NetDaemon
 from horus.network.port_table import PortTable
+from horus.processes.process import process as Process
+from horus.processes.processTable import ProcessTable
 from horus.session.context import Context
 from horus.session.user import UserRole
 
@@ -15,12 +18,21 @@ def full_text(buffer):
     return "\n".join("".join(buffer.get_cell(c, r).char for c in range(buffer.cols)) for r in range(buffer.rows))
 
 
+def running_netd(hardware, port_table=None):
+    """A NetDaemon whose netd process is running; returns (netd, process_table)."""
+    processes = ProcessTable()
+    processes.add_process(Process(name="netd", pid=0, owner="root"))
+    return NetDaemon(hardware, processes, port_table), processes
+
+
 @pytest.fixture
 def netman():
-    """Runs a netman command line against default hardware; returns (run, hardware, buffer)."""
+    """Runs a netman command line against default hardware with netd running;
+    returns (run, hardware, buffer)."""
     buffer = ScreenBuffer(80, 20)
     hardware = HardwareSpec()
-    ctx = Context(session_id="s", user="root", cwd="/", screen=buffer, hardware=hardware)
+    netd, _ = running_netd(hardware)
+    ctx = Context(session_id="s", user="root", cwd="/", screen=buffer, hardware=hardware, netd=netd)
     kernel = Kernel(registry=netman_commands, bus=EventBus())
 
     def run(line):
@@ -126,3 +138,56 @@ def test_speed_rejects_bad_input_and_leaves_the_interface_alone(netman, line, me
     before = (eth0(hardware).link_speed_down_mbps, eth0(hardware).link_speed_up_mbps)
     assert message in run(line)
     assert (eth0(hardware).link_speed_down_mbps, eth0(hardware).link_speed_up_mbps) == before
+
+
+# --- changes go through netd ---
+
+@pytest.fixture
+def netman_with_netd():
+    """Like `netman`, but also hands out a way to kill netd."""
+    buffer = ScreenBuffer(80, 30)
+    hardware = HardwareSpec()
+    netd, processes = running_netd(hardware)
+    ctx = Context(session_id="s", user="root", cwd="/", screen=buffer, hardware=hardware, netd=netd)
+    kernel = Kernel(registry=netman_commands, bus=EventBus())
+
+    def run(line):
+        kernel.execute(line, ctx)
+        return full_text(buffer)
+
+    def kill_netd():
+        pid = next(p.pid for p in processes.list_processes() if p.name == "netd")
+        processes.remove_process(pid, user="root", role=UserRole.ROOT)
+
+    return run, hardware, kill_netd
+
+
+@pytest.mark.parametrize("line", ["down eth0", "up eth0", "set-ip eth0 10.0.0.42", "speed eth0 100 20"])
+def test_changes_are_refused_while_netd_is_not_running(netman_with_netd, line):
+    run, hardware, kill_netd = netman_with_netd
+    before = vars(eth0(hardware)).copy()
+    kill_netd()
+    assert "netd is not running" in run(line)
+    assert vars(eth0(hardware)) == before
+
+
+def test_reading_the_interfaces_works_without_netd(netman_with_netd):
+    run, hardware, kill_netd = netman_with_netd
+    kill_netd()
+    assert f"eth0  {eth0(hardware).ip_address}  UP" in run("status")
+    assert "Interface   | eth0" in run("iface eth0")
+
+
+def test_changes_are_refused_without_a_netd_at_all():
+    buffer = ScreenBuffer(80, 20)
+    hardware = HardwareSpec()
+    ctx = Context(session_id="s", user="root", cwd="/", screen=buffer, hardware=hardware)
+    Kernel(registry=netman_commands, bus=EventBus()).execute("down eth0", ctx)
+    assert "netd is not running" in full_text(buffer)
+    assert eth0(hardware).enabled is True
+
+
+@pytest.mark.parametrize("line", ["up wlan9", "down wlan9", "set-ip wlan9 10.0.0.42"])
+def test_changes_to_an_unknown_interface_are_reported(netman, line):
+    run, _, _ = netman
+    assert "Interface 'wlan9' not found." in run(line)

@@ -171,7 +171,7 @@ def test_ephemeral_ports_skip_taken_ones():
 # --- system services open their ports at startup ---
 
 def test_seeded_services_listen_on_their_ports_and_close_them_when_killed():
-    from horus.processes.seed_process import seed_processes
+    from horus.processes.services import seed_processes
     bus = EventBus()
     processes = ProcessTable(events=bus)
     table = PortTable(processes, events=bus)
@@ -187,7 +187,7 @@ def test_seeded_services_listen_on_their_ports_and_close_them_when_killed():
 
 
 def test_seeding_without_a_port_table_only_starts_the_processes():
-    from horus.processes.seed_process import seed_processes
+    from horus.processes.services import seed_processes
     processes = ProcessTable()
     seed_processes(processes)
     assert len(processes.list_processes()) == 10

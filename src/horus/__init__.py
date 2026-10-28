@@ -15,12 +15,13 @@ from horus.hardware.spec import HardwareSpec
 from horus.kernel.commands.cmd_menu import horus_menu, open_settings_menu
 from horus.kernel.kernel import Kernel
 from horus.kernel.registry import registry
+from horus.network.netd import NetDaemon
 from horus.network.port_table import PortTable
 from horus.paths import BOOT_DIR, BOOT_PROGRESS_PATH, DATA_DIR, HARDWARE_SPEC_PATH, SAVES_DIR, SOUNDS_DIR
 from horus.processes.memory import MemoryManager
 from horus.processes.processTable import ProcessTable
 from horus.processes.scheduler import CpuScheduler
-from horus.processes.seed_process import seed_processes
+from horus.processes.services import seed_processes
 from horus.processes.system_reactions import (
     register_memory_reactions,
     register_power_reactions,
@@ -149,6 +150,7 @@ def main() -> None:
     register_system_log(bus, system_log)
     register_status_bar(bus, window.status_bar)
     window.status_bar.start_blinking()
+    netd = NetDaemon(hardware, process_table, port_table, hosts=None)
 
     # ---- CONTEXT -----
     context = Context(
@@ -170,6 +172,7 @@ def main() -> None:
         memory_manager=memory_manager,
         port_table=port_table,
         clipboard=window.clipboard,
+        netd=netd,
     )
 
     def on_submit(line: str) -> None:

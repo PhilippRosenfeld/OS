@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     # on Context, so only a type checker (never actual execution) sees them
     from horus.audio.sound_manager import SoundManager
     from horus.kernel.kernel import Kernel
+    from horus.network.netd import NetDaemon
     from horus.network.port_table import PortTable
     from horus.processes.memory import MemoryManager
     from horus.processes.scheduler import CpuScheduler
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     from horus.shell.input_handler import InputHandler
     from horus.story.progress import BootProgress
     from horus.ui.screens.main_menu_screen import MainMenuScreen
+    
 
 
 @dataclass
@@ -62,6 +64,7 @@ class Context:
     cpu_scheduler: "CpuScheduler" = None
     memory_manager: "MemoryManager" = None
     port_table: "PortTable" = None
+    netd: "NetDaemon" = None  # the network daemon, which manages network interfaces and ports
 
 
     def __post_init__(self):
