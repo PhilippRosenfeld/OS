@@ -595,3 +595,39 @@ def test_command_decorator_registers_into_a_given_registry_only():
     from horus.kernel.registry import registry as global_registry
     assert own.lookup("only_here_xyz") is handler
     assert global_registry.lookup("only_here_xyz") is None
+
+
+# --- the 'netman' shell command ---
+
+def test_netman_command_opens_the_connection_manager_as_a_process():
+    from horus.apps.netman.screen import NetmanWindow
+    from horus.kernel.commands.cmd_net import netman
+    desk = Desktop()
+    netman(desk.ctx, [])
+    manager = desk.screens.active
+    window = manager.focused
+    assert isinstance(window, NetmanWindow)
+    assert desk.table.get_process(window.pid).name == "netman"
+    assert window.prompt() == "net> "
+
+
+def test_netman_command_brings_back_the_running_netman():
+    from horus.kernel.commands.cmd_net import netman
+    desk = Desktop()
+    netman(desk.ctx, [])
+    manager = desk.screens.active
+    window = manager.focused
+    type_line(manager, "exit")
+    assert desk.screens.active is desk.shell
+
+    netman(desk.ctx, [])
+    assert desk.screens.active.focused is window
+    assert [p.name for p in desk.table.list_processes()] == ["netman"]
+
+
+def test_netman_command_rejects_arguments_without_opening_a_window():
+    from horus.kernel.commands.cmd_net import netman
+    desk = Desktop()
+    netman(desk.ctx, ["--bogus"])
+    assert desk.screens.active is desk.shell
+    assert desk.table.list_processes() == []

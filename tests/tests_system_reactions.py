@@ -1,5 +1,7 @@
 from unittest.mock import patch
 
+import pytest
+
 from horus.display.screen_buffer import ScreenBuffer
 from horus.display.status_bar import StatusBar
 from horus.events.bus import EventBus
@@ -513,3 +515,70 @@ def test_storage_reactions_without_sounds_do_nothing():
     bus = EventBus()
     register_storage_reactions(bus, sounds=None)
     bus.publish(StorageActivityCheckedEvent(activity=1.0))
+
+
+# --- power, temperature and memory sounds ---
+
+def power(over_budget):
+    return PowerUsageCheckedEvent(total_power_usage=600.0 if over_budget else 300.0, psu_output_watts=500.0,
+                                  over_budget=over_budget)
+
+
+def test_power_over_budget_alarms_once_per_crossing():
+    from horus.processes.system_reactions import register_power_reactions
+    bus = EventBus()
+    sounds = FakeSounds()
+    register_power_reactions(bus, sounds)
+
+    for over in (False, True, True, True, False, True):
+        bus.publish(power(over))
+
+    assert sounds.played == ["system_error_notification"] * 2    # entering the overload twice, not every tick
+
+
+def test_power_reactions_without_sounds_do_not_fail():
+    from horus.processes.system_reactions import register_power_reactions
+    bus = EventBus()
+    register_power_reactions(bus, None)
+    bus.publish(power(True))
+
+
+def test_critical_temperature_plays_the_crash_sound_and_shows_the_reason():
+    bus = EventBus()
+    screens = ScreenManager()
+    sounds = FakeSounds()
+    register_temperature_reactions(bus, screens, window=None, sounds=sounds, buffer=ScreenBuffer(80, 24))
+
+    bus.publish(TemperatureCriticalEvent(temperature=95.0, critical_temperature=90.0))
+
+    assert sounds.played == ["system_crashed"]
+    assert isinstance(screens.active, CrashScreen)
+
+
+def test_critical_temperature_is_logged_as_an_error():
+    bus = EventBus()
+    log = SystemLog()
+    register_system_log(bus, log)
+    bus.publish(TemperatureCriticalEvent(temperature=95.0, critical_temperature=90.0))
+    entry = log.entries()[-1]
+    assert entry.severity == LogSeverity.ERROR and "95.0C" in entry.message
+
+
+@pytest.mark.parametrize("kind,sound", [("corrected", "error_notification"), ("crash", "system_error_notification"),
+                                        ("corruption", "system_error_notification"), ("oom", "system_error_notification")])
+def test_memory_errors_play_a_sound_by_severity(kind, sound):
+    from horus.events.types import MemoryErrorEvent
+    from horus.processes.system_reactions import register_memory_reactions
+    bus = EventBus()
+    sounds = FakeSounds()
+    register_memory_reactions(bus, sounds)
+    bus.publish(MemoryErrorEvent(kind=kind, detail="x"))
+    assert sounds.played == [sound]
+
+
+def test_memory_reactions_without_sounds_do_not_fail():
+    from horus.events.types import MemoryErrorEvent
+    from horus.processes.system_reactions import register_memory_reactions
+    bus = EventBus()
+    register_memory_reactions(bus, None)
+    bus.publish(MemoryErrorEvent(kind="oom", detail="x"))

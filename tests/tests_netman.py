@@ -191,3 +191,53 @@ def test_changes_are_refused_without_a_netd_at_all():
 def test_changes_to_an_unknown_interface_are_reported(netman, line):
     run, _, _ = netman
     assert "Interface 'wlan9' not found." in run(line)
+
+
+# --- ports and usage ---
+
+def test_ports_lists_every_open_port_with_its_process(netman_with_ports):
+    run, _ = netman_with_ports
+    lines = run("ports").splitlines()
+    assert "Protocol" in lines[0] and "PID" in lines[0]
+    assert any(line.split()[:2] == ["tcp", "22"] and "ssh" in line for line in lines)
+    assert any(line.split()[:3] == ["tcp", "8080", "192.168.9.9"] for line in lines)
+    assert any(line.split()[:2] == ["udp", "5353"] for line in lines)
+
+
+def test_ports_without_any_open_port():
+    buffer = ScreenBuffer(80, 5)
+    ctx = Context(session_id="s", user="root", cwd="/", screen=buffer, hardware=HardwareSpec(), port_table=PortTable())
+    Kernel(registry=netman_commands, bus=EventBus()).execute("ports", ctx)
+    assert "No open ports." in full_text(buffer)
+
+
+@pytest.mark.parametrize("line,usage", [
+    ("iface", "Usage: iface <interface_name>"),
+    ("up", "Usage: up <interface_name>"),
+    ("down", "Usage: down <interface_name>"),
+    ("set-ip eth0", "Usage: set-ip <interface_name> <ip_address>"),
+])
+def test_commands_without_enough_arguments_show_their_usage(netman, line, usage):
+    run, hardware, _ = netman
+    before = vars(eth0(hardware)).copy()
+    assert usage in run(line)
+    assert vars(eth0(hardware)) == before
+
+
+def test_iface_matches_ports_against_the_interfaces_current_ip(netman_with_ports):
+    run, hardware = netman_with_ports
+    hardware.motherboard.network_interfaces[0].ip_address = "10.9.9.9"
+    out = run("iface eth0")
+    assert "ssh" in out                      # bound to every interface, so still there
+    assert "mdns" not in out                 # was bound to the old IP
+
+
+def test_iface_without_reachable_ports_says_none():
+    buffer = ScreenBuffer(80, 20)
+    hardware = HardwareSpec()
+    ports = PortTable()
+    ports.add(Listener("tcp", 8080, pid=1, service="other-nic", address="192.168.9.9"))
+    ctx = Context(session_id="s", user="root", cwd="/", screen=buffer, hardware=hardware, port_table=ports)
+    Kernel(registry=netman_commands, bus=EventBus()).execute("iface eth0", ctx)
+    assert "Ports: none" in full_text(buffer)
+    assert "other-nic" not in full_text(buffer)

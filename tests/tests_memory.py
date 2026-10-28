@@ -2,6 +2,7 @@ import random
 from unittest.mock import patch
 
 import pyglet
+import pytest
 
 from horus.display.screen_buffer import ScreenBuffer
 from horus.display.status_bar import StatusBar
@@ -403,6 +404,39 @@ def test_stress_starts_a_killable_process():
     hog = by_name(table, "hog")
     assert (hog.cpu_mhz, hog.mem_kb, hog.killable) == (300, 8192, True)
     assert f"kill {hog.pid}" in full_text(buffer)
+
+
+def test_free_without_a_memory_manager_counts_everything_as_resident():
+    ctx, buffer, table, _ = make_ctx(memory=False)
+    free(ctx, [])
+    rows = [row_text(buffer, r) for r in range(buffer.rows)]
+    mem_row = next(row for row in rows if row.startswith("Mem:"))
+    swap_row = next(row for row in rows if row.startswith("Swap:"))
+    assert mem_row.split()[1:3] == [str(table.total_memory_kb), str(table.used_mem_kb())]
+    assert swap_row.split()[1:] == ["0", "0", "0"]
+
+
+def test_memdump_reports_an_unknown_pid():
+    ctx, buffer, _, _ = make_ctx()
+    memdump(ctx, ["9999"])
+    assert "memdump: (9999) - No such process" in full_text(buffer)
+
+
+def test_stress_rejects_negative_load_and_starts_nothing():
+    ctx, buffer, table, _ = make_ctx()
+    count = len(table.list_processes())
+    stress(ctx, ["-c", "-5"])
+    assert "must not be negative" in full_text(buffer)
+    assert len(table.list_processes()) == count
+
+
+@pytest.mark.parametrize("cmd,argv", [(free, ["--bogus"]), (memdump, []), (memdump, ["abc"]), (stress, ["-m", "lots"])])
+def test_memory_commands_report_bad_arguments(cmd, argv):
+    ctx, buffer, table, _ = make_ctx()
+    count = len(table.list_processes())
+    cmd(ctx, argv)
+    assert full_text(buffer).strip() != ""
+    assert "Mem:" not in full_text(buffer) and len(table.list_processes()) == count
 
 
 # --- RamScreen ---
