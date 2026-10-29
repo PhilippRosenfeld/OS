@@ -152,8 +152,9 @@ def test_without_an_input_handler_everything_runs_right_away():
 def ping_shell(shell):
     ctx, handler, buffer = shell
     hardware = HardwareSpec()
+    hardware.motherboard.network_interfaces[0].ip_address = "192.168.1.2"
     hardware.motherboard.network_interfaces[0].latency_ms = 0
-    hosts = HostTable({"slow.test": HostEntry(name="slow.test", ip="10.0.0.9", latency_ms=200.0)})
+    hosts = HostTable({"slow.test": HostEntry(name="slow.test", ip="192.168.1.9", latency_ms=200.0)})
     processes = ProcessTable()
     processes.add_process(Process(name="netd", pid=0, owner="root"))
     ctx.hardware, ctx.host_table = hardware, hosts

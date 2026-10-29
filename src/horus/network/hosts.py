@@ -23,9 +23,9 @@ class HostEntry:
     
     
 STANDARD_HOSTS = {
-    "gateway": HostEntry(name="gateway", ip="192.168.1.1", latency_ms=10.0, online=True),
-    "server.local": HostEntry(name="server.local", ip="192.168.1.100", latency_ms=50.0, online=True),
-    "mainframe.corp": HostEntry(name="mainframe.corp", ip="192.168.1.200", latency_ms=150.0, online=True)
+    "gateway": HostEntry(name="gateway", ip="192.168.1.10", latency_ms=10.0, online=True),
+    "server.local": HostEntry(name="server.local", ip="192.168.1.23", latency_ms=50.0, online=True),
+    "mainframe.corp": HostEntry(name="mainframe.corp", ip="172.16.4.10", latency_ms=150.0, online=True)
 }
         
 class HostTable:

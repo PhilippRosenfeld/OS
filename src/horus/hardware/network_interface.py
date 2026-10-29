@@ -1,3 +1,4 @@
+import ipaddress
 from typing import Optional
 
 
@@ -15,6 +16,7 @@ class NetworkInterface:
                  latency_ms: Optional[float] = 0.0,
                  load_down: Optional[float] = 0.0,
                  load_up: Optional[float] = 0.0,
+                 netmask_length: Optional[int] =  24,
                  ):
         
         self.name = name
@@ -29,7 +31,7 @@ class NetworkInterface:
         self.latency_ms = latency_ms
         self.load_down = load_down
         self.load_up = load_up
-        
+        self.netmask_length = netmask_length
 
     def to_dict(self) -> dict:
         return {
@@ -43,6 +45,9 @@ class NetworkInterface:
             "packet_loss_percentage": self.packet_loss_percentage,
             "enabled": self.enabled,
             "latency_ms": self.latency_ms,
+            "load_down": self.load_down,
+            "load_up": self.load_up,
+            "netmask_length": self.netmask_length,
         }
 
     @classmethod
@@ -51,3 +56,7 @@ class NetworkInterface:
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, NetworkInterface) and self.to_dict() == other.to_dict()
+    
+    @property
+    def network(self):
+        return ipaddress.ip_interface(f"{self.ip_address}/{self.netmask_length}").network

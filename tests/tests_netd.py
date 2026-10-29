@@ -9,6 +9,7 @@ from horus.network.netd import (
     NetdError,
     NetdInterfaceNotFoundError,
     NetdInvalidConfigError,
+    NetdNoRouteError,
     NetdNotRunningError,
 )
 from horus.network.port_table import PortInUseError, PortTable
@@ -122,3 +123,65 @@ def test_start_service_rolls_back_when_a_port_is_taken(system):
 def test_find_service():
     assert find_service("netd").ports == (("udp", 53, "netd"),)
     assert find_service("nope") is None
+
+
+# --- routing ---
+
+@pytest.fixture
+def routed(system):
+    """`system` with eth0 at 192.168.1.2/24 and the gateway 192.168.1.10 in that network."""
+    netd, hardware, processes, ports = system
+    eth0(hardware).ip_address, eth0(hardware).netmask_length = "192.168.1.2", 24
+    return netd, hardware
+
+
+def test_a_host_in_the_local_network_is_reached_directly(routed):
+    netd, hardware = routed
+    route = netd.route("192.168.1.23")
+    assert route.iface is eth0(hardware) and route.via is None
+
+
+def test_any_other_host_is_reached_via_the_gateway(routed):
+    netd, hardware = routed
+    route = netd.route("172.16.4.10")
+    assert route.iface is eth0(hardware) and route.via == netd.gateway == "192.168.1.10"
+
+
+def test_the_netmask_decides_what_is_local(routed):
+    netd, hardware = routed
+    eth0(hardware).netmask_length = 16
+    assert netd.route("192.168.99.1").via is None
+    eth0(hardware).netmask_length = 28                     # 192.168.1.0 - 192.168.1.15
+    assert netd.route("192.168.1.23").via == "192.168.1.10"
+
+
+def test_no_route_without_a_gateway_or_outside_the_gateways_network(routed):
+    netd, hardware = routed
+    netd.set_gateway("10.9.9.1")                        # not in any local network
+    with pytest.raises(NetdNoRouteError):
+        netd.route("172.16.4.10")
+    assert netd.route("192.168.1.23").via is None             # the local network still works
+
+
+def test_no_route_while_the_interface_is_down(routed):
+    netd, hardware = routed
+    eth0(hardware).enabled = False
+    for ip in ("192.168.1.23", "172.16.4.10"):
+        with pytest.raises(NetdNoRouteError):
+            netd.route(ip)
+
+
+def test_routing_works_without_netd_but_changing_the_gateway_does_not(routed, system):
+    netd, _ = routed
+    kill(system[2], "netd")
+    assert netd.route("172.16.4.10").via == "192.168.1.10"
+    with pytest.raises(NetdNotRunningError):
+        netd.set_gateway("192.168.1.254")
+    assert netd.gateway == "192.168.1.10"
+
+
+def test_the_default_gateway_is_the_hosts_gateway_entry(system):
+    netd, hardware, processes, _ = system
+    hosts = HostTable()
+    assert NetDaemon(hardware, processes, hosts=hosts).gateway == hosts.get_host("gateway").ip
+    assert NetDaemon(hardware, processes, hosts=hosts, gateway="10.1.1.1").gateway == "10.1.1.1"

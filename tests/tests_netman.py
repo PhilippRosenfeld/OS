@@ -251,7 +251,8 @@ def pinger():
     from horus.network.hosts import HostEntry, HostTable
     buffer = ScreenBuffer(100, 40)
     hardware = HardwareSpec()
-    hosts = HostTable({"files.test": HostEntry(name="files.test", ip="10.0.0.5", latency_ms=20.0)})
+    eth0(hardware).ip_address = "192.168.1.2"             # in the 192.168.1.0/24 the test hosts and the gateway are in
+    hosts = HostTable({"files.test": HostEntry(name="files.test", ip="192.168.1.5", latency_ms=20.0)})
     processes = ProcessTable()
     processes.add_process(Process(name="netd", pid=0, owner="root"))
     netd = NetDaemon(hardware, processes, hosts=hosts)
@@ -278,7 +279,7 @@ def replies(out):
 def test_ping_a_known_host_by_name_gets_replies_with_its_latency(pinger):
     run, hardware, _, _ = pinger
     out = run("ping files.test")
-    assert "Pinging files.test [10.0.0.5] via eth0" in out
+    assert "Pinging files.test [192.168.1.5] via eth0" in out
     assert replies(out) == 4
     assert "Sent = 4, Received = 4, Lost = 0 (0% loss)" in out
     times = [int(line.split("time=")[1].split("ms")[0]) for line in out.splitlines() if "time=" in line]
@@ -307,13 +308,13 @@ def test_ping_by_name_needs_netd_but_by_ip_does_not(pinger):
     run, _, _, kill_netd = pinger
     kill_netd()
     assert "cannot resolve 'files.test': netd is not running" in run("ping files.test")
-    assert replies(run("ping 10.0.0.5")) == 4
+    assert replies(run("ping 192.168.1.5")) == 4
 
 
 def test_ping_an_offline_or_unknown_ip_times_out(pinger):
     run, _, hosts, _ = pinger
     hosts.get_host("files.test").online = False
-    out = run("ping 10.0.0.5")
+    out = run("ping 192.168.1.5")
     assert replies(out) == 0 and out.count("Request timed out.") == 4
     assert "Lost = 4 (100% loss)" in out and "Round trip" not in out
     assert replies(run("ping 10.9.9.9")) == 0
@@ -322,8 +323,8 @@ def test_ping_an_offline_or_unknown_ip_times_out(pinger):
 def test_ping_needs_an_interface_that_is_up(pinger):
     run, hardware, _, _ = pinger
     eth0(hardware).enabled = False
-    out = run("ping 10.0.0.5")
-    assert "Network is unreachable" in out and replies(out) == 0
+    out = run("ping 192.168.1.5")
+    assert "Network unreachable: No route to 192.168.1.5" in out and replies(out) == 0
 
 
 def test_ping_drops_packets_by_the_interfaces_packet_loss(pinger):
@@ -336,3 +337,36 @@ def test_ping_the_own_address_answers(pinger):
     run, hardware, _, _ = pinger
     assert replies(run(f"ping {eth0(hardware).ip_address}")) == 4
     assert replies(run("ping 127.0.0.1")) == 4
+
+
+# --- ping follows the route ---
+
+def test_ping_a_local_host_goes_out_directly(pinger):
+    run, _, _, _ = pinger
+    out = run("ping files.test 1")
+    assert "via eth0 with" in out and "gateway" not in out
+
+
+def test_ping_a_remote_host_goes_via_the_gateway_and_adds_its_latency(pinger):
+    run, hardware, hosts, _ = pinger
+    hosts.add_host("far.test", "172.16.9.9", latency_ms=100.0)
+    out = run("ping far.test")
+    assert "via eth0, gateway [192.168.1.10]" in out and replies(out) == 4
+    expected = eth0(hardware).latency_ms + hosts.get_host("gateway").latency_ms + 100.0
+    times = [int(line.split("time=")[1].split("ms")[0]) for line in out.splitlines() if "time=" in line]
+    assert all(int(expected * 0.8) <= t <= round(expected * 1.2) for t in times)
+
+
+def test_ping_behind_a_gateway_that_is_offline_times_out(pinger):
+    run, _, hosts, _ = pinger
+    hosts.add_host("far.test", "172.16.9.9", latency_ms=100.0)
+    hosts.get_host("gateway").online = False
+    out = run("ping far.test 2")
+    assert out.count("Request timed out.") == 2
+    assert replies(run("ping files.test 1")) == 1          # the local network doesn't need the gateway
+
+
+def test_ping_after_moving_into_another_network_has_no_route(pinger):
+    run, hardware, _, _ = pinger
+    eth0(hardware).ip_address = "192.168.5.5"
+    assert "ping: Network unreachable: No route to 192.168.1.5" in run("ping files.test")

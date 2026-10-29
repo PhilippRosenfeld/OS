@@ -1,10 +1,10 @@
 import random
+from dataclasses import dataclass
 
 from horus.kernel.registry import Registry, command
 from horus.network.address import is_valid_ip
-from horus.network.hosts import HostEntry
 from horus.network.listener import ANY_ADDRESS
-from horus.network.netd import NetdError, NetdNotRunningError
+from horus.network.netd import NetdError, NetdNoRouteError, NetdNotRunningError
 from horus.shell.jobs import run_timed
 
 netman_commands = Registry()
@@ -116,13 +116,12 @@ def ping(ctx, argv):
     if ip_address is None:
         return
 
-    iface = next((i for i in ctx.hardware.motherboard.network_interfaces if i.enabled), None)
-    if iface is None:
-        ctx.write_line("ping: Network is unreachable (no interface is UP)")
+    path = _ping_path(ctx, ip_address)
+    if path is None:
         return
 
-    host = _ping_target_host(ctx, iface, ip_address)
-    ctx.write_line(f"Pinging {target} [{ip_address}] via {iface.name} with 32 bytes of data:")
+    via = f"{path.device}, gateway [{path.gateway}]" if path.gateway else path.device
+    ctx.write_line(f"Pinging {target} [{ip_address}] via {via} with 32 bytes of data:")
     sent = 0
     times = []
 
@@ -132,10 +131,10 @@ def ping(ctx, argv):
         nonlocal sent
         for i in range(count):
             gap = PING_INTERVAL_S if i > 0 else 0.0
-            if host is None or random.random() * 100 < iface.packet_loss_percentage:
+            if path.latency_ms is None or random.random() * 100 < path.packet_loss_percentage:
                 yield gap + PING_TIMEOUT_S, lambda: ctx.write_line("Request timed out.")
             else:
-                rtt = max(0.0, (iface.latency_ms + host.latency_ms) * random.uniform(0.8, 1.2))
+                rtt = max(0.0, path.latency_ms * random.uniform(0.8, 1.2))
                 yield gap + rtt / 1000, lambda rtt=rtt: _reply(rtt)
             sent += 1
 
@@ -173,14 +172,43 @@ def _resolve_target(ctx, target):
     return ip_address
 
 
-def _ping_target_host(ctx, iface, ip_address):
-    """The HostEntry answering at ip_address, or None if nothing does (unknown
-    or offline) -- the pings then just time out. Pinging the interface's own
-    address always answers, instantly."""
-    if ip_address == iface.ip_address or ip_address.startswith("127."):
-        return HostEntry(name="localhost", ip=ip_address, latency_ms=0.0)
-    host = ctx.host_table.get_host_by_ip(ip_address) if ctx.host_table is not None else None
-    return host if host is not None and host.online else None
+@dataclass(frozen=True)
+class _PingPath:
+    """How the pings travel: out of `device`, via `gateway` (None: the
+    target is in the local network), taking latency_ms per round trip --
+    None if nothing answers at the other end (unknown or offline host, or
+    a gateway that is down), so every packet times out."""
+    device: str
+    gateway: str | None
+    latency_ms: float | None
+    packet_loss_percentage: float
+
+
+def _ping_path(ctx, ip_address):
+    """The _PingPath to ip_address, or None after printing why there is no
+    route. The own addresses (and 127.x) always answer, instantly."""
+    interfaces = ctx.hardware.motherboard.network_interfaces
+    own = next((i for i in interfaces if i.enabled and i.ip_address == ip_address), None)
+    if own is not None or ip_address.startswith("127."):
+        return _PingPath(own.name if own is not None else "lo", None, 0.0, 0.0)
+
+    if ctx.netd is None:
+        ctx.write_line(f"ping: Network unreachable: No route to {ip_address}")
+        return None
+    try:
+        route = ctx.netd.route(ip_address)
+    except NetdNoRouteError as error:
+        ctx.write_line(f"ping: {error}")
+        return None
+
+    latency = route.iface.latency_ms
+    for hop in ([route.via] if route.via else []) + [ip_address]:   # the gateway, then the target
+        host = ctx.host_table.get_host_by_ip(hop) if ctx.host_table is not None else None
+        if host is None or not host.online:
+            latency = None
+            break
+        latency += host.latency_ms
+    return _PingPath(route.iface.name, route.via, latency, route.iface.packet_loss_percentage)
 
 
 def _port_state(listener, iface) -> str:
