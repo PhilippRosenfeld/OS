@@ -110,7 +110,11 @@ def ping(ctx, argv):
         ctx.write_line("Usage: ping <hostname_or_ip> [count]")
         return
     target = argv[0]
-    count = max(1, min(int(argv[1]), PING_MAX_COUNT)) if len(argv) == 2 else PING_DEFAULT_COUNT
+    count = max(0, min(int(argv[1]), PING_MAX_COUNT)) if len(argv) == 2 else PING_DEFAULT_COUNT
+    
+    if count == 0:
+        ctx.write_line(f"No pakets sent")
+        return
 
     ip_address = _resolve_target(ctx, target)
     if ip_address is None:
