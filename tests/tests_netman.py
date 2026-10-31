@@ -370,3 +370,63 @@ def test_ping_after_moving_into_another_network_has_no_route(pinger):
     run, hardware, _, _ = pinger
     eth0(hardware).ip_address = "192.168.5.5"
     assert "ping: Network unreachable: No route to 192.168.1.5" in run("ping files.test")
+
+
+# --- route ---
+
+def test_route_to_a_local_host_is_direct(pinger):
+    run, _, _, _ = pinger
+    assert "files.test [192.168.1.5] dev eth0 (direct)" in run("route files.test")
+
+
+def test_route_to_a_remote_host_goes_via_the_gateway(pinger):
+    run, _, _, _ = pinger
+    assert "172.16.4.10 [172.16.4.10] via 192.168.1.10 dev eth0" in run("route 172.16.4.10")
+
+
+def test_route_shows_the_way_even_to_a_host_that_is_offline(pinger):
+    run, _, hosts, _ = pinger
+    hosts.get_host("files.test").online = False
+    assert "dev eth0 (direct)" in run("route files.test")
+
+
+def test_route_to_the_own_address_and_loopback_is_local(pinger):
+    run, hardware, _, _ = pinger
+    assert "dev eth0 (local)" in run(f"route {eth0(hardware).ip_address}")
+    assert "dev lo (local)" in run("route 127.0.0.1")
+
+
+def test_route_by_name_needs_netd_but_by_ip_does_not(pinger):
+    run, _, _, kill_netd = pinger
+    kill_netd()
+    assert "route: cannot resolve 'files.test': netd is not running" in run("route files.test")
+    assert "(direct)" in run("route 192.168.1.5")
+
+
+def test_route_errors_carry_the_route_prefix(pinger):
+    run, hardware, _, _ = pinger
+    assert "route: unknown host 'nowhere.test'" in run("route nowhere.test")
+    eth0(hardware).enabled = False
+    assert "route: Network unreachable: No route to 192.168.1.5" in run("route 192.168.1.5")
+
+
+def test_route_with_too_many_arguments_shows_its_usage(pinger):
+    run, _, _, _ = pinger
+    assert "Usage: route [hostname_or_ip]" in run("route a b")
+
+
+def table_rows(out):
+    return [line.split() for line in out.splitlines()[2:] if line.strip()]
+
+
+def test_route_without_arguments_shows_the_routing_table(pinger):
+    run, _, _, _ = pinger
+    assert table_rows(run("route")) == [["192.168.1.0/24", "-", "eth0", "UP"],
+                                         ["default", "192.168.1.10", "eth0", "UP"]]
+
+
+def test_route_table_marks_a_down_interface_and_an_unreachable_gateway(pinger):
+    run, hardware, _, _ = pinger
+    eth0(hardware).enabled = False
+    assert table_rows(run("route")) == [["192.168.1.0/24", "-", "eth0", "DOWN"],
+                                         ["default", "192.168.1.10", "-", "unreachable"]]

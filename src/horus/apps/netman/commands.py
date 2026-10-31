@@ -113,7 +113,7 @@ def ping(ctx, argv):
     count = max(0, min(int(argv[1]), PING_MAX_COUNT)) if len(argv) == 2 else PING_DEFAULT_COUNT
     
     if count == 0:
-        ctx.write_line(f"No pakets sent")
+        ctx.write_line("No packets sent.")
         return
 
     ip_address = _resolve_target(ctx, target)
@@ -157,10 +157,59 @@ def ping(ctx, argv):
                            f"avg = {sum(times) / len(times):.0f}ms")
 
     run_timed(ctx, packets(), finish=statistics)
+    
+@command("route", help_text="Show the routing table, or the route to a host", target=netman_commands)
+def route(ctx, argv):
+    if len(argv) > 1:
+        ctx.write_line("Usage: route [hostname_or_ip]")
+        return
+    if not argv:
+        _route_table(ctx)
+        return
+
+    target = argv[0]
+    ip_address = _resolve_target(ctx, target, prog="route")
+    if ip_address is None:
+        return
+    interfaces = ctx.hardware.motherboard.network_interfaces
+    own = next((i for i in interfaces if i.enabled and i.ip_address == ip_address), None)
+    if own is not None or ip_address.startswith("127."):
+        ctx.write_line(f"{target} [{ip_address}] dev {own.name if own is not None else 'lo'} (local)")
+        return
+    if ctx.netd is None:
+        ctx.write_line(f"route: Network unreachable: No route to {ip_address}")
+        return
+    try:
+        path = ctx.netd.route(ip_address)
+    except NetdNoRouteError as error:
+        ctx.write_line(f"route: {error}")
+        return
+    if path.via is None:
+        ctx.write_line(f"{target} [{ip_address}] dev {path.iface.name} (direct)")
+    else:
+        ctx.write_line(f"{target} [{ip_address}] via {path.via} dev {path.iface.name}")
 
 
-def _resolve_target(ctx, target):
-    """The IP to ping, or None after printing why there is none. IPs work
+def _route_table(ctx):
+    """One direct route per interface (its network), plus the default
+    route via the gateway -- 'unreachable' if no UP interface reaches it."""
+    ctx.write_line(f"{'Destination':<18} {'Gateway':<15} {'Iface':<6} Status")
+    ctx.write_line("-" * 48)
+    for iface in ctx.hardware.motherboard.network_interfaces:
+        status = "UP" if iface.enabled else "DOWN"
+        ctx.write_line(f"{str(iface.network):<18} {'-':<15} {iface.name:<6} {status}")
+    gateway = ctx.netd.gateway if ctx.netd is not None else None
+    if gateway is None:
+        return
+    try:
+        iface_name, status = ctx.netd.route(gateway).iface.name, "UP"
+    except NetdNoRouteError:
+        iface_name, status = "-", "unreachable"
+    ctx.write_line(f"{'default':<18} {gateway:<15} {iface_name:<6} {status}")
+
+
+def _resolve_target(ctx, target, prog="ping"):
+    """The IP of target, or None after printing why there is none. IPs work
     without netd -- only names need it (and its DNS records)."""
     if is_valid_ip(target):
         return target
@@ -169,10 +218,10 @@ def _resolve_target(ctx, target):
             raise NetdNotRunningError()
         ip_address = ctx.netd.resolve(target)
     except NetdNotRunningError:
-        ctx.write_line(f"ping: cannot resolve '{target}': netd is not running")
+        ctx.write_line(f"{prog}: cannot resolve '{target}': netd is not running")
         return None
     if ip_address is None:
-        ctx.write_line(f"ping: unknown host '{target}'")
+        ctx.write_line(f"{prog}: unknown host '{target}'")
     return ip_address
 
 
