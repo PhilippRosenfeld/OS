@@ -1068,3 +1068,44 @@ def test_renderer_enlarges_sprites_along_with_the_glyph_size(tmp_path):
 
     assert tuple(renderer._pixel_buffer[3, 3]) == (255, 0, 0)          # inside the 4x4 (2x scaled) sprite
     assert tuple(renderer._pixel_buffer[0, 5]) == buffer.default_bg     # just past it
+
+
+# --- inset: a second buffer drawn smaller over part of the screen ---
+
+def test_an_inset_is_dropped_by_clear_and_kept_by_snapshot_and_restore():
+    from horus.display.screen_buffer import Inset
+    buffer = ScreenBuffer(10, 5)
+    inset = Inset(ScreenBuffer(8, 4), 1, 1, 4, 2)
+    buffer.set_inset(inset)
+    saved = buffer.snapshot()
+    buffer.clear()
+    assert buffer.inset is None
+    buffer.restore(saved)
+    assert buffer.inset is inset
+
+
+def test_the_renderer_draws_an_inset_with_glyphs_sized_to_fit_its_area():
+    from horus.display.screen_buffer import Inset
+    renderer, buffer, atlas = make_renderer(cols=4, rows=2, char_width=16, char_height=32)
+    inner = ScreenBuffer(8, 4)                       # twice the cells of its 4x2 area: half-size glyphs
+    inner.cursor_enabled = False
+    red = (255, 0, 0)
+    inner.write_string(1, 0, " ", bg=red)
+    buffer.set_inset(Inset(inner, 0, 0, 4, 2))
+    renderer._build_pixel_buffer()
+    assert tuple(renderer._pixel_buffer[0, 8]) == red and tuple(renderer._pixel_buffer[15, 15]) == red
+    assert tuple(renderer._pixel_buffer[0, 7]) == inner.default_bg    # the cell before it
+    assert tuple(renderer._pixel_buffer[16, 8]) == inner.default_bg   # the row below it
+
+
+def test_a_changed_inset_buffer_alone_triggers_a_redraw():
+    from horus.display.screen_buffer import Inset
+    renderer, buffer, _ = make_renderer(cols=4, rows=2)
+    inner = ScreenBuffer(8, 4)
+    buffer.set_inset(Inset(inner, 0, 0, 4, 2))
+    renderer.render(64, 64)
+    assert not buffer.dirty and not inner.dirty
+    inner.write_string(0, 0, "x")
+    with patch.object(renderer, "_build_pixel_buffer") as build:
+        renderer.render(64, 64)
+    build.assert_called_once()

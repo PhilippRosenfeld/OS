@@ -1,3 +1,5 @@
+from horus.apps.netman.screen import NetmanWindow
+from horus.apps.window_manager import running_app
 from horus.filesystem.disk_usage import drive_used_kb
 from horus.hardware.cpu import OVERCLOCK_MIN, OVERCLOCK_STEP
 from horus.hardware.ram import DEFAULT_RAM_TIMINGS, RAM_OVERCLOCK_STEP, RAM_TIMINGS
@@ -11,6 +13,7 @@ from horus.story.progress import BOOT_DISKS, BootProgress
 from horus.ui.screens.cpu_screen import CoreView, CpuScreen
 from horus.ui.screens.detail_screen import DetailScreen, StatusBarInfo, UsageBar
 from horus.ui.screens.hardware_screen import HardwareScreen, HardwareTile
+from horus.ui.screens.network_screen import NetworkScreen
 from horus.ui.screens.ram_screen import ModuleView, RamScreen
 from horus.ui.screens.settings_screen import SettingOption
 
@@ -396,22 +399,73 @@ def _cooling_options(hardware) -> list[SettingOption]:
     ]
 
 
-def _network_detail_lines(hardware) -> list[str]:
+def _network_detail_lines(hardware, netd) -> list[str]:
+    """The netd and its gateway, then every interface's configuration."""
+    lines = [
+        f"netd: {'running' if netd is not None and netd.is_running() else 'stopped'}",
+        f"Gateway: {(netd.gateway if netd is not None else None) or '-'}",
+    ]
     interfaces = hardware.motherboard.network_interfaces
     if not interfaces:
-        return ["No network interfaces."]
-    lines = []
+        return lines + ["", "No network interfaces."]
     for iface in interfaces:
-        if lines:
-            lines.append("")
         lines.extend([
-            iface.name,
+            "---",
+            f"{iface.name} ({'UP' if iface.enabled else 'DOWN'})",
             f"MAC: {iface.mac_address}",
-            f"IP: {iface.ip_address}",
+            f"IP: {iface.ip_address}/{iface.netmask_length}",
+            f"Network: {iface.network}",
             f"Manufacturer: {iface.manufacturer}",
+            f"Latency: {iface.latency_ms:.0f} ms   Loss: {iface.packet_loss_percentage:.0f}%",
             f"Power: {iface.power_usage_watts} W",
         ])
     return lines
+
+
+def _network_status(hardware, netd) -> StatusBarInfo:
+    """A stopped netd blinks -- nothing can be (re)configured without it --
+    and with every interface down the machine is steadily OFFLINE."""
+    if netd is None or not netd.is_running():
+        return StatusBarInfo("Status: NETD STOPPED", blink=True)
+    if not any(iface.enabled for iface in hardware.motherboard.network_interfaces):
+        return StatusBarInfo("Status: OFFLINE")
+    return StatusBarInfo("Status: ONLINE")
+
+
+def _network_usage(hardware) -> list[UsageBar]:
+    """One bar per interface: the download traffic against its link speed,
+    the upload traffic and link quality underneath (see
+    HardwareSpec._sync_component_load_from_process_table)."""
+    bars = []
+    for iface in hardware.motherboard.network_interfaces:
+        down, up = iface.link_speed_down_mbps, iface.link_speed_up_mbps
+        bars.append(UsageBar(f"{iface.name} ({'UP' if iface.enabled else 'DOWN'}) down",
+                             iface.load_down * down, down, unit="Mbps",
+                             details=[f"Up: {iface.load_up * up:.1f}/{up} Mbps   "
+                                      f"Latency: {iface.latency_ms:.0f} ms   "
+                                      f"Loss: {iface.packet_loss_percentage:.0f}%"]))
+    return bars
+
+
+def _one_font_size_smaller(ctx) -> float:
+    """The scale from the current font size to the next smaller one (font
+    sizes step in 8x16 multiples, see the settings menu) -- 1.0, i.e. the
+    same size, without a window or below the smallest step."""
+    if ctx.window is None:
+        return 1.0
+    steps = round(ctx.window.char_width / 8)
+    return (steps - 1) / steps if steps > 1 else 1.0
+
+
+def _push_network_screen(ctx, hardware) -> None:
+    """The Network panel, with the running netman (or a new one) in its
+    box -- the same program and process 'netman' shows in its window, one
+    font size smaller than the panel."""
+    ctx.screens.push(NetworkScreen(ctx.screen, "Network", lambda: _network_detail_lines(hardware, ctx.netd), ctx.screens,
+                                   status_fn=lambda: _network_status(hardware, ctx.netd),
+                                   usage_fn=lambda: _network_usage(hardware),
+                                   app_fn=lambda: running_app(ctx, "netman", lambda: NetmanWindow(ctx)),
+                                   app_font_scale=_one_font_size_smaller(ctx)))
 
 
 def _push_detail_screen(ctx, title: str, lines_fn, history_fn=None, history_title: str = "History",
@@ -490,7 +544,7 @@ def _build_hardware_screen(ctx) -> tuple[HardwareScreen, dict[str, HardwareTile]
         history_markers_fn=lambda: [hardware.motherboard.cooling_system.env_temperature_celsius,
                                      hardware.warning_temperature, hardware.critical_temperature],
         options=_cooling_options(hardware), status_fn=lambda: _cooling_status(hardware)))
-    network = HardwareTile("Network", on_select=lambda: _push_detail_screen(ctx, "Network", lambda: _network_detail_lines(hardware)))
+    network = HardwareTile("Network", on_select=lambda: _push_network_screen(ctx, hardware))
 
     def refresh() -> None:
         overview.lines = [format_system_summary(table, hardware)]
@@ -536,8 +590,17 @@ def _build_hardware_screen(ctx) -> tuple[HardwareScreen, dict[str, HardwareTile]
             
         ]
 
-        interfaces = hardware.motherboard.network_interfaces
-        network.lines = [f"{iface.name}: {iface.ip_address}" for iface in interfaces] or ["No network interfaces."]
+        netd_stopped = ctx.netd is not None and not ctx.netd.is_running()
+        network.lines = []
+        for iface in hardware.motherboard.network_interfaces:
+            # the tile shows three lines -- a stopped netd goes on the first, so it's never cut off
+            network.lines += [
+                f"{iface.name} ({'UP' if iface.enabled else 'DOWN'})" + (", netd stopped" if netd_stopped else ""),
+                f"IP: {iface.ip_address}/{iface.netmask_length}",
+                f"Load: {iface.load_down * iface.link_speed_down_mbps:.1f}/{iface.link_speed_down_mbps} Mbps "
+                f"({iface.load_down * 100:.0f}%)",
+            ]
+        network.lines = network.lines or ["No network interfaces."]
 
     refresh()  # populate before the first render
 

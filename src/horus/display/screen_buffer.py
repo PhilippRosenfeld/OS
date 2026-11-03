@@ -10,6 +10,20 @@ class Cell:
     fg_color: tuple[int, int, int] = NAMED_COLORS.get("green")  # Placeholder foreground color: will be overwritten
     bg_color: tuple[int, int, int] = NAMED_COLORS.get("magenta")  # Placeholder background color: will be overwritten
 
+@dataclass(frozen=True)
+class Inset:
+    """A second buffer drawn over the area `cols` x `rows` at (col, row) of
+    the one it's set on, its glyphs sized so it fills exactly that area --
+    e.g. smaller text in one box, with an inset buffer that has more
+    cols/rows than the area. Its own cursor fields say where its cursor is;
+    it blinks with the outer buffer's. See Renderer._render_inset."""
+    buffer: "ScreenBuffer"
+    col: int
+    row: int
+    cols: int
+    rows: int
+
+
 class ScreenBuffer:
     """Class representing a screen buffer with a grid of cells. Renderer will read from this buffer to display content on the screen."""
     
@@ -29,6 +43,7 @@ class ScreenBuffer:
                                                           # Renderer._composite_sprites() for how these
                                                           # get drawn
         self.view_offset = 0  # rows of scrollback shown at the top of the view instead of live content
+        self.inset: Inset | None = None  # see set_inset
         self.default_fg: tuple[int, int, int] = NAMED_COLORS.get("green")
         self.default_bg: tuple[int, int, int] = NAMED_COLORS.get("black")
         self._cells: list[list[Cell]] = [[self._blank_cell() for _ in range(cols)] for _ in range(rows)] #has to be set after colors!
@@ -130,12 +145,21 @@ class ScreenBuffer:
             self.write_string(col, row, string, fg, bg)
         self.dirty = True
 
+    def set_inset(self, inset: Inset | None) -> None:
+        """Draws `inset` over part of this buffer (see Inset), or with None
+        nothing anymore. Like a sprite it's dropped by clear() -- so a screen
+        sets it again on every render, and one that clears the buffer on its
+        way in never shows someone else's -- and kept by snapshot()/restore()."""
+        self.inset = inset
+        self.dirty = True
+
     def clear(self) -> None:
         """Clear the screen buffer by resetting all cells to default."""
         self._cells = [[self._blank_cell() for _ in range(self.cols)] for _ in range(self.rows)]
         self._writes = []
         self._scrollback = []
         self._sprites = {}
+        self.inset = None
         self.view_offset = 0
         self.dirty = True
 
@@ -195,6 +219,7 @@ class ScreenBuffer:
             "cells": [[Cell(c.char, c.fg_color, c.bg_color) for c in row] for row in self._cells],
             "writes": list(self._writes),
             "sprites": dict(self._sprites),
+            "inset": self.inset,
             "cursor_col": self.cursor_col,
             "cursor_row": self.cursor_row,
             "cursor_enabled": self.cursor_enabled,
@@ -219,6 +244,7 @@ class ScreenBuffer:
         self._cells = cells
         self._writes = list(snapshot["writes"])
         self._sprites = dict(snapshot.get("sprites", {}))
+        self.inset = snapshot.get("inset")
         self.cursor_col = min(snapshot["cursor_col"], self.cols - 1)
         self.cursor_row = min(snapshot["cursor_row"], self.rows - 1)
         self.cursor_enabled = snapshot["cursor_enabled"]

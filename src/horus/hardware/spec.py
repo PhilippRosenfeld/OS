@@ -35,6 +35,9 @@ _THERMAL_SCALE = 0.05  # tunable: how many degC a net watt of heat vs. cooling s
 # with the given stddev so the bars don't sit perfectly still.
 _STORAGE_READ_FACTOR, _STORAGE_READ_JITTER = 0.6, 0.05
 _STORAGE_WRITE_FACTOR, _STORAGE_WRITE_JITTER = 0.3, 0.03
+# Network traffic: a little background chatter plus a share of the CPU load
+_NETWORK_DOWN_BASE, _NETWORK_DOWN_FACTOR, _NETWORK_DOWN_JITTER = 0.05, 0.4, 0.05
+_NETWORK_UP_BASE, _NETWORK_UP_FACTOR, _NETWORK_UP_JITTER = 0.02, 0.15, 0.02
 
 
 def _default_motherboard() -> Motherboard:
@@ -280,6 +283,14 @@ class HardwareSpec:
             swap = self.swap_activity if drive is system_drive else 0.0  # paging hits the swap's drive hard
             drive.read_load = min(1.0, max(0.0, random.gauss(cpu_load * _STORAGE_READ_FACTOR, _STORAGE_READ_JITTER)) + swap)
             drive.write_load = min(1.0, max(0.0, random.gauss(cpu_load * _STORAGE_WRITE_FACTOR, _STORAGE_WRITE_JITTER)) + swap)
+        for iface in self.motherboard.network_interfaces:
+            if not iface.enabled:  # a downed link carries nothing
+                iface.load_down = iface.load_up = 0.0
+                continue
+            iface.load_down = min(1.0, max(0.0, random.gauss(
+                _NETWORK_DOWN_BASE + cpu_load * _NETWORK_DOWN_FACTOR, _NETWORK_DOWN_JITTER)))
+            iface.load_up = min(1.0, max(0.0, random.gauss(
+                _NETWORK_UP_BASE + cpu_load * _NETWORK_UP_FACTOR, _NETWORK_UP_JITTER)))
 
     def _check_power_usage(self, dt: float) -> None:
         self._sync_component_load_from_process_table()

@@ -114,7 +114,8 @@ class DetailScreen(Screen):
     and a `devices_title`-labeled box spanning the full width along the
     bottom with the plain text lines `devices_fn` returns (e.g. other
     attached devices and their status). Both are live callables on the
-    same refresh tick as `refresh`."""
+    same refresh tick as `refresh`. `usage_empty` is what the usage box
+    says while usage_fn returns nothing."""
 
     def __init__(self, buffer: ScreenBuffer, title: str, lines: list[str], screens: ScreenManager,
                  refresh: Callable[[], list[str]] | None = None, refresh_interval: float = 1.0,
@@ -126,6 +127,7 @@ class DetailScreen(Screen):
                  breakdown_fn: Callable[[], list[str]] | None = None, breakdown_title: str = "Breakdown",
                  breakdown_chart_fn: Callable[[], list[tuple[str, float]]] | None = None,
                  usage_fn: Callable[[], list[UsageBar]] | None = None, usage_title: str = "Usage",
+                 usage_empty: str = "No drives detected.",
                  devices_fn: Callable[[], list[str]] | None = None, devices_title: str = "Devices") -> None:
         self._buffer = buffer
         self._title = title
@@ -153,6 +155,7 @@ class DetailScreen(Screen):
         self._usage_fn = usage_fn
         self._usage_title = usage_title
         self._usage = usage_fn() if usage_fn is not None else []
+        self._usage_empty = usage_empty
         self._devices_fn = devices_fn
         self._devices_title = devices_title
         self._devices = devices_fn() if devices_fn is not None else []
@@ -306,13 +309,14 @@ class DetailScreen(Screen):
         skipped entirely rather than drawn half-way."""
         draw_box(self._buffer, x, y, width, height, self._usage_title)
         if not self._usage:
-            self._buffer.write_string(x + 2, y + 2, "No drives detected."[:max(0, width - 4)])
+            self._buffer.write_string(x + 2, y + 2, self._usage_empty[:max(0, width - 4)])
             return
-        text_x = x + 2 + _USAGE_ICON_COLS
-        text_width = max(0, (x + width - 2) - text_x)
         row = y + 2
         for entry in self._usage:
-            entry_rows = max(_USAGE_ICON_ROWS, 2 + len(entry.details))
+            # room for the icon only where there is one -- otherwise the bar gets the full width
+            text_x = x + 2 + (_USAGE_ICON_COLS if entry.sprite is not None else 0)
+            text_width = max(0, (x + width - 2) - text_x)
+            entry_rows = max(_USAGE_ICON_ROWS, 2 + len(entry.details)) if entry.sprite is not None                 else 2 + len(entry.details)
             if row + entry_rows > y + height - 1:
                 break
             if entry.sprite is not None:

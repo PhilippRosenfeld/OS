@@ -5,6 +5,7 @@ from horus.kernel.registry import Registry, command
 from horus.network.address import is_valid_ip
 from horus.network.listener import ANY_ADDRESS
 from horus.network.netd import NetdError, NetdNoRouteError, NetdNotRunningError
+from horus.network.network_view import host_lines, port_lines, route_table_lines
 from horus.shell.jobs import run_timed
 
 netman_commands = Registry()
@@ -93,17 +94,14 @@ def speed(ctx, argv):
 
 @command("ports", help_text="List the open ports and their associated processes", target=netman_commands)
 def ports(ctx, argv):
-    port_table = ctx.port_table
-    listeners = port_table.list()
-    if not listeners:
-        ctx.write_line("No open ports.")
-        return
+    for line in port_lines(ctx.port_table):
+        ctx.write_line(line)
 
-    ctx.write_line(f"{'Protocol':<10} {'Port':<6} {'Address':<15} {'PID':<6} {'Service':<20}")
-    ctx.write_line("-" * 60)
-    for listener in listeners:
-        ctx.write_line(f"{listener.protocol:<10} {listener.port:<6} {listener.address:<15} {listener.pid:<6} {listener.service:<20}")
-        
+@command("hosts", help_text="List the known hosts", target=netman_commands)
+def hosts(ctx, argv):
+    for line in host_lines(ctx.host_table):
+        ctx.write_line(line)
+
 @command("ping", help_text="Ping a host to check its reachability", target=netman_commands)
 def ping(ctx, argv):
     if len(argv) < 1 or len(argv) > 2 or (len(argv) == 2 and not argv[1].isdigit()):
@@ -191,21 +189,8 @@ def route(ctx, argv):
 
 
 def _route_table(ctx):
-    """One direct route per interface (its network), plus the default
-    route via the gateway -- 'unreachable' if no UP interface reaches it."""
-    ctx.write_line(f"{'Destination':<18} {'Gateway':<15} {'Iface':<6} Status")
-    ctx.write_line("-" * 48)
-    for iface in ctx.hardware.motherboard.network_interfaces:
-        status = "UP" if iface.enabled else "DOWN"
-        ctx.write_line(f"{str(iface.network):<18} {'-':<15} {iface.name:<6} {status}")
-    gateway = ctx.netd.gateway if ctx.netd is not None else None
-    if gateway is None:
-        return
-    try:
-        iface_name, status = ctx.netd.route(gateway).iface.name, "UP"
-    except NetdNoRouteError:
-        iface_name, status = "-", "unreachable"
-    ctx.write_line(f"{'default':<18} {gateway:<15} {iface_name:<6} {status}")
+    for line in route_table_lines(ctx.hardware, ctx.netd):
+        ctx.write_line(line)
 
 
 def _resolve_target(ctx, target, prog="ping"):

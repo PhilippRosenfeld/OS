@@ -309,7 +309,13 @@ def show_app(ctx, app_id: str, create) -> WindowManager:
 
         show_app(ctx, "netman", lambda: NetmanWindow(ctx))
     """
+    return show_window(ctx, running_app(ctx, app_id, create))
+
+
+def running_app(ctx, app_id: str, create) -> Window:
+    """The program `app_id` if it's still running (shown or in the
+    background), otherwise a new one from `create()` -- not shown yet."""
     window = ctx.background_apps.get(app_id) if ctx.background_apps is not None else None
     if window is None or not window.is_open:
         window = create()
-    return show_window(ctx, window)
+    return window

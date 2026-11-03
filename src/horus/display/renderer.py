@@ -39,6 +39,8 @@ class Renderer:
         self._quad: moderngl.VertexArray = None
         self._build_quad()
         self._block_cache: dict[tuple[str, tuple[int, int, int], tuple[int, int, int]], np.ndarray] = {}
+        # the inset's font at the glyph size it currently needs, and its blocks -- see _render_inset
+        self._inset_font: tuple[tuple[int, int], FontAtlas, dict] | None = None
 
     def _load_shader(self, ver_path: str, frag_path: str) -> None:
         """Load the vertex and fragment shaders and compile them into a moderngl.Program."""
@@ -85,6 +87,7 @@ class Renderer:
         cached glyph blocks, which would otherwise be the wrong pixel dimensions."""
         self.font_atlas = font_atlas
         self._block_cache = {}
+        self._inset_font = None
         self.screen_buffer.dirty = True
         if self.status_bar is not None:
             self.status_bar.dirty = True
@@ -105,19 +108,23 @@ class Renderer:
         self._texture = self.ctx.texture((pixel_width, pixel_height), 3, data=self._pixel_buffer.tobytes())
         return True
 
-    def _get_block(self, char: str, fg_color: tuple[int, int, int], bg_color: tuple[int, int, int]) -> np.ndarray:
-        """Return the rendered (char_height, char_width, 3) pixel block for this glyph/color combo, computing and caching it on first use. Characters missing from the FontAtlas fall back to a placeholder glyph instead of raising."""
-        if not self.font_atlas.exists_glyph(char):
+    def _get_block(self, char: str, fg_color: tuple[int, int, int], bg_color: tuple[int, int, int],
+                   font_atlas: FontAtlas | None = None, cache: dict | None = None) -> np.ndarray:
+        """Return the rendered (char_height, char_width, 3) pixel block for this glyph/color combo, computing and caching it on first use. Characters missing from the FontAtlas fall back to a placeholder glyph instead of raising.
+        `font_atlas`/`cache` default to the main font -- the inset passes its own (see _render_inset)."""
+        font_atlas = font_atlas if font_atlas is not None else self.font_atlas
+        cache = cache if cache is not None else self._block_cache
+        if not font_atlas.exists_glyph(char):
             char = self.PLACEHOLDER_CHAR
         key = (char, fg_color, bg_color)
-        block = self._block_cache.get(key)
+        block = cache.get(key)
         if block is None:
-            glyph = self.font_atlas.get_glyph(char)
+            glyph = font_atlas.get_glyph(char)
             coverage = (glyph.astype(np.float32) / 255.0)[:, :, None]
             fg = np.array(fg_color, dtype=np.float32)
             bg = np.array(bg_color, dtype=np.float32)
             block = (coverage * fg + (1.0 - coverage) * bg).astype(np.uint8)
-            self._block_cache[key] = block
+            cache[key] = block
         return block
 
     def _build_pixel_buffer(self) -> None:
@@ -159,6 +166,55 @@ class Renderer:
                     self._pixel_buffer[y0:y0 + char_height, x0:x0 + char_width] = block
 
         self._composite_sprites()
+        self._render_inset()
+
+    def _inset_glyphs(self, char_width: int, char_height: int) -> tuple[FontAtlas, dict]:
+        """The main font rasterized at the inset's glyph size -- kept as long
+        as that size stays the same, since rasterizing is slow."""
+        size = (char_width, char_height)
+        if self._inset_font is None or self._inset_font[0] != size:
+            self._inset_font = (size, FontAtlas(str(self.font_atlas.font_path), char_width, char_height), {})
+        return self._inset_font[1], self._inset_font[2]
+
+    def _render_inset(self) -> None:
+        """Draws screen_buffer's inset (see ScreenBuffer.set_inset) over its
+        area: its glyphs are the area's pixel size divided by the inset
+        buffer's cols/rows, so a larger inset buffer shows smaller text.
+        Pixels the division leaves over stay as the main grid drew them.
+        Its cursor follows the inset buffer's own fields, blinking with the
+        main buffer's."""
+        inset = self.screen_buffer.inset
+        if inset is None or inset.buffer.cols < 1 or inset.buffer.rows < 1:
+            return
+        source = inset.buffer
+        char_width = inset.cols * self.font_atlas.char_width // source.cols
+        char_height = inset.rows * self.font_atlas.char_height // source.rows
+        if char_width < 1 or char_height < 1:
+            return
+        font_atlas, cache = self._inset_glyphs(char_width, char_height)
+        x_base = inset.col * self.font_atlas.char_width
+        y_base = inset.row * self.font_atlas.char_height
+        buffer_height, buffer_width = self._pixel_buffer.shape[:2]
+        cursor_visible = self.screen_buffer.cursor_visible and source.cursor_enabled and source.view_offset == 0
+        bar_width = max(1, char_width // 8)
+        for row in range(source.rows):
+            y0 = y_base + row * char_height
+            if y0 + char_height > buffer_height:
+                break
+            for col in range(source.cols):
+                x0 = x_base + col * char_width
+                if x0 + char_width > buffer_width:
+                    break
+                cell = source.get_cell(col, row)
+                if cursor_visible and col == source.cursor_col and row == source.cursor_row:
+                    if source.cursor_block:
+                        block = self._get_block(cell.char, source.default_bg, source.default_fg, font_atlas, cache)
+                    else:
+                        block = self._get_block(cell.char, cell.fg_color, cell.bg_color, font_atlas, cache).copy()
+                        block[:, :bar_width] = source.default_fg
+                else:
+                    block = self._get_block(cell.char, cell.fg_color, cell.bg_color, font_atlas, cache)
+                self._pixel_buffer[y0:y0 + char_height, x0:x0 + char_width] = block
 
     def _sprite_scale(self) -> int:
         """Whole-number factor sprites are enlarged by, following the glyph
@@ -201,11 +257,15 @@ class Renderer:
         """Full frame: rebuild pixel buffer and upload as texture only if the content or size changed,
         run the shader, draw the quad sized to preserve aspect ratio."""
         resized = self._ensure_pixel_buffer_size()
-        dirty = self.screen_buffer.dirty or (self.status_bar is not None and self.status_bar.dirty)
+        inset = self.screen_buffer.inset
+        dirty = (self.screen_buffer.dirty or (self.status_bar is not None and self.status_bar.dirty)
+                 or (inset is not None and inset.buffer.dirty))
         if resized or dirty:
             self._build_pixel_buffer()
             self._texture.write(self._pixel_buffer.tobytes())
             self.screen_buffer.dirty = False
+            if inset is not None:
+                inset.buffer.dirty = False
             if self.status_bar is not None:
                 self.status_bar.dirty = False
         self._update_quad_geometry(window_width, window_height, margin)

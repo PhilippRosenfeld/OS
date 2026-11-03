@@ -65,6 +65,10 @@ class HostTable:
             raise HostNotFoundError(hostname)
         return self._hosts[hostname]
     
+    def list_hosts(self) -> list[HostEntry]:
+        """Every known host, sorted by name."""
+        return sorted(self._hosts.values(), key=lambda entry: entry.name)
+
     def get_host_by_ip(self, ip: str) -> HostEntry | None:
         """Retrieves a host entry by its IP address."""
         for entry in self._hosts.values():

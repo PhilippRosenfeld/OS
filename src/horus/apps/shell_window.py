@@ -1,4 +1,5 @@
 import dataclasses
+import textwrap
 
 from horus.apps.window import Window
 from horus.display.screen_buffer import ScreenBuffer
@@ -147,10 +148,18 @@ class ShellWindow(Window):
         return combined
 
     def _cmd_help(self, ctx: Context, argv: list[str]) -> None:
+        """Name and help text per command -- a help text too long for the
+        shell is wrapped at word boundaries, aligned under itself."""
         names = sorted(self.commands.names())
         width = max(len(name) for name in names)
+        indent = " " * (width + 4)
+        room = max(10, ctx.screen.cols - len(indent) - 1)  # the last column would push the cursor to the next row
         for name in names:
-            ctx.write_line(f"  {name:<{width}}  {self.commands.help_text(name)}")
+            text = self.commands.help_text(name)
+            lines = textwrap.wrap(text, room) or [""]
+            ctx.write_line(f"  {name:<{width}}  {lines[0]}")
+            for line in lines[1:]:
+                ctx.write_line(indent + line)
 
     def _cmd_clear(self, ctx: Context, argv: list[str]) -> None:
         ctx.screen.clear()
