@@ -275,6 +275,18 @@ def test_an_up_interface_carries_traffic_that_grows_with_the_cpu_load(system):
     assert sum(busy) / len(busy) > sum(idle) / len(idle) + 0.2
 
 
+def test_no_traffic_flows_while_netd_is_down_and_it_comes_back_with_it(system):
+    ctx, _, hardware, processes = system
+    kill(processes, "netd")
+    eth0(hardware).load_down = eth0(hardware).load_up = 0.7
+    sync(hardware, processes)
+    assert (eth0(hardware).load_down, eth0(hardware).load_up) == (0.0, 0.0)
+    start_service(find_service("netd"), processes, ctx.port_table)
+    processes.add_process(Process(name="busy", pid=99, owner="root", cpu_mhz=processes.total_cpu_mhz))
+    sync(hardware, processes)                                    # full load: traffic far above zero
+    assert eth0(hardware).load_down > 0.2
+
+
 def test_a_down_interface_carries_nothing(system):
     _, _, hardware, processes = system
     eth0(hardware).enabled = False

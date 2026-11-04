@@ -47,6 +47,7 @@ class NetDaemon:
         self._ports = port_table
         self._dns = hosts if hosts is not None else HostTable()  # hostname -> IP address
         self._gateway = gateway if gateway is not None else self._default_gateway()
+        hardware.network_running = self.is_running  # no traffic while netd is down
 
     def _default_gateway(self):
         """The IP of the host called 'gateway' in the host table, if there is one."""

@@ -122,6 +122,9 @@ class HardwareSpec:
         # identical hardware but different sample history are still "equal"
         # hardware, e.g. after a save/load round trip).
         self.power_history = MetricHistory()
+        # whether the network service runs -- without it no traffic flows;
+        # a NetDaemon sets it (see NetDaemon.__init__), None: always running
+        self.network_running = None
         self.cooling_history = MetricHistory()
         self.temperature_history = MetricHistory()
         self._thermal_shutdown_triggered = False  # latches once _handle_thermal_shutdown
@@ -283,8 +286,9 @@ class HardwareSpec:
             swap = self.swap_activity if drive is system_drive else 0.0  # paging hits the swap's drive hard
             drive.read_load = min(1.0, max(0.0, random.gauss(cpu_load * _STORAGE_READ_FACTOR, _STORAGE_READ_JITTER)) + swap)
             drive.write_load = min(1.0, max(0.0, random.gauss(cpu_load * _STORAGE_WRITE_FACTOR, _STORAGE_WRITE_JITTER)) + swap)
+        network_running = self.network_running is None or self.network_running()
         for iface in self.motherboard.network_interfaces:
-            if not iface.enabled:  # a downed link carries nothing
+            if not iface.enabled or not network_running:  # a downed link, or no netd, carries nothing
                 iface.load_down = iface.load_up = 0.0
                 continue
             iface.load_down = min(1.0, max(0.0, random.gauss(
