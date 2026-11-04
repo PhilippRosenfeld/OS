@@ -1504,6 +1504,8 @@ def make_sys_context(cols=80, rows=24):
     screens = ScreenManager()
     hardware = HardwareSpec()
     table = ProcessTable(total_memory_kb=hardware.total_memory_kb(), total_cpu_mhz=hardware.total_cpu_mhz())
+    for daemon in ("thermald", "powerd"):  # as on a booted system -- without them their controls are locked
+        table.add_process(Process(name=daemon, pid=0, owner="root", cpu_mhz=0, mem_kb=0))
     ctx = Context(session_id="s", user="root", cwd="/", screen=buffer, screens=screens,
                   process_table=table, hardware=hardware)
     return ctx, buffer, screens, table, hardware

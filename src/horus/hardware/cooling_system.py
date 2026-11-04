@@ -29,6 +29,9 @@ _ENV_TEMP_SCALE = 0.01
 # HardwareSpec.critical_temperature (like _NEUTRAL_ENV_TEMPERATURE_CELSIUS
 # above) to avoid a circular import back to spec.py.
 _MAX_COOLING_TEMPERATURE_CELSIUS = 75.0
+# How hard an unregulated unit works (see CoolingSystem.regulated): a fixed
+# fallback speed -- enough at idle, too little under load.
+UNREGULATED_COOLING_FACTOR = 0.35
 
 
 class CoolingSystem:
@@ -48,6 +51,9 @@ class CoolingSystem:
         self.base_cooling_modifier = base_cooling_modifier
         self.max_cooling_temperature_celsius = max_cooling_temperature_celsius
         self.active = active  # a deactivated unit cools nothing, regardless of coolant/type/rating
+        # runtime state, not saved: False while thermald is down -- the unit then runs at
+        # UNREGULATED_COOLING_FACTOR instead of following the temperature (see HardwareSpec)
+        self.regulated = True
         self._cooling_power = self.calculate_cooling_power()
 
     def update_temperature(self, new_temperature: float) -> None:
@@ -86,7 +92,10 @@ class CoolingSystem:
     def _temperature_factor(self) -> float:
         """How hard the unit is currently working, from 0 (the system is no
         hotter than the environment -- nothing to cool) to 1 (the system is
-        at/above max_cooling_temperature_celsius -- running flat out)."""
+        at/above max_cooling_temperature_celsius -- running flat out).
+        Unregulated (no thermald) it's stuck at UNREGULATED_COOLING_FACTOR."""
+        if not self.regulated:
+            return UNREGULATED_COOLING_FACTOR
         span = self.max_cooling_temperature_celsius - self.env_temperature_celsius
         if span <= 0:
             return 1.0

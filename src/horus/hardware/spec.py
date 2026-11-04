@@ -35,6 +35,10 @@ _THERMAL_SCALE = 0.05  # tunable: how many degC a net watt of heat vs. cooling s
 # with the given stddev so the bars don't sit perfectly still.
 _STORAGE_READ_FACTOR, _STORAGE_READ_JITTER = 0.6, 0.05
 _STORAGE_WRITE_FACTOR, _STORAGE_WRITE_JITTER = 0.3, 0.03
+# The daemons that run parts of the hardware -- see service_running()
+NETWORK_DAEMON = "netd"      # without it no network traffic flows
+THERMAL_DAEMON = "thermald"  # without it the cooling isn't regulated (see CoolingSystem.regulated)
+POWER_DAEMON = "powerd"      # without it nobody watches the PSU budget (no PowerUsageCheckedEvent)
 # Network traffic: a little background chatter plus a share of the CPU load
 _NETWORK_DOWN_BASE, _NETWORK_DOWN_FACTOR, _NETWORK_DOWN_JITTER = 0.05, 0.4, 0.05
 _NETWORK_UP_BASE, _NETWORK_UP_FACTOR, _NETWORK_UP_JITTER = 0.02, 0.15, 0.02
@@ -122,9 +126,7 @@ class HardwareSpec:
         # identical hardware but different sample history are still "equal"
         # hardware, e.g. after a save/load round trip).
         self.power_history = MetricHistory()
-        # whether the network service runs -- without it no traffic flows;
-        # a NetDaemon sets it (see NetDaemon.__init__), None: always running
-        self.network_running = None
+        self._process_table = None  # set by start_power_monitoring -- see service_running
         self.cooling_history = MetricHistory()
         self.temperature_history = MetricHistory()
         self._thermal_shutdown_triggered = False  # latches once _handle_thermal_shutdown
@@ -268,6 +270,13 @@ class HardwareSpec:
     def stop_power_monitoring(self) -> None:
         pyglet.clock.unschedule(self._check_power_usage)
 
+    def service_running(self, name: str) -> bool:
+        """Whether the daemon `name` (e.g. THERMAL_DAEMON) runs in the
+        monitored process table -- without one (not monitoring yet) every
+        daemon counts as running."""
+        table = self._process_table
+        return table is None or any(proc.name == name for proc in table.list_processes())
+
     def _sync_component_load_from_process_table(self) -> None:
         table = self._process_table
         cpu_load = table.used_cpu_mhz() / table.total_cpu_mhz if table.total_cpu_mhz else 0.0
@@ -286,7 +295,7 @@ class HardwareSpec:
             swap = self.swap_activity if drive is system_drive else 0.0  # paging hits the swap's drive hard
             drive.read_load = min(1.0, max(0.0, random.gauss(cpu_load * _STORAGE_READ_FACTOR, _STORAGE_READ_JITTER)) + swap)
             drive.write_load = min(1.0, max(0.0, random.gauss(cpu_load * _STORAGE_WRITE_FACTOR, _STORAGE_WRITE_JITTER)) + swap)
-        network_running = self.network_running is None or self.network_running()
+        network_running = self.service_running(NETWORK_DAEMON)
         for iface in self.motherboard.network_interfaces:
             if not iface.enabled or not network_running:  # a downed link, or no netd, carries nothing
                 iface.load_down = iface.load_up = 0.0
@@ -305,11 +314,12 @@ class HardwareSpec:
         self.power_history.record(total_power_usage)
         self.cooling_history.record(self.motherboard.cooling_system.calc_current_power_usage())
         self.temperature_history.record(self.temperature_celsius)
-        self._events.publish(PowerUsageCheckedEvent(
-            total_power_usage=total_power_usage,
-            psu_output_watts=psu_output_watts,
-            over_budget=total_power_usage > psu_output_watts,
-        ))
+        if self.service_running(POWER_DAEMON):  # without powerd an overloaded PSU goes unnoticed
+            self._events.publish(PowerUsageCheckedEvent(
+                total_power_usage=total_power_usage,
+                psu_output_watts=psu_output_watts,
+                over_budget=total_power_usage > psu_output_watts,
+            ))
         self._events.publish(StorageActivityCheckedEvent(activity=self.storage_activity()))
 
     def storage_activity(self) -> float:
@@ -337,7 +347,9 @@ class HardwareSpec:
         system's temperature-based throttle (see CoolingSystem.
         _temperature_factor) always reacts to this tick's actual starting
         temperature, even if temperature_celsius was just changed directly
-        (e.g. by load())."""
+        (e.g. by load()). Without thermald the cooling runs unregulated
+        (see CoolingSystem.regulated)."""
+        self.motherboard.cooling_system.regulated = self.service_running(THERMAL_DAEMON)
         self.motherboard.cooling_system.update_temperature(self.temperature_celsius)
         heat_generated = self.calculate_total_power_usage() - self.motherboard.cooling_system.calc_current_power_usage()
         cooling_power = self.motherboard.cooling_system.calculate_cooling_power()

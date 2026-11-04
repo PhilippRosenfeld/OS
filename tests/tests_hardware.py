@@ -379,9 +379,15 @@ def test_stop_power_monitoring_unschedules_the_tick():
     mock_unschedule.assert_called_once_with(spec._check_power_usage)
 
 
+def add_powerd(table):
+    """The daemon that watches the PSU budget -- without it no PowerUsageCheckedEvent."""
+    table.add_process(Process(name="powerd", pid=0, owner="root", cpu_mhz=0, mem_kb=0))
+
+
 def test_check_power_usage_publishes_an_event_under_budget():
     spec = make_spec(cpus=[make_cpu(power_min=5, power_max=50)])
     table = ProcessTable(total_cpu_mhz=1000, total_memory_kb=1024)
+    add_powerd(table)
     events = EventBus()
     received = []
     events.subscribe(PowerUsageCheckedEvent, received.append)
@@ -399,6 +405,7 @@ def test_check_power_usage_publishes_an_event_over_budget():
     spec = make_spec(cpus=[make_cpu(power_min=5, power_max=500)])
     table = ProcessTable(total_cpu_mhz=1000, total_memory_kb=1024)
     table.add_process(Process(name="hog", pid=0, owner="root", cpu_mhz=1000, mem_kb=1))
+    add_powerd(table)
     events = EventBus()
     received = []
     events.subscribe(PowerUsageCheckedEvent, received.append)

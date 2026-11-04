@@ -3,7 +3,7 @@ from horus.apps.window_manager import running_app
 from horus.filesystem.disk_usage import drive_used_kb
 from horus.hardware.cpu import OVERCLOCK_MIN, OVERCLOCK_STEP
 from horus.hardware.ram import DEFAULT_RAM_TIMINGS, RAM_OVERCLOCK_STEP, RAM_TIMINGS
-from horus.hardware.spec import HardwareSpec
+from horus.hardware.spec import POWER_DAEMON, THERMAL_DAEMON, HardwareSpec
 from horus.kernel.commands.command_parser import CommandArgumentParser, CommandParseError
 from horus.kernel.registry import command
 from horus.processes.memory import MemoryManager
@@ -41,6 +41,32 @@ def _build_sys_parser() -> CommandArgumentParser:
 
 
 _sys_parser = _build_sys_parser()
+
+
+def _daemon_running(ctx, name: str) -> bool:
+    """Whether the daemon `name` runs -- without a process table (nothing
+    to ask) it counts as running."""
+    table = ctx.process_table
+    return table is None or table.get_process_by_name(name) is not None
+
+
+def _daemon_line(name: str, running: bool, stopped_note: str = "") -> str:
+    return f"{name}: running" if running else f"{name}: stopped{stopped_note}"
+
+
+def _needs_daemon(options: list[SettingOption], running) -> list[SettingOption]:
+    """The same options, but locked while `running()` is False: Left/Right
+    do nothing and the value says so -- like netman's changes need netd."""
+    def guarded(action):
+        return (lambda: action() if running() else None) if action is not None else None
+
+    def shown(get_value):
+        return lambda: get_value() if running() else f"{get_value()} (locked)"
+
+    return [SettingOption(option.label, get_value=shown(option.get_value) if option.get_value else None,
+                          on_left=guarded(option.on_left), on_right=guarded(option.on_right),
+                          on_select=guarded(option.on_select))
+            for option in options]
 
 
 def _cpu_detail_lines(hardware, table) -> list[str]:
@@ -270,10 +296,12 @@ def _storage_devices_lines(boot_progress) -> list[str]:
     return lines
 
 
-def _power_detail_lines(hardware) -> list[str]:
+def _power_detail_lines(hardware, powerd_running: bool = True) -> list[str]:
     psu_unit = hardware.power_supply_unit
     total_draw = hardware.calculate_total_power_usage()
     lines = [
+        _daemon_line(POWER_DAEMON, powerd_running, " (budget unwatched)"),
+        "---",
         psu_unit.name,
         f"Manufacturer: {psu_unit.manufacturer}",
         f"Rated output: {psu_unit.power_output_watts} W",
@@ -284,9 +312,12 @@ def _power_detail_lines(hardware) -> list[str]:
     return lines
 
 
-def _power_status(hardware) -> StatusBarInfo:
+def _power_status(hardware, powerd_running: bool = True) -> StatusBarInfo:
     """Blinks while over budget, same treatment as Cooling's warning
-    state -- steady OK otherwise."""
+    state -- steady OK otherwise. Without powerd nobody watches the budget,
+    which blinks too."""
+    if not powerd_running:
+        return StatusBarInfo("Status: POWERD STOPPED", blink=True)
     psu_unit = hardware.power_supply_unit
     over_budget = hardware.calculate_total_power_usage() > psu_unit.power_output_watts
     if over_budget:
@@ -327,22 +358,28 @@ def _power_breakdown_chart(hardware) -> list[tuple[str, float]]:
     return [(label[:3], draw) for label, draw in _power_draws(hardware).items()]
 
 
-def _cooling_status(hardware) -> StatusBarInfo:
+def _cooling_status(hardware, thermald_running: bool = True) -> StatusBarInfo:
     """Deactivated never lights up (nothing to warn about), a warning-level
-    temperature blinks to draw attention, and critical/OK stay lit steady."""
+    temperature blinks to draw attention, and critical/OK stay lit steady.
+    A stopped thermald (the cooling runs unregulated) blinks as well --
+    only a critical temperature is more important."""
     cooling_system = hardware.motherboard.cooling_system
     if not cooling_system.active:
         return StatusBarInfo("Status: INACTIVE", lit=False)
     if hardware.temperature_celsius >= hardware.critical_temperature:
         return StatusBarInfo("Status: CRITICAL")
+    if not thermald_running:
+        return StatusBarInfo("Status: THERMALD STOPPED", blink=True)
     if hardware.temperature_celsius >= hardware.warning_temperature:
         return StatusBarInfo("Status: WARNING", blink=True)
     return StatusBarInfo("Status: OK")
 
 
-def _cooling_detail_lines(hardware) -> list[str]:
+def _cooling_detail_lines(hardware, thermald_running: bool = True) -> list[str]:
     cooling_system = hardware.motherboard.cooling_system
     lines = [
+        _daemon_line(THERMAL_DAEMON, thermald_running, " (unregulated)"),
+        "---",
         cooling_system.name,
         f"Manufacturer: {cooling_system.manufacturer}",
         f"Coolant: {cooling_system.coolant_type.value} ({cooling_system.coolant_amount}%)",
@@ -530,20 +567,21 @@ def _build_hardware_screen(ctx) -> tuple[HardwareScreen, dict[str, HardwareTile]
         devices_fn=lambda: _storage_devices_lines(boot_progress), devices_title="Devices"))
     external = HardwareTile("External")
     power = HardwareTile("Power", on_select=lambda: _push_detail_screen(
-        ctx, "Power", lambda: _power_detail_lines(hardware),
+        ctx, "Power", lambda: _power_detail_lines(hardware, _daemon_running(ctx, POWER_DAEMON)),
         history_fn=lambda: hardware.power_history.values(),
         history_title="Power Draw History", history_y_label="Watts", history_unit="W",
         history_markers_fn=lambda: [0.0, hardware.power_supply_unit.power_output_watts],
         breakdown_fn=lambda: _power_breakdown_lines(hardware), breakdown_title="Power Draw Breakdown",
         breakdown_chart_fn=lambda: _power_breakdown_chart(hardware),
-        status_fn=lambda: _power_status(hardware)))
+        status_fn=lambda: _power_status(hardware, _daemon_running(ctx, POWER_DAEMON))))
     cooling = HardwareTile("Cooling", on_select=lambda: _push_detail_screen(
-        ctx, "Cooling", lambda: _cooling_detail_lines(hardware),
+        ctx, "Cooling", lambda: _cooling_detail_lines(hardware, _daemon_running(ctx, THERMAL_DAEMON)),
         history_fn=lambda: hardware.temperature_history.values(),
         history_title="Temperature History", history_y_label="Temp", history_unit="C",
         history_markers_fn=lambda: [hardware.motherboard.cooling_system.env_temperature_celsius,
                                      hardware.warning_temperature, hardware.critical_temperature],
-        options=_cooling_options(hardware), status_fn=lambda: _cooling_status(hardware)))
+        options=_needs_daemon(_cooling_options(hardware), lambda: _daemon_running(ctx, THERMAL_DAEMON)),
+        status_fn=lambda: _cooling_status(hardware, _daemon_running(ctx, THERMAL_DAEMON))))
     network = HardwareTile("Network", on_select=lambda: _push_network_screen(ctx, hardware))
 
     def refresh() -> None:
@@ -575,14 +613,14 @@ def _build_hardware_screen(ctx) -> tuple[HardwareScreen, dict[str, HardwareTile]
 
         psu_unit = hardware.power_supply_unit
         power.lines = [
-            psu_unit.name,
+            psu_unit.name + ("" if _daemon_running(ctx, POWER_DAEMON) else ", powerd stopped"),
             f"Output: {hardware.calculate_total_power_usage():.0f}/{psu_unit.power_output_watts} W",
             f"Headroom: {psu_unit.power_output_watts - hardware.calculate_total_power_usage():.0f} W",
         ]
 
         cooling_system = hardware.motherboard.cooling_system
         cooling.lines = [
-            cooling_system.name,
+            cooling_system.name + ("" if _daemon_running(ctx, THERMAL_DAEMON) else ", thermald stopped"),
             f"{cooling_system.coolant_type.value}: {cooling_system.coolant_amount}%",
             f"Temp: {hardware.temperature_celsius:.1f}/{hardware.critical_temperature:.1f} C",
             f"Cooling power: {cooling_system.calculate_cooling_power():.0f}",
