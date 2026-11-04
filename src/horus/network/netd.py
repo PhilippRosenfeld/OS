@@ -95,12 +95,31 @@ class NetDaemon:
         return iface
     
     def set_gateway(self, ip):
-        """Set the default gateway for outgoing connections. Raises
-        NetdInvalidConfigError if `ip` is not a valid IP address."""
+        """Set the default gateway for outgoing connections and return it.
+        Raises NetdInvalidConfigError if `ip` is not a valid IP address or
+        lies in none of the interfaces' networks -- nothing could be routed
+        via it."""
         self._require()
         if not is_valid_ip(ip):
             raise NetdInvalidConfigError(f"Invalid IP address: {ip}")
+        address = ipaddress.ip_address(ip)
+        if not any(address in iface.network for iface in self._hardware.motherboard.network_interfaces):
+            raise NetdInvalidConfigError(f"Gateway {ip} is not in any local network")
         self._gateway = ip
+        return ip
+
+    def set_netmask(self, name, length):
+        """Set an interface's netmask as a prefix length (0-32, e.g. 24 for
+        255.255.255.0) -- what counts as its local network."""
+        iface = self._configurable(name)
+        try:
+            length = int(length)
+        except ValueError:
+            raise NetdInvalidConfigError(f"Invalid prefix length: {length}") from None
+        if not 0 <= length <= 32:
+            raise NetdInvalidConfigError("Prefix length must be between 0 and 32.")
+        iface.netmask_length = length
+        return iface
 
     def resolve(self, name_or_ip):
         """Resolve a hostname to an IP address, or None if it is unknown. Raises

@@ -87,7 +87,7 @@ def _default_motherboard() -> Motherboard:
         network_interfaces=[
             NetworkInterface(name="eth0", mac_address="00:00:00:00:00:01",
                               ip_address="192.168.1.6", manufacturer="Horus Inc.",
-                              power_usage_watts=5, latency_ms=50, netmask_length="24"),
+                              power_usage_watts=5, latency_ms=50, netmask_length=24),
         ],
         cooling_system=CoolingSystem(
             name="Coolant System",

@@ -337,8 +337,10 @@ def test_help_wraps_long_texts_aligned_under_themselves_in_a_narrow_box(system):
     type_line(screen, "help")
     shell = screen.app.shell_buffer
     rows = [line for line in screen_text(shell).splitlines()]
-    down = row_of(rows, "  down    Bring down")
-    assert rows[down + 1].startswith(" " * 10) and rows[down + 1].strip() == "interface"
+    down = next(i for i, row in enumerate(rows) if row.startswith("  down "))
+    indent = rows[down].index("Bring down")
+    continuation = rows[down + 1]
+    assert continuation.strip() and len(continuation) - len(continuation.lstrip()) == indent
     assert all(len(row) < shell.cols for row in rows)
 
 

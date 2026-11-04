@@ -430,3 +430,59 @@ def test_route_table_marks_a_down_interface_and_an_unreachable_gateway(pinger):
     eth0(hardware).enabled = False
     assert table_rows(run("route")) == [["192.168.1.0/24", "-", "eth0", "DOWN"],
                                          ["default", "192.168.1.10", "-", "unreachable"]]
+
+
+# --- set-gw / set-mask ---
+
+def test_set_gw_changes_the_gateway_ping_goes_via(pinger):
+    run, _, hosts, _ = pinger
+    hosts.add_host("gw2", "192.168.1.1", latency_ms=5.0)
+    assert "Default gateway set to 192.168.1.1." in run("set-gw 192.168.1.1")
+    assert "via eth0, gateway [192.168.1.1]" in run("ping 172.16.4.10 1")
+
+
+@pytest.mark.parametrize("line,error", [
+    ("set-gw 300.1.1.1", "Invalid IP address: 300.1.1.1"),
+    ("set-gw 10.9.9.1", "Gateway 10.9.9.1 is not in any local network"),
+])
+def test_set_gw_refuses_a_bad_gateway(pinger, line, error):
+    run, _, _, _ = pinger
+    out = run(line)
+    assert error in out and "Default gateway set" not in out
+
+
+@pytest.mark.parametrize("line", ["set-gw", "set-gw 1.1.1.1 2.2.2.2", "set-mask eth0", "set-mask eth0 24 x"])
+def test_set_commands_with_the_wrong_arguments_show_their_usage(pinger, line):
+    run, _, _, _ = pinger
+    assert "Usage: " + line.split()[0] in run(line)
+
+
+def test_set_mask_changes_what_is_local(pinger):
+    run, hardware, _, _ = pinger
+    out = run("set-mask eth0 28")
+    assert "Interface 'eth0' netmask set to /28 (192.168.1.0/28)." in out
+    assert "Warning" not in out                                     # the gateway .10 is still inside
+    assert eth0(hardware).netmask_length == 28
+    assert "via 192.168.1.10" in run("route server.local")          # .23 is outside /28 now
+
+
+def test_set_mask_warns_when_the_gateway_falls_outside(pinger):
+    run, _, _, _ = pinger
+    out = run("set-mask eth0 29")
+    assert "Warning: gateway 192.168.1.10 is no longer in any local network" in out
+    assert "No route to 172.16.4.10" in run("ping 172.16.4.10 1")
+
+
+@pytest.mark.parametrize("line", ["set-mask eth0 33", "set-mask eth0 abc"])
+def test_set_mask_refuses_a_bad_prefix_length(pinger, line):
+    run, hardware, _, _ = pinger
+    assert "Invalid configuration" in run(line)
+    assert eth0(hardware).netmask_length == 24
+
+
+def test_set_commands_need_netd(pinger):
+    run, hardware, _, kill_netd = pinger
+    kill_netd()
+    assert "netd is not running" in run("set-gw 192.168.1.1")
+    assert "netd is not running" in run("set-mask eth0 16")
+    assert eth0(hardware).netmask_length == 24

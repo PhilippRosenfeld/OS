@@ -155,12 +155,34 @@ def test_the_netmask_decides_what_is_local(routed):
     assert netd.route("192.168.1.23").via == "192.168.1.10"
 
 
-def test_no_route_without_a_gateway_or_outside_the_gateways_network(routed):
-    netd, hardware = routed
-    netd.set_gateway("10.9.9.1")                        # not in any local network
+def test_a_gateway_outside_every_local_network_is_refused(routed):
+    netd, _ = routed
+    with pytest.raises(NetdInvalidConfigError):
+        netd.set_gateway("10.9.9.1")
+    assert netd.gateway == "192.168.1.10"
+    assert netd.set_gateway("192.168.1.254") == "192.168.1.254"
+
+
+def test_no_route_once_the_netmask_leaves_the_gateway_outside(routed):
+    netd, _ = routed
+    netd.set_netmask("eth0", 29)                           # 192.168.1.0 - .7: the gateway .10 is outside
     with pytest.raises(NetdNoRouteError):
         netd.route("172.16.4.10")
-    assert netd.route("192.168.1.23").via is None             # the local network still works
+    assert netd.route("192.168.1.5").via is None           # the local network still works
+
+
+@pytest.mark.parametrize("length", ["abc", "-1", "33"])
+def test_a_bad_prefix_length_is_refused(routed, length):
+    netd, hardware = routed
+    with pytest.raises(NetdInvalidConfigError):
+        netd.set_netmask("eth0", length)
+    assert eth0(hardware).netmask_length == 24
+
+
+def test_the_netmask_is_stored_as_a_number(routed):
+    netd, hardware = routed
+    netd.set_netmask("eth0", "16")
+    assert eth0(hardware).netmask_length == 16
 
 
 def test_no_route_while_the_interface_is_down(routed):

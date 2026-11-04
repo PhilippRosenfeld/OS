@@ -16,7 +16,7 @@ class NetworkInterface:
                  latency_ms: Optional[float] = 0.0,
                  load_down: Optional[float] = 0.0,
                  load_up: Optional[float] = 0.0,
-                 netmask_length: Optional[int] =  24,
+                 netmask_length: int = 24,
                  ):
         
         self.name = name
@@ -31,7 +31,7 @@ class NetworkInterface:
         self.latency_ms = latency_ms
         self.load_down = load_down
         self.load_up = load_up
-        self.netmask_length = netmask_length
+        self.netmask_length = int(netmask_length)  # older saves stored it as a string
 
     def to_dict(self) -> dict:
         return {

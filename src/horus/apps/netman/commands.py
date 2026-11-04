@@ -77,6 +77,29 @@ def set_ip(ctx, argv):
     iface = _configure(ctx, lambda netd: netd.set_ip(argv[0], argv[1]))
     if iface is not None:
         ctx.write_line(f"Interface '{iface.name}' IP address set to {iface.ip_address}.")
+        
+@command("set-gw", help_text="Set the default gateway for outgoing connections", target=netman_commands)
+def set_gw(ctx, argv):
+    if len(argv) != 1:
+        ctx.write_line("Usage: set-gw <gateway_ip>")
+        return
+    gateway = _configure(ctx, lambda netd: netd.set_gateway(argv[0]))
+    if gateway is not None:
+        ctx.write_line(f"Default gateway set to {gateway}.")
+
+@command("set-mask", help_text="Set the netmask (prefix length) of the specified network interface", target=netman_commands)
+def set_mask(ctx, argv):
+    if len(argv) != 2:
+        ctx.write_line("Usage: set-mask <interface_name> <prefix_length>")
+        return
+    iface = _configure(ctx, lambda netd: netd.set_netmask(argv[0], argv[1]))
+    if iface is None:
+        return
+    ctx.write_line(f"Interface '{iface.name}' netmask set to /{iface.netmask_length} ({iface.network}).")
+    gateway = ctx.netd.gateway
+    if gateway is not None and not _reachable(ctx, gateway):
+        ctx.write_line(f"Warning: gateway {gateway} is no longer in any local network -- "
+                       "everything outside is unreachable.")
 
 @command("speed", help_text="Set the speed of the specified network interface", target=netman_commands)
 def speed(ctx, argv):
@@ -191,6 +214,15 @@ def route(ctx, argv):
 def _route_table(ctx):
     for line in route_table_lines(ctx.hardware, ctx.netd):
         ctx.write_line(line)
+
+
+def _reachable(ctx, ip) -> bool:
+    """Whether netd has a route to `ip`."""
+    try:
+        ctx.netd.route(ip)
+        return True
+    except NetdNoRouteError:
+        return False
 
 
 def _resolve_target(ctx, target, prog="ping"):
