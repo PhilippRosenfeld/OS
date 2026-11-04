@@ -207,3 +207,9 @@ def test_the_default_gateway_is_the_hosts_gateway_entry(system):
     hosts = HostTable()
     assert NetDaemon(hardware, processes, hosts=hosts).gateway == hosts.get_host("gateway").ip
     assert NetDaemon(hardware, processes, hosts=hosts, gateway="10.1.1.1").gateway == "10.1.1.1"
+
+
+def test_each_host_table_has_its_own_standard_hosts():
+    first, second = HostTable(), HostTable()
+    first.get_host("gateway").online = False
+    assert second.get_host("gateway").online

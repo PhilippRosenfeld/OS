@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from horus.network.address import is_valid_ip
 
@@ -36,7 +36,7 @@ class HostTable:
         
         if STANDARD_HOSTS:
             for hostname, entry in STANDARD_HOSTS.items():
-                self._hosts[hostname] = entry
+                self._hosts[hostname] = replace(entry)  # a copy -- each table changes only its own
         
         
     def add_host(self, hostname: str, ip: str, latency_ms: float = 0.0, online: bool = True) -> None:

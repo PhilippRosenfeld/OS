@@ -201,3 +201,33 @@ def test_ping_stopped_before_the_first_reply_prints_no_statistics(clock, ping_sh
     run("ping slow.test")
     handler._handle_key(key.C, key.MOD_CTRL)
     assert "^C" in full_text(buffer) and "statistics" not in full_text(buffer)
+
+
+# --- traceroute takes its time, hop by hop ---
+
+def test_traceroute_prints_each_hop_once_its_probes_are_back(clock, ping_shell):
+    run, handler, buffer, _ = ping_shell
+    run("traceroute slow.test")
+    assert "Tracing route" in full_text(buffer) and "  1 " not in full_text(buffer)
+    assert 3 * 0.16 <= clock.delays[0] <= 3 * 0.24             # three probes of 200 ms +-20 %
+    clock.run_all()
+    assert "slow.test [192.168.1.9]" in full_text(buffer) and "Trace complete." in full_text(buffer)
+    assert not handler.busy
+
+
+def test_a_hop_that_does_not_answer_waits_for_three_timeouts(clock, ping_shell):
+    run, _, buffer, hosts = ping_shell
+    hosts.get_host("slow.test").online = False
+    run("traceroute slow.test")
+    clock.run_all()
+    assert clock.delays == [3.0]
+    assert "Request timed out." in full_text(buffer)
+
+
+def test_ctrl_c_stops_traceroute_without_trace_complete(clock, ping_shell):
+    run, handler, buffer, _ = ping_shell
+    run("traceroute 172.16.4.10")                                 # gateway, then the target
+    clock.advance(clock.delays[0])
+    handler._handle_key(key.C, key.MOD_CTRL)
+    text = full_text(buffer)
+    assert "^C" in text and "Trace complete." not in text and not handler.busy

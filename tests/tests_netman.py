@@ -486,3 +486,84 @@ def test_set_commands_need_netd(pinger):
     assert "netd is not running" in run("set-gw 192.168.1.1")
     assert "netd is not running" in run("set-mask eth0 16")
     assert eth0(hardware).netmask_length == 24
+
+
+# --- traceroute ---
+
+def hop_lines(out):
+    return [line.rstrip() for line in out.splitlines() if line[:3].strip().isdigit()]
+
+
+def hop_times(line):
+    return [int(t) for t in line.split("ms")[0:-1] for t in [t.split()[-1]]]
+
+
+def test_traceroute_to_a_remote_host_lists_the_gateway_then_the_target(pinger):
+    run, hardware, hosts, _ = pinger
+    out = run("traceroute 172.16.4.10")
+    assert "Tracing route to 172.16.4.10 [172.16.4.10] via eth0, gateway [192.168.1.10]:" in out
+    first, second = hop_lines(out)
+    assert first.endswith("gateway [192.168.1.10]") and second.endswith("mainframe.corp [172.16.4.10]")
+    gateway_rtt = eth0(hardware).latency_ms + hosts.get_host("gateway").latency_ms
+    target_rtt = gateway_rtt + hosts.get_host("mainframe.corp").latency_ms
+    assert all(int(gateway_rtt * 0.8) <= t <= round(gateway_rtt * 1.2) for t in hop_times(first))
+    assert all(int(target_rtt * 0.8) <= t <= round(target_rtt * 1.2) for t in hop_times(second))
+    assert out.rstrip().endswith("Trace complete.")
+
+
+def test_traceroute_to_a_local_host_is_a_single_hop(pinger):
+    run, _, _, _ = pinger
+    out = run("traceroute files.test")
+    assert "via eth0:" in out and "gateway" not in out
+    assert [line.split("  ")[-1] for line in hop_lines(out)] == ["files.test [192.168.1.5]"]
+
+
+def test_traceroute_shows_where_the_way_breaks_off(pinger):
+    run, _, hosts, _ = pinger
+    hosts.get_host("mainframe.corp").online = False
+    first, second = hop_lines(run("traceroute mainframe.corp"))
+    assert first.endswith("gateway [192.168.1.10]")
+    assert second.endswith("Request timed out.") and second.count("*") == 3
+
+
+def test_behind_an_offline_gateway_nothing_answers(pinger):
+    run, _, hosts, _ = pinger
+    hosts.get_host("gateway").online = False
+    lines = hop_lines(run("traceroute mainframe.corp"))
+    assert len(lines) == 2 and all(line.endswith("Request timed out.") for line in lines)
+
+
+def test_traceroute_loses_probes_by_the_interfaces_packet_loss(pinger):
+    run, hardware, _, _ = pinger
+    eth0(hardware).packet_loss_percentage = 100.0
+    assert all(line.count("*") == 3 for line in hop_lines(run("traceroute mainframe.corp")))
+
+
+def test_traceroute_to_the_own_address_answers_at_once(pinger):
+    run, hardware, _, _ = pinger
+    (line,) = hop_lines(run(f"traceroute {eth0(hardware).ip_address}"))
+    assert hop_times(line) == [1, 1, 1]                          # under a millisecond, shown as 1 ms
+
+
+@pytest.mark.parametrize("line,error", [
+    ("traceroute", "Usage: traceroute <hostname_or_ip>"),
+    ("traceroute a b", "Usage: traceroute <hostname_or_ip>"),
+    ("traceroute nowhere.test", "traceroute: unknown host 'nowhere.test'"),
+])
+def test_traceroute_refusals(pinger, line, error):
+    run, _, _, _ = pinger
+    assert error in run(line)
+
+
+def test_traceroute_without_a_route(pinger):
+    run, hardware, _, _ = pinger
+    eth0(hardware).enabled = False
+    out = run("traceroute 172.16.4.10")
+    assert "traceroute: Network unreachable: No route to 172.16.4.10" in out and not hop_lines(out)
+
+
+def test_traceroute_by_name_needs_netd_but_by_ip_does_not(pinger):
+    run, _, _, kill_netd = pinger
+    kill_netd()
+    assert "traceroute: cannot resolve 'files.test': netd is not running" in run("traceroute files.test")
+    assert len(hop_lines(run("traceroute 172.16.4.10"))) == 2

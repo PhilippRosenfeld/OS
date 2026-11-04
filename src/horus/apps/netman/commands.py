@@ -14,6 +14,7 @@ PING_DEFAULT_COUNT = 4
 PING_MAX_COUNT = 20
 PING_INTERVAL_S = 0.5   # pause between two packets
 PING_TIMEOUT_S = 1.0    # how long a lost packet is waited for
+TRACEROUTE_PROBES = 3   # probes per hop, each shown with its own time
 
 @command("status", help_text="Show the network interfaces", target=netman_commands)
 def status(ctx, argv):
@@ -141,7 +142,7 @@ def ping(ctx, argv):
     if ip_address is None:
         return
 
-    path = _ping_path(ctx, ip_address)
+    path = _path(ctx, ip_address)
     if path is None:
         return
 
@@ -209,6 +210,52 @@ def route(ctx, argv):
         ctx.write_line(f"{target} [{ip_address}] dev {path.iface.name} (direct)")
     else:
         ctx.write_line(f"{target} [{ip_address}] via {path.via} dev {path.iface.name}")
+        
+@command("traceroute", help_text="Trace the route to a host, hop by hop", target=netman_commands)
+def traceroute(ctx, argv):
+    if len(argv) != 1:
+        ctx.write_line("Usage: traceroute <hostname_or_ip>")
+        return
+    target = argv[0]
+    ip_address = _resolve_target(ctx, target, prog="traceroute")
+    if ip_address is None:
+        return
+    path = _path(ctx, ip_address, prog="traceroute")
+    if path is None:
+        return
+
+    via = f"{path.device}, gateway [{path.gateway}]" if path.gateway else path.device
+    ctx.write_line(f"Tracing route to {target} [{ip_address}] via {via}:")
+    traced = 0
+
+    def hops():
+        """One step per hop: TRACEROUTE_PROBES probes, the line shows up
+        once all of them are back (a lost one after the timeout). Behind a
+        hop that doesn't answer, nothing further does either."""
+        nonlocal traced
+        for number, hop in enumerate(path.hops, start=1):
+            rtt = path.round_trip_to(number)
+            probes = []
+            for _ in range(TRACEROUTE_PROBES):
+                if rtt is None or random.random() * 100 < path.packet_loss_percentage:
+                    probes.append(None)
+                else:
+                    probes.append(max(0.0, rtt * random.uniform(0.8, 1.2)))
+            wait = sum(PING_TIMEOUT_S if probe is None else probe / 1000 for probe in probes)
+            yield wait, lambda number=number, hop=hop, probes=probes: _hop_line(number, hop, probes)
+            traced += 1
+
+    def _hop_line(number, hop, probes):
+        times = "".join(f"{'*':>8}" if probe is None else f"{max(1, round(probe)):>5} ms" for probe in probes)
+        answered = any(probe is not None for probe in probes)
+        where = (f"{hop.name} [{hop.ip}]" if hop.name else hop.ip) if answered else "Request timed out."
+        ctx.write_line(f"{number:>3} {times}  {where}")
+
+    def finish():
+        if traced == len(path.hops):
+            ctx.write_line("Trace complete.")
+
+    run_timed(ctx, hops(), finish=finish)
 
 
 def _route_table(ctx):
@@ -243,42 +290,64 @@ def _resolve_target(ctx, target, prog="ping"):
 
 
 @dataclass(frozen=True)
-class _PingPath:
-    """How the pings travel: out of `device`, via `gateway` (None: the
-    target is in the local network), taking latency_ms per round trip --
-    None if nothing answers at the other end (unknown or offline host, or
-    a gateway that is down), so every packet times out."""
+class _Hop:
+    """One station on the way: its IP, its name if it's a known host, and
+    the latency it adds -- None if it doesn't answer (unknown or offline)."""
+    ip: str
+    name: str | None
+    latency_ms: float | None
+
+
+@dataclass(frozen=True)
+class _Path:
+    """How packets travel: out of `device`, via `gateway` (None: the target
+    is in the local network), through `hops` -- the gateway if any, then the
+    target. The interface adds its own latency before the first hop."""
     device: str
     gateway: str | None
-    latency_ms: float | None
+    hops: tuple[_Hop, ...]
+    interface_latency_ms: float
     packet_loss_percentage: float
 
+    def round_trip_to(self, number: int) -> float | None:
+        """The round trip to hop `number` (1-based) -- None if it, or a hop
+        before it, doesn't answer."""
+        latency = self.interface_latency_ms
+        for hop in self.hops[:number]:
+            if hop.latency_ms is None:
+                return None
+            latency += hop.latency_ms
+        return latency
 
-def _ping_path(ctx, ip_address):
-    """The _PingPath to ip_address, or None after printing why there is no
+    @property
+    def latency_ms(self) -> float | None:
+        """The round trip to the target -- None if nothing answers there."""
+        return self.round_trip_to(len(self.hops))
+
+
+def _path(ctx, ip_address, prog="ping"):
+    """The _Path to ip_address, or None after printing why there is no
     route. The own addresses (and 127.x) always answer, instantly."""
     interfaces = ctx.hardware.motherboard.network_interfaces
     own = next((i for i in interfaces if i.enabled and i.ip_address == ip_address), None)
     if own is not None or ip_address.startswith("127."):
-        return _PingPath(own.name if own is not None else "lo", None, 0.0, 0.0)
+        return _Path(own.name if own is not None else "lo", None, (_Hop(ip_address, None, 0.0),), 0.0, 0.0)
 
     if ctx.netd is None:
-        ctx.write_line(f"ping: Network unreachable: No route to {ip_address}")
+        ctx.write_line(f"{prog}: Network unreachable: No route to {ip_address}")
         return None
     try:
         route = ctx.netd.route(ip_address)
     except NetdNoRouteError as error:
-        ctx.write_line(f"ping: {error}")
+        ctx.write_line(f"{prog}: {error}")
         return None
 
-    latency = route.iface.latency_ms
-    for hop in ([route.via] if route.via else []) + [ip_address]:   # the gateway, then the target
-        host = ctx.host_table.get_host_by_ip(hop) if ctx.host_table is not None else None
-        if host is None or not host.online:
-            latency = None
-            break
-        latency += host.latency_ms
-    return _PingPath(route.iface.name, route.via, latency, route.iface.packet_loss_percentage)
+    hops = []
+    for hop_ip in ([route.via] if route.via else []) + [ip_address]:   # the gateway, then the target
+        host = ctx.host_table.get_host_by_ip(hop_ip) if ctx.host_table is not None else None
+        answers = host is not None and host.online
+        hops.append(_Hop(hop_ip, host.name if host is not None else None, host.latency_ms if answers else None))
+    return _Path(route.iface.name, route.via, tuple(hops), route.iface.latency_ms, route.iface.packet_loss_percentage)
 
 
 def _port_state(listener, iface) -> str:
