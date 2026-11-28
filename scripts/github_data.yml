@@ -1,0 +1,497 @@
+# Labels, milestones and issues that scripts/setup_github.py creates on GitHub.
+# Issue titles identify existing issues, so renaming one here creates a new one.
+# Every label an issue uses has to be listed under `labels`.
+
+labels:
+  # type
+  - {name: feature, color: "0e8a16", description: New functionality}
+  - {name: bug, color: "d73a4a", description: Something isn't working}
+  - {name: refactor, color: "fbca04", description: Internal cleanup without behaviour change}
+  - {name: docs, color: "0075ca", description: Documentation}
+  - {name: tests, color: "bfd4f2", description: Test coverage}
+  - {name: chore, color: "ededed", description: "Tooling, CI, dependencies"}
+  # area
+  - {name: "area: hardware", color: "5319e7", description: "Hardware simulation (CPU, RAM, storage, power, cooling, network)"}
+  - {name: "area: processes", color: "5319e7", description: "Process table, scheduler, memory, ports"}
+  - {name: "area: shell", color: "5319e7", description: "Shell, commands, kernel"}
+  - {name: "area: filesystem", color: "5319e7", description: "VFS, permissions, encryption"}
+  - {name: "area: ui", color: "5319e7", description: "Screens, layout, widgets, app windows"}
+  - {name: "area: display", color: "5319e7", description: "Renderer, shader, fonts, sprites"}
+  - {name: "area: audio", color: "5319e7", description: Sound effects and playback}
+  - {name: "area: story", color: "5319e7", description: "Story progress, gameplay content"}
+  # status
+  - {name: blocked, color: "b60205", description: Waiting on something else}
+  - {name: good first issue, color: "7057ff", description: Small and self-contained}
+  - {name: wontfix, color: "ffffff", description: Won't be worked on}
+  - {name: dependencies, color: "0366d6", description: "Dependency updates (set by Dependabot)"}
+
+milestones:
+  - title: v0.5.0
+    description: "Network & netman: editable hosts, services on hosts, connections, remote login, firewall, file transfer, a LAN and a wiki."
+    issues:
+      - title: Add host-add / host-del commands for editing the host table at runtime
+        labels: [feature, "area: shell"]
+        body: |
+          ## Description
+          `HostTable` can already add and remove hosts (with validation of the IP address and a latency of 0-10000 ms), but netman only has `hosts` to list them. The host table is fixed to the three built-in hosts. Add netman commands to edit it.
+
+          ## Acceptance criteria
+          - [ ] `host-add <name> <ip> [latency_ms]` adds a host. It shows up in `hosts` and can be used as a target of `ping` and `traceroute`.
+          - [ ] A duplicate name, an invalid IP address or a latency outside 0-10000 ms is rejected with a clear message and changes nothing.
+          - [ ] `host-del <name>` removes a host. An unknown name prints an error.
+          - [ ] Removing the host the current default gateway points to is refused with a message.
+          - [ ] Both commands behave like the other configuration commands regarding the running `netd` and permissions (see `_configure` in `apps/netman/commands.py`).
+          - [ ] Both commands have `--help` / `man` text and tests.
+
+      - title: Persist network configuration across restarts
+        labels: [feature, "area: hardware"]
+        body: |
+          ## Description
+          Changes made in netman (`set-ip`, `set-mask`, `set-gw`, `speed`, `up`/`down`) only live in memory: `HardwareSpec.save()` exists, but nothing calls it at runtime. The default gateway and the host table are not part of any save and are rebuilt from the built-in defaults on every start. Interface settings already survive in `HardwareSpec.to_dict()`, so the main work is saving at the right moment and covering the gateway and hosts.
+
+          This issue overlaps with the "Save" option of the horus menu (currently `pass #TODO` in `cmd_menu.py`). Decide whether to save automatically on every change, on that menu option, or both.
+
+          ## Acceptance criteria
+          - [ ] Interface settings changed in netman are still there after restarting the game.
+          - [ ] The default gateway and the host table (including hosts added with `host-add`) are saved and restored.
+          - [ ] A missing or corrupt save file falls back to the defaults instead of crashing.
+          - [ ] Older saves without the new fields still load.
+          - [ ] Tests cover a save/load round trip of the interfaces, the gateway and the hosts.
+
+      - title: Hosts expose services (open ports and service names)
+        labels: [feature, "area: processes"]
+        body: |
+          ## Description
+          Hosts in the host table only have a name, an IP address, a latency and an online flag. Nothing on them can be reached. Give each host a list of services it offers, so later features (`scan`, `connect`, the wiki, the firewall) have something to talk to.
+
+          ## Acceptance criteria
+          - [ ] `HostEntry` gets a list of services (protocol, port, name), empty by default.
+          - [ ] The built-in hosts get plausible services (for example `ssh` on 22 and `http` on 80 for `server.local`).
+          - [ ] `hosts` can show the services of a host (for example `hosts -v` or `hosts <name>`).
+          - [ ] Services are validated like local listeners (valid port range, no duplicates per protocol and port).
+          - [ ] The new field is included in the save format of the persistence issue and old saves still load.
+          - [ ] Tests for the data model and the output.
+
+      - title: Name resolution with nslookup and a configurable DNS server
+        labels: [feature, "area: shell"]
+        body: |
+          ## Description
+          Commands resolve host names straight from the host table. Make that a visible, configurable step: an `nslookup` command and a DNS server that can be unreachable.
+
+          ## Acceptance criteria
+          - [ ] `nslookup <name>` prints the IP address, `nslookup <ip>` the host name (the table already has `get_host_by_ip`).
+          - [ ] An unknown name or address prints an error.
+          - [ ] The DNS server defaults to the gateway and can be changed (for example `set-dns <host_or_ip>`).
+          - [ ] If the DNS server is unreachable or its host is offline, name lookups fail with a clear message while commands given an IP address still work.
+          - [ ] `ping` and `traceroute` use the same resolution path.
+          - [ ] Tests for lookup, reverse lookup and the unreachable-DNS case.
+
+      - title: Port scan command (scan <host>)
+        labels: [feature, "area: shell"]
+        body: |
+          ## Description
+          Add a `scan` command that lists the open ports of a host, based on the services from the "Hosts expose services" issue.
+
+          ## Acceptance criteria
+          - [ ] `scan <host_or_ip>` prints `PORT`, `STATE` and `SERVICE` for the host's services.
+          - [ ] An offline or unreachable host prints a clear message (reusing the routing checks of `ping`).
+          - [ ] The scan runs as a background job with a short simulated duration depending on the latency, and can be cancelled with Ctrl+C like `ping`.
+          - [ ] Ports blocked by the firewall (once it exists) show as `filtered`.
+          - [ ] Tests for open ports, an offline host and cancelling.
+
+      - title: Track established connections, not only listeners
+        labels: [feature, "area: processes"]
+        body: |
+          ## Description
+          `PortTable` only knows listeners (services waiting on a port). Outgoing and incoming connections are not tracked, although the table already hands out ephemeral ports for the local end of outgoing connections. Add a connection record and show it next to the listeners.
+
+          ## Acceptance criteria
+          - [ ] A `Connection` record with protocol, local address and port, remote address and port, owning process and state.
+          - [ ] Opening an outgoing connection allocates an ephemeral local port and registers the connection. Closing it releases the port.
+          - [ ] A connection is closed automatically when its owning process dies (same as listeners).
+          - [ ] `ports -a` (or a new command) lists listeners and connections, and the network screen shows them.
+          - [ ] Tests for opening, closing and process death.
+
+      - title: Remote login (connect <host>) with a remote shell window
+        labels: [feature, "area: shell"]
+        body: |
+          ## Description
+          Add an ssh-like `connect <host> [port]` that opens a shell window on a remote host. The window framework (`ShellWindow`, `WindowManager`) already supports windows with their own commands and prompt, so the remote shell can build on it.
+
+          ## Acceptance criteria
+          - [ ] `connect <host>` connects to the host's `ssh` service and opens a window titled with the host and a prompt like `user@host>`.
+          - [ ] The connection appears in the connection table while the window is open and is removed on `exit`.
+          - [ ] Fails with a clear message if there is no route, the host is offline, the port is closed or the firewall blocks it.
+          - [ ] The remote shell has its own small command set and its own view of a filesystem, separate from the local one.
+          - [ ] A login with credentials defined per host; wrong credentials are denied.
+          - [ ] Ctrl+C and window switching work like in the other app windows.
+          - [ ] Tests for success and for each failure case.
+
+      - title: Firewall with allow/deny rules
+        labels: [feature, "area: hardware"]
+        body: |
+          ## Description
+          Add a simple firewall that can block traffic per port, interface or host, so networking has a way to be locked down (and for the story to unlock it again).
+
+          ## Acceptance criteria
+          - [ ] Rules with an action (allow/deny), direction (in/out), protocol, port and an optional host. The default policy is allow.
+          - [ ] `fw list`, `fw add ...` and `fw del <id>` manage the rules. Changing them requires admin rights.
+          - [ ] Inbound rules apply to local listeners, outbound rules to `ping`, `scan` and `connect`. A denied `ping` times out like a lost packet.
+          - [ ] Rules are included in the saved network configuration.
+          - [ ] The network screen shows whether the firewall is active and how many rules exist.
+          - [ ] Tests for rule matching, precedence and the commands.
+
+      - title: File transfer between hosts limited by link speed
+        labels: [feature, "area: filesystem"]
+        body: |
+          ## Description
+          Add `get` and `put` to copy files between this machine and a host. The transfer time depends on the interface's link speed, so upgrading or throttling the network matters.
+
+          ## Acceptance criteria
+          - [ ] `get <host>:<path> <local_path>` and `put <local_path> <host>:<path>` copy a file.
+          - [ ] The duration follows the file size and the relevant link speed (`link_speed_down_mbps` for `get`, `link_speed_up_mbps` for `put`), shown as a progress bar.
+          - [ ] The transfer can be cancelled with Ctrl+C and leaves no half-written file behind.
+          - [ ] Fails with a clear message if the interface is down, the host is unreachable, there is not enough free disk space, or the permissions do not allow it.
+          - [ ] The transfer shows up in the interface's traffic load while it runs.
+          - [ ] Tests for success, cancelling and each failure case.
+
+      - title: Traffic history graph per interface in the network screen
+        labels: [feature, "area: ui"]
+        body: |
+          ## Description
+          The power, cooling and temperature screens show a history graph. The network screen shows the current `load_down` and `load_up` of each interface, but no history. Record the values and plot them.
+
+          ## Acceptance criteria
+          - [ ] The traffic of each interface is recorded in a `MetricHistory` on every monitoring tick.
+          - [ ] The network screen shows a line graph (`draw_line_graph`) of download and upload traffic in Mbit/s.
+          - [ ] With several interfaces the graph can be switched between them.
+          - [ ] The graph updates live like the other detail screens.
+          - [ ] Tests for recording and rendering.
+
+      - title: LAN with several hosts and subnets
+        labels: [feature, "area: hardware"]
+        body: |
+          ## Description
+          The built-in hosts sit in two networks (`192.168.1.x` and `172.16.4.x`), but there is no real LAN. Add more hosts and make the routing between subnets visible and meaningful.
+
+          ## Acceptance criteria
+          - [ ] At least two subnets with several hosts each, defined in one place.
+          - [ ] Hosts on the local subnet are reached directly, hosts on another subnet only through the gateway. A wrong netmask or gateway makes them unreachable.
+          - [ ] `route`, `traceroute` and `hosts` reflect the topology (additional hops, subnet per host).
+          - [ ] Taking the gateway host offline cuts off all other subnets.
+          - [ ] Tests for direct and routed reachability and for the offline gateway.
+
+      - title: Wiki server and a wiki client app
+        labels: [feature, "area: ui"]
+        body: |
+          ## Description
+          The README plans a wiki. Add a host that serves wiki pages over `http` and a client app that browses them in a window. Pages are authored as plain files, like the VFS seed text files.
+
+          ## Acceptance criteria
+          - [ ] A host (for example `wiki.local`) with an `http` service serves pages from files under `data/`.
+          - [ ] `wiki <host>` opens a client window with a page list and a reader for the selected page.
+          - [ ] Pages can link to each other and the links can be followed with the keyboard. A simple search finds pages by text.
+          - [ ] The client fails with a clear message if the host is offline, unreachable or blocked by the firewall.
+          - [ ] The open connection shows up in the connection table.
+          - [ ] Tests for page loading, navigation and the failure cases.
+
+      - title: Tests and docs for the new netman commands
+        labels: [tests, docs]
+        body: |
+          ## Description
+          Collect the remaining test and documentation work for this milestone, so every new command is usable and covered.
+
+          ## Acceptance criteria
+          - [ ] Every new command has a `--help` text and shows up in `man` with the right category.
+          - [ ] The netman window's built-in `help` lists the new commands.
+          - [ ] Integration test that walks through a typical session (add a host, scan it, connect, transfer a file).
+          - [ ] README or CONTRIBUTING mentions the netman commands where relevant.
+
+  - title: v0.6.0
+    description: "Packages & apps: a package installer, an audio player and housekeeping."
+    issues:
+      - title: Design the package format and repository
+        labels: [feature, "area: filesystem"]
+        body: |
+          ## Description
+          Software is meant to be installable (audio player, video player, ...). Define what a package is and where packages come from.
+
+          ## Acceptance criteria
+          - [ ] A package has a name, version, description, dependencies and a list of files and commands it provides.
+          - [ ] A repository (data files on a host, once networking allows it) lists the available packages.
+          - [ ] The format is documented and has validation with clear errors for malformed packages.
+          - [ ] Tests for parsing and validation.
+
+      - title: pkg command (install, remove, list, search)
+        labels: [feature, "area: shell"]
+        body: |
+          ## Description
+          Add a `pkg` command to manage packages.
+
+          ## Acceptance criteria
+          - [ ] `pkg install <name>`, `pkg remove <name>`, `pkg list` and `pkg search <text>`.
+          - [ ] Dependencies are installed along with a package and block removal while something depends on them.
+          - [ ] Installing and removing need the right permissions and print clear errors otherwise.
+          - [ ] Downloads run as a background job with progress and respect the link speed once file transfer exists.
+          - [ ] Tests for each subcommand and the dependency rules.
+
+      - title: Install packages into the VFS with permissions and disk accounting
+        labels: [feature, "area: filesystem"]
+        body: |
+          ## Description
+          Installing a package has to actually put files on a drive.
+
+          ## Acceptance criteria
+          - [ ] Package files are written into the VFS (for example under `/usr` or `/opt`) with sensible owner and permissions.
+          - [ ] Installing fails cleanly with a message if there is not enough free space, and leaves nothing half-installed.
+          - [ ] The used space shows up in the storage screen and `ls` sizes.
+          - [ ] Removing a package deletes exactly its files.
+          - [ ] Tests for install, removal and the out-of-space case.
+
+      - title: Register installed apps as commands and show them in a launcher
+        labels: [feature, "area: ui"]
+        body: |
+          ## Description
+          An installed app should be usable like a built-in command and discoverable.
+
+          ## Acceptance criteria
+          - [ ] Commands provided by an installed package are registered (and unregistered on removal) in the command registry and show up in `man`.
+          - [ ] Apps with a window start through the window manager like `netman`.
+          - [ ] A launcher view (menu entry or command) lists the installed apps.
+          - [ ] Tests for registration and removal.
+
+      - title: Audio player app
+        labels: [feature, "area: audio"]
+        body: |
+          ## Description
+          First real app for the package system: play the audio files in the VFS (`.wav` is already a known audio file type).
+
+          ## Acceptance criteria
+          - [ ] The app opens in its own window and lists audio files from a directory.
+          - [ ] Play, pause, stop and volume control with the keyboard. A simple queue.
+          - [ ] Keeps playing while another window is focused.
+          - [ ] Shows a clear message for unsupported or unreadable files.
+          - [ ] Provided as an installable package.
+          - [ ] Tests for the player logic (queue, state changes).
+
+      - title: Implement the "Save" option in the horus menu
+        labels: [feature, "area: shell"]
+        body: |
+          ## Description
+          The menu entry "Save" in `cmd_menu.py` is a stub (`pass #TODO:implement`). Decide what a save contains (hardware, network configuration, filesystem, story progress) and implement it. Related to the persistence issue of v0.5.0.
+
+          ## Acceptance criteria
+          - [ ] Choosing "Save" writes the agreed state to `saves/`.
+          - [ ] The player gets visible feedback that the save worked or failed.
+          - [ ] The saved state is loaded on the next start.
+          - [ ] Tests for the menu option and the round trip.
+
+      - title: Add file-type handlers to read_file
+        labels: [feature, "area: filesystem"]
+        body: |
+          ## Description
+          `InMemoryVFS.read_file` has a TODO for handlers per file type. Reading currently returns text for everything, while audio and video types are already recognised elsewhere (`file_types.py`).
+
+          ## Acceptance criteria
+          - [ ] `read_file` (or a layer above it) dispatches on the file type, and unknown types keep today's behaviour.
+          - [ ] `cat` on an audio or video file prints a helpful message instead of garbage.
+          - [ ] The same behaviour in the in-memory and the SQLite backend.
+          - [ ] Tests for each file type.
+
+      - title: Remove or justify ScreenBuffer.write_char
+        labels: [refactor, "area: display"]
+        body: |
+          ## Description
+          `ScreenBuffer.write_char` just calls `write_string` and is marked `#TODO: Useless?`.
+
+          ## Acceptance criteria
+          - [ ] Check all callers (source and tests).
+          - [ ] Either remove the method and update the callers, or keep it and replace the TODO with a comment saying why.
+          - [ ] Lint and tests pass.
+
+      - title: Tests and docs for the package system
+        labels: [tests, docs]
+        body: |
+          ## Description
+          Collect the remaining test and documentation work for this milestone.
+
+          ## Acceptance criteria
+          - [ ] Integration test: install a package, use its command, remove it.
+          - [ ] The package format and the `pkg` command are documented.
+          - [ ] README "Planned" list updated.
+
+  - title: v0.7.0
+    description: "Multiple computers & hardware upgrades. Builds on the network from v0.5.0."
+    issues:
+      - title: Support several machines, each with its own hardware, filesystem and processes
+        labels: [feature, "area: hardware"]
+        body: |
+          ## Description
+          Today there is exactly one machine. Make a machine a unit that owns its `HardwareSpec`, VFS and process table, so more of them can exist (and appear as hosts in the network).
+
+          ## Acceptance criteria
+          - [ ] A machine object bundles hardware, filesystem, process table and network identity.
+          - [ ] Each machine is saved and loaded independently.
+          - [ ] A machine shows up as a host in the host table with its own services.
+          - [ ] Existing single-machine behaviour is unchanged. Tests for creating and saving two machines.
+
+      - title: Switch between computers
+        labels: [feature, "area: shell"]
+        body: |
+          ## Description
+          The player needs to move between machines.
+
+          ## Acceptance criteria
+          - [ ] A command or menu entry lists the machines and switches to one.
+          - [ ] The shell, `sys`, `top` and the other screens show the selected machine.
+          - [ ] Running processes of the other machines keep their own state.
+          - [ ] Tests for switching.
+
+      - title: Install, swap and remove hardware components
+        labels: [feature, "area: hardware"]
+        body: |
+          ## Description
+          The hardware model already has slots for CPU, RAM, storage, network and cooling. Allow changing what is installed.
+
+          ## Acceptance criteria
+          - [ ] Commands or screens to install, swap and remove each component type.
+          - [ ] Power draw, process budgets (`total_cpu_mhz`, `total_memory_kb`) and the detail screens update immediately.
+          - [ ] The machine has to be powered down for changes, or the change is refused with a message.
+          - [ ] Tests for each component type.
+
+      - title: Compatibility rules for hardware
+        labels: [feature, "area: hardware"]
+        body: |
+          ## Description
+          Not every part fits every machine.
+
+          ## Acceptance criteria
+          - [ ] Components declare what they need (socket type, slot count, power connectors).
+          - [ ] Incompatible parts are refused with a clear reason, and a PSU that is too weak shows a warning.
+          - [ ] Tests for each rule.
+
+      - title: Shop or inventory for upgrade parts
+        labels: [feature, "area: story"]
+        body: |
+          ## Description
+          Upgrade parts have to come from somewhere. Decide between a shop, an inventory the story fills, or both.
+
+          ## Acceptance criteria
+          - [ ] A place where available parts are listed with their properties.
+          - [ ] Getting a part moves it into the inventory (and costs something if there is a currency).
+          - [ ] Installed parts are removed from the inventory.
+          - [ ] Tests for buying and installing.
+
+  - title: v0.8.0
+    description: "Communication & threats: a mail system and malware."
+    issues:
+      - title: Mail system with mailboxes and delivery over the network
+        labels: [feature, "area: shell"]
+        body: |
+          ## Description
+          Add mail with mailboxes per user, delivered between hosts.
+
+          ## Acceptance criteria
+          - [ ] A mailbox per user with inbox and outbox, stored in the filesystem.
+          - [ ] A mail server service on a host. Delivery fails with a clear message if the host is unreachable or blocked.
+          - [ ] Commands to list, read, send and delete mail.
+          - [ ] Tests for delivery and the failure cases.
+
+      - title: Mail client app
+        labels: [feature, "area: ui"]
+        body: |
+          ## Description
+          A window app for reading and writing mail.
+
+          ## Acceptance criteria
+          - [ ] Inbox list, reader and a compose view, controlled with the keyboard.
+          - [ ] New mail shows a notification (status bar or sound).
+          - [ ] Provided as an installable package.
+          - [ ] Tests for the client logic.
+
+      - title: Malware framework
+        labels: [feature, "area: processes"]
+        body: |
+          ## Description
+          Malware as processes that do something bad: spread over the network, use resources, hide.
+
+          ## Acceptance criteria
+          - [ ] A malware process type with configurable behaviour (resource use, spreading, hiding from `ps`/`top`).
+          - [ ] Spreading uses the network, services and firewall rules.
+          - [ ] Effects show up in the existing systems (CPU, RAM, power, temperature).
+          - [ ] Tests for each behaviour.
+
+      - title: Malware detection and removal
+        labels: [feature, "area: shell"]
+        body: |
+          ## Description
+          The player needs ways to find and remove malware.
+
+          ## Acceptance criteria
+          - [ ] A scan command that finds hidden or suspicious processes and files.
+          - [ ] Removal through `kill` and `rm`, with malware that fights back where the design asks for it.
+          - [ ] Hints in `ps`/`top` for suspicious behaviour.
+          - [ ] Tests for detection and removal.
+
+      - title: Story hooks for messages and infections
+        labels: [feature, "area: story"]
+        body: |
+          ## Description
+          Let the story trigger mails and infections.
+
+          ## Acceptance criteria
+          - [ ] Story progress can trigger events (mail arrives, malware starts).
+          - [ ] Triggers are defined in data files, not in code.
+          - [ ] Tests for triggering.
+
+  - title: v0.9.0
+    description: "Media & surveillance: video rendering and remote cameras."
+    issues:
+      - title: Video rendering in the pixel buffer
+        labels: [feature, "area: display"]
+        body: |
+          ## Description
+          The renderer draws a character grid plus sprites into one pixel buffer. Add a way to draw video frames into it.
+
+          ## Acceptance criteria
+          - [ ] Decode frames of a video file and draw them in a region of the pixel buffer at the right size.
+          - [ ] Playback timing follows the video's frame rate without slowing the rest of the UI.
+          - [ ] The CRT shader still applies.
+          - [ ] Tests for frame placement and timing logic.
+
+      - title: Video player app
+        labels: [feature, "area: ui"]
+        body: |
+          ## Description
+          A window app that plays video files with sound.
+
+          ## Acceptance criteria
+          - [ ] Lists video files, plays one in its window, with play, pause and seek.
+          - [ ] Audio stays in sync with the video.
+          - [ ] Provided as an installable package.
+          - [ ] Tests for the player logic.
+
+      - title: Remote surveillance with camera hosts
+        labels: [feature, "area: hardware"]
+        body: |
+          ## Description
+          Cameras as hosts on the network that stream to a viewer.
+
+          ## Acceptance criteria
+          - [ ] A camera host type with a service and a feed.
+          - [ ] The feed depends on the network (link speed, packet loss, firewall).
+          - [ ] Cameras can be switched on and off.
+          - [ ] Tests for the camera service and failures.
+
+      - title: Surveillance viewer app with multiple feeds
+        labels: [feature, "area: ui"]
+        body: |
+          ## Description
+          A window app that shows several camera feeds at once.
+
+          ## Acceptance criteria
+          - [ ] A grid of feeds with the camera name and status.
+          - [ ] An unreachable camera shows a clear offline state.
+          - [ ] Selecting a feed enlarges it.
+          - [ ] Provided as an installable package.
+          - [ ] Tests for the viewer logic.

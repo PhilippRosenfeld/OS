@@ -92,6 +92,8 @@ Every milestone corresponds to one release (`v0.4.0`, ...). Items from the READM
 
 ### Labels
 
+`scripts/setup_github.py` creates these labels, the milestones and their issues from `scripts/github_data.yml` (see the docstring in the script).
+
 **Type** (matches the commit types)
 
 | Label | Color | Description |
