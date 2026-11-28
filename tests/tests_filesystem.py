@@ -12,8 +12,27 @@ ROOT = "root"
 ROOT_ROLE = UserRole.ROOT
 
 
+_opened: list[SQLiteVFS] = []
+
+
+def open_sqlite(db_path):
+    """Opens a SQLiteVFS that the autouse fixture below closes after the test,
+    so a test doesn't have to (and can't forget to) close its own connection
+    -- an unclosed one only shows up later as a ResourceWarning."""
+    fs = SQLiteVFS(db_path)
+    _opened.append(fs)
+    return fs
+
+
+@pytest.fixture(autouse=True)
+def _close_opened_sqlite():
+    yield
+    while _opened:
+        _opened.pop().close()
+
+
 def make(tmp_path):
-    return SQLiteVFS(tmp_path / "horus.db")
+    return open_sqlite(tmp_path / "horus.db")
 
 
 @pytest.fixture(params=["memory", "sqlite"])
@@ -21,7 +40,7 @@ def fs(request, tmp_path):
     """Runs a test against both backends, since the protected-node contract is
     part of the VFS interface, not a SQLite-only concern."""
     if request.param == "sqlite":
-        return SQLiteVFS(tmp_path / "horus.db")
+        return open_sqlite(tmp_path / "horus.db")
     return InMemoryVFS()
 
 
@@ -98,7 +117,7 @@ def test_opening_a_pre_protected_column_db_migrates_it(tmp_path):
     conn.commit()
     conn.close()
 
-    fs = SQLiteVFS(db_path)
+    fs = open_sqlite(db_path)
     assert fs.get_meta("/").protected is False
     fs.mkdir("/home", user=ROOT, protected=True)
     assert fs.get_meta("/home").protected is True
