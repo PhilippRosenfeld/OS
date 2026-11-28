@@ -7,6 +7,31 @@ from horus.audio.sound_manager import SoundManager
 from horus.paths import BOOT_SOUNDS_DIR
 
 
+@pytest.fixture(autouse=True)
+def _release_players(monkeypatch):
+    """Deletes every Player a test's SoundManager started once the test is
+    over. These tests play real sounds, so pyglet's background player thread
+    keeps updating those players -- and if the SoundManager (and with it the
+    sound source) is garbage collected first, that thread raises "weakly-
+    referenced object no longer exists", which pytest then reports as an
+    unhandled thread exception in whatever test happens to be running."""
+    created = []
+    original_init = SoundManager.__init__
+
+    def tracking_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        created.append(self)
+
+    monkeypatch.setattr(SoundManager, "__init__", tracking_init)
+    yield
+    for sm in created:
+        for player in list(sm._players):
+            try:
+                player.delete()
+            except Exception:
+                pass
+
+
 def test_load_missing_file_does_not_raise():
     sm = SoundManager()
     sm.load("nope", "does/not/exist.wav")  # should not raise
