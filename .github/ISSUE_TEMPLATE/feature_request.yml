@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest a new feature or an improvement
+labels: [feature]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What should be added, and why?
+    validations:
+      required: true
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Acceptance criteria
+      description: When is this done? One checkbox per testable point.
+      value: |
+        - [ ] 
+        - [ ] Tests for the new behaviour
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Hardware
+        - Processes
+        - Shell
+        - Filesystem
+        - UI
+        - Display
+        - Audio
+        - Story
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and notes
+      description: Other approaches you considered, related issues, open questions.
